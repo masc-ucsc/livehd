@@ -21,7 +21,29 @@ test echo.run(cycles:U8=3, seed:U8=7, verbose:Bool=false, file="program.hex", de
   tick cycles { dut.a = 1; step; assert(dut.b == 1) }
   puts("cycles={cycles} verbose={verbose} file={path}")
 }
-test echo.defaults(cycles:U8=9) {
+test echo.defaults(cycles:U8=9, n:U8=1+2, offset:S8=-2+n, cooked="A\x42{{}}\u{43}\0D", raw='A\n',
+                   label="n={n+1}", wide:U80=0x1234_5678_9abc_def0_1234, signed_wide:S80=0sx80000000000000000000,
+                   tail:U8=n+std.valueplusarg("extra", 1)) {
+  assert(n == 3)
+  assert(offset == 1)
+  assert(cooked == "AB{{}}C\x00D")
+  assert(cooked != "AB{{}}C")
+  assert(raw == "A\\n")
+  assert(label == 'n=4')
+  assert(tail == 4)
+  assert(1K == 1024)
+  assert(0so777 == -1)
+  assert(0o111 == 73)
+  if std.testplusarg("override_wide") {
+    assert(wide == 0xffff_ffff_ffff_ffff_ffff)
+    assert(signed_wide == 0x7fff_ffff_ffff_ffff_ffff)
+  } else {
+    assert(wide == 0x1234_5678_9abc_def0_1234)
+    assert(signed_wide == -0x8000_0000_0000_0000_0000)
+  }
+  puts("decoded=\x41{n+1}")
+  puts('raw={n}\n')
+  puts("nul={cooked}!")
   assert(cycles == std.valueplusarg("cycles", 9))
   if not std.testplusarg("cycles") { assert(cycles == 9) }
 }
@@ -38,8 +60,24 @@ grep -q 'cycles=4 verbose=1 file=a=b.hex' "$W/direct.log"
 "$LHD" sim "$W/args.prp" --run-only --workdir "$W/run" --arg cycles=4 --result-json "$W/alias.json"
 drv --cycles=4 --result-json "$W/old.json" > /dev/null
 drv +derived=2 +fallback_derived=typo > /dev/null
+drv --test echo.defaults +override_wide +wide=1208925819614629174706175 +signed_wide=0x7fffffffffffffffffff > "$W/wide.log"
+grep -Fq 'decoded=A4' "$W/wide.log"
+grep -Fq 'raw={n}\n' "$W/wide.log"
+python3 - "$W/wide.log" <<'PYEND'
+import pathlib, sys
+assert b'nul=AB{}C\0D!' in pathlib.Path(sys.argv[1]).read_bytes()
+PYEND
+if drv --test echo.defaults +extra=253 > "$W/default-overflow.log" 2>&1; then
+  echo 'accepted an out-of-range computed default' >&2; exit 1
+fi
+grep -q 'outside U8 range' "$W/default-overflow.log"
+drv --test echo.defaults +extra=253 +tail=4 > /dev/null
+for bad in +wide=0x100000000000000000000 +signed_wide=0x80000000000000000000; do
+  if drv --test echo.defaults "$bad" > "$W/wide-error.log" 2>&1; then echo "accepted $bad" >&2; exit 1; fi
+  grep -q 'outside .* range' "$W/wide-error.log"
+done
 drv +file= --result-json "$W/empty.json" > /dev/null
-for bad in '+cycles' '+cycles=256' '+cycles=-1' '+cycles=typo' '+required' '+verbose=typo' '+request_missing'; do
+for bad in '+cycles' '+cycles=256' '+cycles=-1' '+cycles=typo' '+cycles=0b11' '+required' '+verbose=typo' '+request_missing'; do
   if drv "$bad" > "$W/bad.log" 2>&1; then echo "accepted invalid argument $bad" >&2; exit 1; fi
   grep -Eq 'requires a value|outside U8 range|expects an integer|expects true|missing simulation argument' "$W/bad.log"
 done
@@ -59,6 +97,8 @@ def rows(name):
 r=rows('default.json')
 assert [x['parameters']['cycles'] for x in r]==['3','9'],r
 assert all(x['arguments']==[] and x['status']=='pass' for x in r),r
+p=r[1]['parameters']
+assert (p['n'],p['offset'],p['label'],p['tail'],p['cooked']) == ('3','1','n=4','4','AB{}C\0D'),p
 for name in ['cli.json','direct.json','alias.json','old.json']:
     r=rows(name)
     assert all(x['status']=='pass' and x['parameters']['cycles']=='4' for x in r),(name,r)

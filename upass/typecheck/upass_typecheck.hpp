@@ -119,6 +119,7 @@ public:
   static Kind seed_kind_from_const(std::string_view literal_text);
 
 private:
+  std::string_view                              ssa_base_name(std::string_view name) const;
   int init_construction_depth_{0};
   // Packed-bit-view round trip: a `arr#[hi..=lo] = v` write lowers to
   // `set_mask(%t, arr, mask, v)` followed by `store(arr, %t)` — the ONE store

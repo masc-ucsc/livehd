@@ -25,6 +25,7 @@
 #include "fold_engine.hpp"
 #include "iassert.hpp"
 #include "lnast.hpp"
+#include "literal_kind.hpp"
 #include "lnast_ntype.hpp"
 #include "rewriter.hpp"
 #include "runtime/analyses.hpp"
@@ -123,18 +124,11 @@ private:
 }
 
 [[nodiscard]] Kind const_kind(std::string_view text) {
-  // A single unknown bit can fill a destination of any scalar kind.
-  if (text == "0sb?" || text == "0ub?") {
-    return Kind::unknown;
+  switch (upass::literal_kind(text)) {
+    case upass::Kind::integer: return Kind::integer;
+    case upass::Kind::boolean: return Kind::boolean;
+    default                  : return Kind::unknown;  // the scalar e-graph has no string or nil sort
   }
-  if (text == "true" || text == "false") {
-    return Kind::boolean;
-  }
-  if (!text.empty() && (std::isdigit(static_cast<unsigned char>(text.front())) != 0
-                        || (text.size() > 1 && text.front() == '-' && std::isdigit(static_cast<unsigned char>(text[1])) != 0))) {
-    return Kind::integer;
-  }
-  return Kind::unknown;
 }
 
 // A const leaf's text that may name a variable (a rolled_for carry output or

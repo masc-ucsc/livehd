@@ -348,6 +348,7 @@ cc_binary(
         "//core:sim_values",
         "//inou/cgen:sim_native_rt",
         "//inou/prp:tb_abi",
+        "//inou/prp:tb_integer",
         "@hlop//hlop",
         "@rapidjson",
     ],

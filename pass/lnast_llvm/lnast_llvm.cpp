@@ -104,6 +104,17 @@ std::optional<Literal> parse_literal(std::string_view text) {
         l.mag.push_back(static_cast<uint64_t>(carry));
       }
     }
+    if (spelling.scale_bits) {
+      uint64_t carry = 0;
+      for (auto& word : l.mag) {
+        const auto high = word >> (64 - spelling.scale_bits);
+        word            = (word << spelling.scale_bits) | carry;
+        carry           = high;
+      }
+      if (carry) {
+        l.mag.push_back(carry);
+      }
+    }
     return l;
   }
 
@@ -116,11 +127,12 @@ std::optional<Literal> parse_literal(std::string_view text) {
   for (size_t i = 0; i < spelling.digits.size(); ++i) {
     const char   c   = spelling.digits[spelling.digits.size() - 1 - i];
     const size_t bit = i * bpd;
-    if (c == '?') {
-      l.unk[bit / 64] |= ((uint64_t{1} << bpd) - 1) << (bit % 64);
-    } else {
-      const auto digit  = static_cast<uint64_t>(c <= '9' ? c - '0' : c - 'a' + 10);
-      l.mag[bit / 64]  |= digit << (bit % 64);
+    const bool   unknown  = c == '?';
+    auto&        words    = unknown ? l.unk : l.mag;
+    const auto   digit    = unknown ? (uint64_t{1} << bpd) - 1 : static_cast<uint64_t>(c <= '9' ? c - '0' : c - 'a' + 10);
+    words[bit / 64]      |= digit << (bit % 64);
+    if (bit % 64 + bpd > 64) {
+      words[bit / 64 + 1] |= digit >> (64 - bit % 64);
     }
   }
   if (!l.unk.empty()) {

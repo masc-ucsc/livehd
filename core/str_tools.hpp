@@ -294,6 +294,110 @@ namespace str_tools {
   return name;
 }
 
+// Append the escape starting at the backslash at i. On success i indexes its final byte.
+inline bool decode_pyrope_escape(std::string_view inner, size_t& i, std::string& out) {
+  const auto hexv = [](char c) -> int {
+    if (c >= '0' && c <= '9') {
+      return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+      return c - 'a' + 10;
+    }
+    if (c >= 'A' && c <= 'F') {
+      return c - 'A' + 10;
+    }
+    return -1;
+  };
+  if (++i >= inner.size()) {
+    return false;
+  }
+  switch (inner[i]) {
+    case '\\': out.push_back('\\'); break;
+    case '`' : out.push_back('`'); break;
+    case '"' : out.push_back('"'); break;
+    case '\'': out.push_back('\''); break;
+    case 'n' : out.push_back('\n'); break;
+    case 't' : out.push_back('\t'); break;
+    case 'r' : out.push_back('\r'); break;
+    case '0' : out.push_back('\0'); break;
+    case 'x' : {
+      if (i + 2 >= inner.size() || hexv(inner[i + 1]) < 0 || hexv(inner[i + 2]) < 0) {
+        return false;
+      }
+      out.push_back(static_cast<char>(hexv(inner[i + 1]) * 16 + hexv(inner[i + 2])));
+      i += 2;
+      break;
+    }
+    case 'u': {
+      if (i + 1 >= inner.size() || inner[i + 1] != '{') {
+        return false;
+      }
+      const auto close = inner.find('}', i + 2);
+      if (close == std::string_view::npos || close == i + 2 || close - (i + 2) > 6) {
+        return false;
+      }
+      uint32_t cp = 0;
+      for (size_t k = i + 2; k < close; ++k) {
+        const int h = hexv(inner[k]);
+        if (h < 0) {
+          return false;
+        }
+        cp = cp * 16 + static_cast<uint32_t>(h);
+      }
+      if (cp < 0x80) {
+        out.push_back(static_cast<char>(cp));
+      } else if (cp < 0x800) {
+        out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+      } else if (cp < 0x10000) {
+        out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+      } else if (cp <= 0x10FFFF) {
+        out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+      } else {
+        return false;
+      }
+      i = close;
+      break;
+    }
+    default: return false;
+  }
+  return true;
+}
+
+// Decode a double-quoted string's literal text (docs 02-basics "Strings"): the
+// escapes \n \t \r \\ \" \' \` \0 \xNN \u{N}, and a DOUBLED brace is a
+// literal brace (`{{` is `{`, `}}` is `}`; `\{` is not an escape). The lexer
+// already rejected every other `\c` and a lone `}`, so a malformed sequence
+// here is kept verbatim. Single-quoted (raw) strings never reach here.
+inline std::string decode_cooked_text(std::string_view raw) {
+  std::string out;
+  out.reserve(raw.size());
+  for (size_t i = 0; i < raw.size(); ++i) {
+    char c = raw[i];
+    if ((c == '{' || c == '}') && i + 1 < raw.size() && raw[i + 1] == c) {
+      out.push_back(c);  // `{{` / `}}`: one literal brace
+      ++i;
+      continue;
+    }
+    if (c != '\\' || i + 1 >= raw.size()) {
+      out.push_back(c);
+      continue;
+    }
+    size_t end = i;
+    if (decode_pyrope_escape(raw, end, out)) {
+      i = end;
+    } else {
+      out.push_back(c);
+    }
+  }
+  return out;
+}
+
 // Decode the string escapes of ONE backtick identifier token `` `...` `` (docs
 // 02-basics "Identifiers": a backtick name uses the string escapes -- `\\`,
 // `\``, `\n`, `\t`, `\r`, `\"`, `\'`, `\0`, `\xNN`, `\u{N..}`), keeping the
@@ -306,18 +410,6 @@ namespace str_tools {
   }
   const auto  inner = tok.substr(1, tok.size() - 2);
   std::string out   = "`";
-  const auto  hexv  = [](char c) -> int {
-    if (c >= '0' && c <= '9') {
-      return c - '0';
-    }
-    if (c >= 'a' && c <= 'f') {
-      return c - 'a' + 10;
-    }
-    if (c >= 'A' && c <= 'F') {
-      return c - 'A' + 10;
-    }
-    return -1;
-  };
   for (size_t i = 0; i < inner.size(); ++i) {
     const char c = inner[i];
     if (c == '`') {
@@ -327,63 +419,8 @@ namespace str_tools {
       out.push_back(c);
       continue;
     }
-    if (++i >= inner.size()) {
+    if (!decode_pyrope_escape(inner, i, out)) {
       return std::nullopt;
-    }
-    switch (inner[i]) {
-      case '\\': out.push_back('\\'); break;
-      case '`' : out.push_back('`'); break;
-      case '"' : out.push_back('"'); break;
-      case '\'': out.push_back('\''); break;
-      case 'n' : out.push_back('\n'); break;
-      case 't' : out.push_back('\t'); break;
-      case 'r' : out.push_back('\r'); break;
-      case '0' : out.push_back('\0'); break;
-      case 'x' : {
-        if (i + 2 >= inner.size() || hexv(inner[i + 1]) < 0 || hexv(inner[i + 2]) < 0) {
-          return std::nullopt;
-        }
-        out.push_back(static_cast<char>(hexv(inner[i + 1]) * 16 + hexv(inner[i + 2])));
-        i += 2;
-        break;
-      }
-      case 'u': {
-        if (i + 1 >= inner.size() || inner[i + 1] != '{') {
-          return std::nullopt;
-        }
-        const auto close = inner.find('}', i + 2);
-        if (close == std::string_view::npos || close == i + 2 || close - (i + 2) > 6) {
-          return std::nullopt;
-        }
-        uint32_t cp = 0;
-        for (size_t k = i + 2; k < close; ++k) {
-          const int h = hexv(inner[k]);
-          if (h < 0) {
-            return std::nullopt;
-          }
-          cp = cp * 16 + static_cast<uint32_t>(h);
-        }
-        if (cp < 0x80) {
-          out.push_back(static_cast<char>(cp));
-        } else if (cp < 0x800) {
-          out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
-          out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-        } else if (cp < 0x10000) {
-          out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
-          out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-          out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-        } else if (cp <= 0x10FFFF) {
-          out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
-          out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
-          out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-          out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-        } else {
-          return std::nullopt;
-        }
-        i = close;
-        break;
-      }
-      default: return std::nullopt;
     }
   }
   out.push_back('`');

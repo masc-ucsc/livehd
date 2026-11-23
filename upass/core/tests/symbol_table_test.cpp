@@ -2,6 +2,8 @@
 #include "symbol_table.hpp"
 
 #include "bundle.hpp"
+#include "call_resolver.hpp"
+#include "literal_kind.hpp"
 #include "decl_facts.hpp"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -382,4 +384,34 @@ TEST_F(Symbol_table_test, AggregateFieldsKeepTheirOwnStorageModes) {
   EXPECT_EQ(fixed->mode, upass::Mode::const_kind);
   EXPECT_EQ(variable->mode, upass::Mode::mut_kind);
   st.leave_scope();
+}
+
+TEST(PyropeBindings, DemotionRequiresARecordOnTheCurrentTree) {
+  Lnast unit("owner");
+  unit.note_ssa_demoted("x__w3", "x");
+  EXPECT_EQ(upass::ssa_base_name(&unit, "x__w3___ssa_2"), "x");
+  EXPECT_EQ(upass::ssa_base_name(&unit, "x__w2___ssa_1"), "x__w2");
+  EXPECT_EQ(upass::ssa_base_name(&unit, "x___ssa_tag"), "x___ssa_tag");
+  Lnast sibling("sibling");
+  EXPECT_EQ(upass::ssa_base_name(&sibling, "x__w3"), "x__w3");
+}
+
+TEST(PyropeBindings, ScopedNullaryFunctionsAndEscapedRegistryNames) {
+  absl::flat_hash_map<std::string, std::shared_ptr<Lnast>> registry;
+  for (const auto name : {"pkg.outer.h", "pkg.sibling.h", "foo bar"}) {
+    registry.emplace(name, std::make_shared<Lnast>(name));
+  }
+  EXPECT_EQ(upass::call_resolver::lookup_callee(registry, "h", "pkg.outer"), registry.at("pkg.outer.h"));
+  EXPECT_EQ(upass::call_resolver::lookup_callee(registry, "h", "elsewhere"), nullptr);
+  EXPECT_EQ(upass::call_resolver::lookup_callee(registry, "`foo bar`"), registry.at("foo bar"));
+}
+
+TEST(PyropeBindings, LiteralKinds) {
+  using upass::Kind;
+  EXPECT_EQ(upass::literal_kind("'a'"), Kind::string);
+  EXPECT_EQ(upass::literal_kind("1K"), Kind::integer);
+  EXPECT_EQ(upass::literal_kind("true"), Kind::boolean);
+  EXPECT_EQ(upass::literal_kind("nil"), Kind::nil);
+  EXPECT_EQ(upass::literal_kind("0sb?"), Kind::unknown);
+  EXPECT_EQ(upass::literal_kind("0sb??"), Kind::integer);
 }

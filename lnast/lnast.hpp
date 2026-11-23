@@ -639,6 +639,7 @@ public:
   // the same literal on every pass/operand access dominated big-module compiles.
   // Pass the node's text (get_name(nid)); throws like from_pyrope on a malformed
   // literal (callers that tolerate non-numeric text must catch, as before).
+  absl::flat_hash_map<std::string, std::string> top_level_import_bindings() const;
   const Dlop& get_const_value(std::string_view const_text) const;
 
   // ── source provenance ──────────────────────────────────────────

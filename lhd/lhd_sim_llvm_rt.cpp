@@ -17,7 +17,6 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
-#include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -36,12 +35,13 @@
 #include <thread>
 #include <vector>
 
+#include "tb_integer.hpp"
+
 #include "file_utils.hpp"
 #include "fnv1a.hpp"
 #include "hlop/readmem.hpp"
 #include "json_util.hpp"
 #include "lhd_sim_observe.hpp"
-#include "pyrope_literal.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -586,36 +586,9 @@ void power_on(uint64_t* st, const Dut& d, bool zero_uninitialized, bool unknown_
 }
 
 // ---- parameters --------------------------------------------------------------------------------------
-bool parse_int(std::string_view text, int64_t& out, bool is_unsigned) {
-  const auto parsed = livehd::parse_pyrope_integer_spelling(text);
-  if (!parsed || parsed->unknown()) {
-    return false;
-  }
-  const auto& lit       = *parsed;
-  uint64_t    magnitude = 0;
-  const auto  end       = lit.digits.data() + lit.digits.size();
-  const auto  value     = std::from_chars(lit.digits.data(), end, magnitude, static_cast<int>(lit.radix));
-  if (value.ec != std::errc{} || value.ptr != end) {
-    return false;
-  }
-  const bool signed_negative = lit.negative_pattern();
-  if (signed_negative) {
-    const auto bits = lit.digits.size() * lit.bits_per_digit();
-    if (bits > 64) {
-      return false;
-    }
-    magnitude = uint64_t{0} - magnitude;
-    if (bits < 64) {
-      magnitude &= (uint64_t{1} << bits) - 1;
-    }
-  }
-  const bool     negative = lit.negate != signed_negative;
-  constexpr auto max      = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
-  if (is_unsigned ? negative : magnitude > max + negative) {
-    return false;
-  }
-  out = static_cast<int64_t>(negative ? uint64_t{0} - magnitude : magnitude);
-  return true;
+std::optional<llvm::APInt> parse_int(std::string_view text) {
+  const auto literal = livehd::parse_pyrope_integer_spelling(text);
+  return literal ? prp_tb::integer_value(*literal) : std::nullopt;
 }
 
 struct Site {
@@ -1295,7 +1268,7 @@ void print_cb(prp_tb::Rt* base, uint32_t site, const uint64_t* words) {
   if (s.newline) {
     line += '\n';
   }
-  std::fputs(line.c_str(), stdout);
+  std::fwrite(line.data(), 1, line.size(), stdout);
 }
 
 // A string value: formatted now, interned so equal text has an equal handle (a comparison is an integer compare).
@@ -1357,13 +1330,11 @@ int64_t plusarg_cb(prp_tb::Rt* base, int64_t mode, int64_t key_handle, int64_t f
     }
     return fail("+" + key + " expects true, false, 1 or 0");
   }
-  errno           = 0;
-  char*      end  = nullptr;
-  const long val  = std::strtol(it->second.c_str(), &end, 0);
-  if (it->second.empty() || end == it->second.c_str() || *end != '\0' || errno == ERANGE) {
+  const auto value = parse_int(it->second);
+  if (!value || !value->isSignedIntN(64)) {
     return fail("+" + key + " expects an integer, got '" + it->second + "'");
   }
-  return val;
+  return value->getSExtValue();
 }
 
 // An edge kernel flagged an undefined access in instance `inst`: report each site ONCE (what and where), then clear its
@@ -1690,6 +1661,8 @@ void run_replay(const Replay_config& config, const Signal_catalog& catalog, cons
     try {
       const auto& interval = intervals[index];
       auto        rt       = original;
+      std::vector<uint64_t> resolved(args.size());
+      rt.resolved_params   = resolved.data();
       rt.replaying         = true;
       rt.warn_undefined    = false;
       rt.ckpt.enabled      = false;
@@ -2045,8 +2018,7 @@ int main(int argc, char** argv) {
     }
     args_id += ";defaults:";
     std::vector<int64_t> args;
-    std::string          params_json = "{";
-    bool                 pfirst      = true;
+    std::vector<std::string> displayed;
     for (const auto& p : t["params"].GetArray()) {
       const std::string pname  = p["name"].GetString();
       const std::string type   = p["type"].GetString();
@@ -2056,70 +2028,73 @@ int main(int argc, char** argv) {
       const bool        typed_int
           = type.size() > 1 && (type[0] == 'U' || type[0] == 'S') && type.find_first_not_of("0123456789", 1) == std::string::npos;
       const bool  is_unsigned = typed_int && type[0] == 'U';
-      int64_t     v           = 0;
-      int64_t     supplied    = 0;
-      std::string shown;
-      if (const auto it = plus.find(pname); it != plus.end()) {
+      // Version 2 objects take one value word even for wider declarations.
+      const unsigned width       = p.HasMember("bits") ? p["bits"].GetUint() : 64;
+      if (width == 0 || width > prp_tb::kMaxTbWidth) {
+        err = "invalid test parameter width for " + pname;
+        break;
+      }
+      const auto  it       = plus.find(pname);
+      const bool  supplied = it != plus.end();
+      const bool  bare     = supplied && plus_flags.contains(pname);
+      std::string shown    = supplied ? it->second : p["default"].GetString();
+      llvm::APInt value(64, 0);
+      if (supplied) {
         consumed.insert(pname);
-        shown    = it->second;
-        supplied = 1;
-        if (plus_flags.contains(pname) && !is_bool) {
-          err = "+" + pname + " requires a value";
-          break;
+      }
+      if (!supplied && p["required"].GetBool()) {
+        err = "test parameter '" + pname + "' is required: pass +" + pname + "=VALUE";
+        break;
+      }
+      if (bare && !is_bool) {
+        err = "+" + pname + " requires a value";
+        break;
+      }
+      if (!supplied && dyn) {
+        // The compiled test evaluates this expression using the previous bindings.
+      } else if (is_str) {
+        if (!supplied) {
+          if (p.HasMember("string_default") && p["string_default"].IsString()) {
+            shown.assign(p["string_default"].GetString(), p["string_default"].GetStringLength());
+          } else if (shown.size() >= 2) {
+            shown = shown.substr(1, shown.size() - 2);  // older object/manifest
+          }
         }
-        if (is_str) {
-          v = intern_pre(shown);
-        } else if (is_bool && plus_flags.contains(pname)) {
-          v     = 1;
+        value = intern_pre(shown);
+      } else if (is_bool) {
+        if (bare) {
           shown = "true";
-        } else if (it->second == "true" || it->second == "false") {
-          v = it->second == "true";
-        } else if (!parse_int(it->second, v, is_unsigned)) {
-          err = is_bool ? "+" + pname + " expects true, false, 1 or 0" : "+" + pname + " expects an integer, got '" + it->second + "'";
-          break;
         }
-        if (is_bool && !plus_flags.contains(pname) && v != 0 && v != 1) {
+        if (shown == "true" || shown == "1") {
+          value = 1;
+        } else if (shown != "false" && shown != "0") {
           err = "+" + pname + " expects true, false, 1 or 0";
           break;
         }
-      } else if (p["required"].GetBool()) {
-        err = "test parameter '" + pname + "' is required: pass +" + pname + "=VALUE";
-        break;
       } else {
-        shown = p["default"].GetString();
-        if (is_str) {
-          std::string text = shown;
-          if (text.size() >= 2) {
-            text = text.substr(1, text.size() - 2);
-          }
-          v     = intern_pre(text);
-          shown = text;
-        } else if (dyn) {
-          // evaluated by the test itself
-        } else if (shown == "true" || shown == "false") {
-          v = shown == "true";
-        } else if (!parse_int(shown, v, is_unsigned)) {
-          err = "test parameter '" + pname + "' has a default this flow does not read yet: " + shown;
+        auto integer = parse_int(shown);
+        if (!integer) {
+          err = "+" + pname + " expects an integer, got '" + shown + "'";
           break;
         }
-      }
-      if (!is_str && typed_int && (supplied || !dyn)) {
-        const auto bits = std::strtoul(type.c_str() + 1, nullptr, 10);
-        if (bits > 0 && bits < 64) {
-          const int64_t signed_limit = int64_t{1} << (bits - 1);
-          if (is_unsigned ? static_cast<uint64_t>(v) >= (uint64_t{1} << bits) : v < -signed_limit || v >= signed_limit) {
-            err = "+" + pname + " is outside " + type + " range";
-            break;
-          }
+        const unsigned range = typed_int ? static_cast<unsigned>(std::strtoul(type.c_str() + 1, nullptr, 10)) : width;
+        if (is_unsigned ? integer->isNegative() || !integer->isIntN(range) : !integer->isSignedIntN(range)) {
+          err = "+" + pname + " is outside " + (type.empty() ? "signed " + std::to_string(width) + "-bit" : type) + " range";
+          break;
         }
+        if (!p.HasMember("bits") && !(is_unsigned ? integer->isIntN(64) : integer->isSignedIntN(64))) {
+          err = "+" + pname + " requires rerunning simulation setup for wide arguments";
+          break;
+        }
+        value = std::move(*integer);
       }
-      args.push_back(v);
+      const auto words = (width + 63) / 64;
+      value            = value.sextOrTrunc(words * 64);
+      args.insert(args.end(), value.getRawData(), value.getRawData() + words);
       args.push_back(supplied);
       args_id     += std::to_string(pname.size()) + ":" + pname + std::to_string(shown.size()) + ":" + shown;
-      params_json  += std::string(pfirst ? "" : ",") + "\"" + escape(pname) + "\":\"" + escape(shown) + "\"";
-      pfirst       = false;
+      displayed.push_back(std::move(shown));
     }
-    params_json += "}";
 
     long      fails = -1;
     Fail_info first;
@@ -2181,7 +2156,7 @@ int main(int argc, char** argv) {
           for (const auto& g : a["segs"].GetArray()) {
             Print_seg sg;
             sg.hole  = g["hole"].GetBool();
-            sg.text  = g["text"].GetString();
+            sg.text.assign(g["text"].GetString(), g["text"].GetStringLength());
             sg.base  = g["base"].GetString()[0];
             sg.width = g["width"].GetUint64();
             sg.sep   = g["sep"].GetBool();
@@ -2196,7 +2171,7 @@ int main(int argc, char** argv) {
           for (const auto& g : a["segs"].GetArray()) {
             Print_seg sg;
             sg.hole  = g["hole"].GetBool();
-            sg.text  = g["text"].GetString();
+            sg.text.assign(g["text"].GetString(), g["text"].GetStringLength());
             sg.base  = g["base"].GetString()[0];
             sg.width = g["width"].GetUint64();
             sg.sep   = g["sep"].GetBool();
@@ -2317,7 +2292,31 @@ int main(int argc, char** argv) {
             }
           }
           if (err.empty()) {
+            std::vector<uint64_t> resolved(args.size());
+            rt.resolved_params = resolved.data();
             fails = run(&rt, state.data(), args.data());
+            size_t offset      = 0;
+            for (const auto& p : t["params"].GetArray()) {
+              if (!p.HasMember("bits")) {
+                break;
+              }  // older object
+              const auto   width = p["bits"].GetUint();
+              const size_t words = (width + 63) / 64;
+              if (p["dynamic"].GetBool() && !args[offset + words]) {
+                auto&       shown = displayed[&p - t["params"].Begin()];
+                const auto* data  = resolved.data() + offset;
+                if (p["string"].GetBool()) {
+                  if (*data > 0 && *data <= rt.pool.size()) {
+                    shown = rt.pool[*data - 1];
+                  }
+                } else if (std::string_view(p["type"].GetString()) == "Bool") {
+                  shown = *data ? "true" : "false";
+                } else {
+                  shown = livehd::wide_decimal(data, width);
+                }
+              }
+              offset += words + 1;
+            }
             if (!rt.plusarg_err.empty()) {
               fails = -1;
               err   = rt.plusarg_err;
@@ -2328,6 +2327,12 @@ int main(int argc, char** argv) {
         }
       }
     }
+    std::string params_json = "{";
+    for (size_t i = 0; i < displayed.size(); ++i) {
+      const auto& p  = t["params"][static_cast<rapidjson::SizeType>(i)];
+      params_json   += std::string(i ? "," : "") + "\"" + escape(p["name"].GetString()) + "\":\"" + escape(displayed[i]) + "\"";
+    }
+    params_json           += "}";
     std::string args_json = "[";
     for (size_t k = 0; k < arg_tokens.size(); ++k) {
       args_json += std::string(k ? "," : "") + "\"" + escape(arg_tokens[k]) + "\"";

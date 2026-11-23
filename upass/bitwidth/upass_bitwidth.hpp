@@ -120,6 +120,7 @@ public:
   void notify_arm_guard(std::string_view cond, bool negated) override;
 
 private:
+  std::string_view                 ssa_base_name(std::string_view name) const;
   // Variables whose next write carries a wrap/sat policy. A wrap/sat call is
   // emitted immediately before the store to its `type` argument; consume the
   // exemption at that store so later ordinary writes are checked normally.

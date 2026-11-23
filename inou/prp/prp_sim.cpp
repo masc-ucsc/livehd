@@ -5,6 +5,10 @@
 // print is gone (todo/livehd/2sl-llvm-only-sim.md).
 
 #include "prp_sim.hpp"
+#include "test_signature.hpp"
+#include "prp_string.hpp"
+#include "pyrope_literal.hpp"
+#include "json_util.hpp"
 
 #include <fstream>
 #include <functional>
@@ -40,59 +44,6 @@ std::string slurp(const std::string& path) {
   std::ostringstream ss;
   ss << ifs.rdbuf();
   return ss.str();
-}
-
-std::string json_lit(std::string_view s) {
-  std::string o;
-  for (const char c : s) {
-    switch (c) {
-      case '\\': o += "\\\\"; break;
-      case '"' : o += "\\\""; break;
-      case '\n': o += "\\n"; break;
-      case '\r': o += "\\r"; break;
-      case '\t': o += "\\t"; break;
-      default  : o += c;
-    }
-  }
-  return o;
-}
-
-// A `test`'s parameter as it appears in the source: name, required (no default or `=nil`), and the default's node.
-struct Param_raw {
-  std::string name;
-  bool        required = false;
-  TSNode      default_node{};
-};
-
-std::vector<Param_raw> read_params_raw(const std::string& src, TSNode test) {
-  std::vector<Param_raw> out;
-  TSNode                 inp = field(test, "input");
-  if (ts_node_is_null(inp)) {
-    return out;
-  }
-  Param_raw  cur;
-  bool       have  = false;
-  const auto flush = [&]() {
-    if (!have) {
-      return;
-    }
-    cur.required = ts_node_is_null(cur.default_node) || text_of(src, cur.default_node) == "nil";
-    out.push_back(cur);
-    have = false;
-  };
-  for (TSNode ci : ts_node_named_children(inp)) {
-    if (ntype(ci) == "typed_identifier") {
-      flush();
-      cur       = Param_raw{};
-      TSNode id = field(ci, "identifier");
-      cur.name  = ts_node_is_null(id) ? std::string{} : text_of(src, id);
-      have      = true;
-    } else if (have) {
-      cur.default_node = ci;
-    }
-  }
-  flush();
-  return out;
 }
 
 // Parse `file` and invoke `on_test(test_node, dotted_name)` for each `test_statement` whose name matches `test_sel`
@@ -136,24 +87,74 @@ int for_each_test(const std::string& file, const std::string& test_sel, std::str
 
 }  // namespace
 
+std::vector<Param_raw> read_params_raw(const std::string& src, TSNode test) {
+  std::vector<Param_raw> out;
+  TSNode                 inp = field(test, "input");
+  if (ts_node_is_null(inp)) {
+    return out;
+  }
+  Param_raw  cur;
+  bool       have  = false;
+  const auto flush = [&]() {
+    if (!have) {
+      return;
+    }
+    cur.required  = ts_node_is_null(cur.default_node) || text_of(src, cur.default_node) == "nil";
+    cur.is_string = cur.type == "String";
+    if (!cur.required) {
+      const auto expr     = prp_ast::unwrap_expression(cur.default_node);
+      const auto spelling = text_of(src, cur.default_node);
+      const auto literal  = livehd::parse_pyrope_integer_spelling(spelling);
+      cur.dynamic         = !(literal && !literal->unknown()) && spelling != "true" && spelling != "false";
+      if (ntype(expr) == "string_literal" || ntype(expr) == "interpolated_string_literal") {
+        cur.is_string      = true;
+        cur.string_default = prp_ast::literal_string(expr, src);
+        cur.dynamic        = !cur.string_default.has_value();
+      }
+    }
+    out.push_back(cur);
+    have = false;
+  };
+  for (TSNode ci : ts_node_named_children(inp)) {
+    if (ntype(ci) == "typed_identifier") {
+      flush();
+      cur       = Param_raw{};
+      TSNode id = field(ci, "identifier");
+      cur.name  = ts_node_is_null(id) ? std::string{} : text_of(src, id);
+      for (TSNode child : ts_node_named_children(ci)) {
+        if (ntype(child) == "type_cast") {
+          for (TSNode type : ts_node_named_children(child)) {
+            cur.type = text_of(src, type);
+          }
+        }
+      }
+      have = true;
+    } else if (have) {
+      cur.default_node = ci;
+    }
+  }
+  flush();
+  return out;
+}
+
 std::string tests_to_json(const std::string& file, const std::vector<Test_info>& tests) {
   std::string j  = "{\"file\":\"";
-  j             += json_lit(file);
+  j              += livehd::json_util::escape(file);
   j             += "\",\"tests\":[";
   for (size_t ti = 0; ti < tests.size(); ++ti) {
     const auto& t  = tests[ti];
     j             += (ti != 0 ? ",{\"name\":\"" : "{\"name\":\"");
-    j             += json_lit(t.name);
+    j              += livehd::json_util::escape(t.name);
     j             += "\",\"params\":[";
     for (size_t pi = 0; pi < t.params.size(); ++pi) {
       const auto& p  = t.params[pi];
       j             += (pi != 0 ? ",{\"name\":\"" : "{\"name\":\"");
-      j             += json_lit(p.name);
+      j              += livehd::json_util::escape(p.name);
       j             += "\",\"required\":";
       j             += (p.required ? "true" : "false");
       if (!p.required) {
         j += ",\"default\":\"";
-        j += json_lit(p.default_text);
+        j += livehd::json_util::escape(p.default_text);
         j += "\"";
       }
       j += "}";

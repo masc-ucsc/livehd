@@ -73,6 +73,7 @@
 #include "call_resolver.hpp"
 #include "debug_env.hpp"
 #include "decl_facts.hpp"
+#include "literal_kind.hpp"
 #include "default_prologue.hpp"
 #include "diag.hpp"
 #include "hash_util.hpp"
@@ -2015,26 +2016,6 @@ static std::string_view ssa_version_base(std::string_view name) {
   return {};
 }
 
-// The variable a COMPILER-MINTED SSA version in `ln` belongs to, or "" when
-// `name` is not one: upass.ssa's private `x___ssa_<N>`, and a `x__w<N>` that
-// demote_stale_ssa recorded on `ln` (both may stack). Unlike ssa_version_base
-// this never strips a source-authored `x__w2`, which is a distinct variable.
-static std::string minted_ssa_base(const Lnast& ln, std::string_view name) {
-  std::string_view base     = name;
-  bool             stripped = false;
-  for (;;) {
-    if (const auto suffix = upass::stale_ssa_suffix(base); suffix && suffix->first > 0) {
-      base = base.substr(0, suffix->first);
-    } else if (const auto demoted = ln.ssa_demoted_base(base); !demoted.empty()) {
-      base = demoted;
-    } else {
-      break;
-    }
-    stripped = true;
-  }
-  return stripped ? std::string(base) : std::string{};
-}
-
 // `x:u48 = 0sb?` — an UNKNOWN sign extension is the WIDTH-TAKING wildcard: the
 // `?` replicates into the destination's DECLARED width and stops there, so the
 // store is exactly `x = 0ub` + 48 `?` (and `v:u8 = 0sb?1` is `0ub??????_?1`).
@@ -2462,11 +2443,6 @@ bool uPass_runner::resolve_node_operands(Resolved_node& out) {
   while (lm->move_to_sibling()) {
     const auto t = lm->get_raw_ntype();
     if (Lnast_ntype::is_const(t)) {
-      // Literal text → Kind (optable.md §Inference, ex-typecheck
-      // seed_kind_from_const): nil is poison, true/false are boolean, the
-      // single-unknown-bit `0sb?`/`0ub?` is TYPELESS (wildcard), a
-      // double-quoted literal is a string (single-quoted chars parse as
-      // integers), anything integer-parseable is an integer.
       const auto txt = lm->current_text();
       // Per-run cache of the const's {value, Kind, pattern}. The shln-heavy parse
       // itself is owned by the Lnast (get_const_value, memoized there); this layer
@@ -2474,29 +2450,13 @@ bool uPass_runner::resolve_node_operands(Resolved_node& out) {
       // unparseable-literal fallback so neither is recomputed per dispatched node.
       auto       cit = const_parse_cache_.find(txt);
       if (cit == const_parse_cache_.end()) {
-        upass::Kind k = upass::Kind::unknown;
-        if (txt == "nil") {
-          k = upass::Kind::nil;
-        } else if (txt == "true" || txt == "false") {
-          k = upass::Kind::boolean;
-        } else if (txt == "0sb?" || txt == "0ub?") {
-          k = upass::Kind::unknown;
-        } else if (!txt.empty() && txt.front() == '"') {
-          k = upass::Kind::string;
-        }
         Dlop v;
         try {
-          v = lm->get_lnast()->get_const_value(txt);  // Lnast-memoized from_pyrope
-          if (k == upass::Kind::unknown && txt != "0sb?" && txt != "0ub?") {
-            k = v.is_string() ? upass::Kind::string : (v.is_integer() ? upass::Kind::integer : upass::Kind::unknown);
-          }
+          v = lm->get_lnast()->get_const_value(txt);
         } catch (...) {
-          // Unparseable literal (selector words etc.): keep it as a string.
           v = *Dlop::from_string(txt);
-          if (k == upass::Kind::unknown) {
-            k = upass::Kind::string;
-          }
         }
+        const auto k       = upass::literal_kind(txt, v);
         const bool pattern = txt.size() >= 3 && txt[0] == '0' && (txt[1] == 's' || txt[1] == 'u') && txt[2] == 'b';
         cit                = const_parse_cache_.emplace(std::string(txt), Parsed_const{std::move(v), k, pattern}).first;
       }
@@ -15707,7 +15667,8 @@ std::pair<std::string, std::string> uPass_runner::source_var_at_cursor() const {
   if (!Lnast_ntype::is_ref(lm->get_raw_ntype()) || Lnast::is_tmp(raw)) {
     return {};
   }
-  return {std::string(raw), minted_ssa_base(*lm->get_lnast(), raw)};
+  const auto base = upass::ssa_base_name(lm->get_lnast().get(), raw);
+  return {std::string(raw), base == raw ? std::string{} : std::string(base)};
 }
 
 bool uPass_runner::gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& actuals,

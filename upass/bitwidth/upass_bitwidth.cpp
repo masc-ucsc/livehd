@@ -12,6 +12,7 @@
 #include "array_dim.hpp"
 #include "bundle_key.hpp"
 #include "decl_facts.hpp"
+#include "ssa_demote.hpp"
 #include "diag.hpp"
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
@@ -22,14 +23,11 @@ static upass::uPass_plugin plugin_bitwidth("bitwidth", upass::uPass_wrapper<uPas
 
 static constexpr std::string_view call_ref_arg_marker = "__ref_arg";
 
-namespace {
-std::string_view ssa_base_name(std::string_view name) {
-  const auto pos = name.find("___ssa_");
-  if (pos == std::string_view::npos) {
-    return name;
-  }
-  return name.substr(0, pos);
+std::string_view uPass_bitwidth::ssa_base_name(std::string_view name) const {
+  return upass::ssa_base_name(lm ? lm->get_lnast().get() : nullptr, name);
 }
+
+namespace {
 
 int64_t storage_bits_for_env(const Lnast_range& env) {
   if (env.is_unbounded()) {

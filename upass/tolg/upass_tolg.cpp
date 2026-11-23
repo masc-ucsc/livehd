@@ -2,6 +2,7 @@
 //  details.
 
 #include "upass_tolg.hpp"
+#include "lexical_callee.hpp"
 
 #include <algorithm>
 #include <array>
@@ -267,71 +268,35 @@ struct Val {
 [[nodiscard]] std::shared_ptr<Lnast> resolve_callee_lnast(std::string_view                           name,
                                                           const std::vector<std::shared_ptr<Lnast>>& registry,
                                                           std::string_view caller_unit = {}, bool want_template = false) {
-  // Escaped Verilog module references retain LNAST backticks until tolg;
-  // registry keys carry the literal module name.
-  if (name.size() >= 2 && name.front() == '`' && name.back() == '`') {
-    name = name.substr(1, name.size() - 2);
-  }
-  // A TEMPLATE is never the answer to a lowering lookup: it mints no GraphIO
-  // (register_io) and lowers to nothing (run), so any call that survived to
-  // tolg is served by a specialization. It also SHARES its name with an
-  // IDENTITY specialization (maybe_specialize_template_call), which would
-  // otherwise make that name look ambiguous to the suffix scan below and
-  // resolve to nothing at all. `want_template` inverts the filter, ONLY for
-  // the diagnostic of a call that reached tolg still naming a generic callee
-  // (the runner never specialized it) — the same scan, so the two answers
-  // cannot drift apart.
-  const auto candidate = [want_template](const std::shared_ptr<Lnast>& ln) { return ln && ln->is_template() == want_template; };
-  std::shared_ptr<Lnast> exact;
-  std::shared_ptr<Lnast> suffix_hit;
-  int                    suffix_matches = 0;
-  const std::string      suffix         = "." + std::string(name);
-  for (const auto& ln : registry) {
-    if (!candidate(ln)) {
-      continue;
-    }
-    auto n = ln->get_top_module_name();
-    if ((n == name)) {
-      exact = ln;
-    } else if (n.size() > suffix.size() && str_tools::ends_with(n, suffix)) {
-      suffix_hit = ln;
-      ++suffix_matches;
-    }
-  }
-  // Same preference order as the runner's call_resolver::lookup_callee: an
-  // exact match wins only when it carries a real signature. An imported FILE
-  // unit shares its name with the file (`leaf` for leaf.prp) and has no io; it
-  // must not shadow the caller's own `comb leaf` (`<file>.leaf`), which the
-  // runner already bound -- tolg then reported "call to undefined function".
-  const auto has_sig = [](const std::shared_ptr<Lnast>& ln) { return ln && !ln->io_meta().empty(); };
-  if (has_sig(exact)) {
-    return exact;
-  }
-  if (!caller_unit.empty()) {
-    std::string scoped;
-    for (std::string_view unit = caller_unit;;) {
-      scoped.assign(unit);
-      scoped.push_back('.');
-      scoped.append(name);
-      for (const auto& ln : registry) {
-        if (candidate(ln) && ln->get_top_module_name() == scoped && (has_sig(ln) || !exact)) {
-          return ln;
+  // Lowering needs a concrete body. A diagnostic lookup can instead request the template.
+  const auto eligible = [want_template](const auto& ln) { return ln && ln->is_template() == want_template; };
+  return upass::resolve_lexical_callee(
+      name,
+      caller_unit,
+      [&](std::string_view key) -> std::shared_ptr<Lnast> {
+        for (const auto& ln : registry) {
+          if (eligible(ln) && ln->get_top_module_name() == key) {
+            return ln;
+          }
         }
-      }
-      const auto dot = unit.rfind('.');
-      if (dot == std::string_view::npos) {
-        break;
-      }
-      unit = unit.substr(0, dot);
-    }
-  }
-  if (suffix_matches == 1 && (has_sig(suffix_hit) || !exact)) {
-    return suffix_hit;
-  }
-  if (exact) {
-    return exact;  // an empty-io exact match (e.g. a void marker) is the last resort
-  }
-  return nullptr;
+        return nullptr;
+      },
+      [&](std::string_view suffix) -> std::shared_ptr<Lnast> {
+        std::shared_ptr<Lnast> match;
+        for (const auto& ln : registry) {
+          if (!eligible(ln)) {
+            continue;
+          }
+          auto key = ln->get_top_module_name();
+          if (key.size() > suffix.size() && key.ends_with(suffix)) {
+            if (match) {
+              return nullptr;
+            }
+            match = ln;
+          }
+        }
+        return match;
+      });
 }
 
 // One pending time obligation: an asserted (min,max) landing
@@ -15934,44 +15899,6 @@ void uPass_tolg::detect_lg_collisions(const Registry& registry) {
   }
 }
 
-namespace {
-// The import bindings of `ln`'s top-level statements, binding -> unit text: an
-// `import` call's destination (`func_call(Cnt, 'import', 'lib.ent')`) and a
-// copy of one (`store(lib, %t)`). Before upass folds them, a call names its
-// callee through such a binding (`Cnt(...)`, `lib.ent(...)`).
-absl::flat_hash_map<std::string, std::string> top_level_import_bindings(const Lnast& ln) {
-  absl::flat_hash_map<std::string, std::string> out;
-  for (auto top : ln.children(ln.get_root())) {
-    if (!Lnast_ntype::is_stmts(ln.get_type(top))) {
-      continue;
-    }
-    for (auto stmt : ln.children(top)) {
-      const auto dst = ln.get_first_child(stmt);
-      const auto arg = dst.is_invalid() ? dst : ln.get_sibling_next(dst);
-      if (arg.is_invalid() || !Lnast_ntype::is_ref(ln.get_type(dst))) {
-        continue;
-      }
-      if (Lnast_ntype::is_func_call(ln.get_type(stmt))) {
-        const auto txt = ln.get_sibling_next(arg);
-        if (Lnast_ntype::is_const(ln.get_type(arg)) && ln.get_name(arg) == "import" && !txt.is_invalid()) {
-          std::string_view t = ln.get_name(txt);
-          if (t.size() >= 2 && (t.front() == '\'' || t.front() == '"') && t.back() == t.front()) {
-            t = t.substr(1, t.size() - 2);
-          }
-          out.insert_or_assign(std::string(ln.get_name(dst)), std::string(t));
-        }
-      } else if (Lnast_ntype::is_store(ln.get_type(stmt)) && Lnast_ntype::is_ref(ln.get_type(arg))
-                 && ln.get_sibling_next(arg).is_invalid()) {
-        if (const auto it = out.find(ln.get_name(arg)); it != out.end()) {
-          auto text = it->second;
-          out.insert_or_assign(std::string(ln.get_name(dst)), std::move(text));
-        }
-      }
-    }
-  }
-  return out;
-}
-}  // namespace
 
 uPass_tolg::Registry uPass_tolg::lowering_order(const Registry& registry, const std::function<bool(const Lnast&)>& follow) {
   // Units sharing a graph name are lowered back to back in registry order, so
@@ -16006,7 +15933,7 @@ uPass_tolg::Registry uPass_tolg::lowering_order(const Registry& registry, const 
         if (!callee) {
           // A callee named through an import binding (the pre-upass spelling).
           if (!imports) {
-            imports = top_level_import_bindings(*ln);
+            imports = ln->top_level_import_bindings();
           }
           const auto dot = callee_name.find('.');
           if (const auto it = imports->find(callee_name.substr(0, dot)); it != imports->end()) {
@@ -16098,7 +16025,7 @@ uPass_tolg::Registry uPass_tolg::unreferenced_private_combs(const Registry& regi
       auto callee = resolve_callee_lnast(callee_name, registry, ln->get_top_module_name());
       if (!callee) {
         if (!imports) {
-          imports = top_level_import_bindings(*ln);
+          imports = ln->top_level_import_bindings();
         }
         const auto dot = callee_name.find('.');
         if (const auto it = imports->find(callee_name.substr(0, dot)); it != imports->end()) {

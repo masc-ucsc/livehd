@@ -21,6 +21,7 @@
 #include "absl/strings/str_cat.h"
 #include "hlop/dlop.hpp"
 #include "kind.hpp"
+#include "ssa_demote.hpp"
 #include "lnast.hpp"
 #include "symbol_table.hpp"
 
@@ -275,8 +276,8 @@ inline std::optional<Facts> lookup_operand(const Symbol_table& st, const Lnast* 
     if (typed(f)) {
       return f;
     }
-    if (const auto p = name.find("___ssa_"); p != std::string_view::npos) {
-      if (auto bf = lookup(st, ln, name.substr(0, p)); typed(bf)) {
+    if (const auto base = upass::ssa_base_name(ln, name); base != name) {
+      if (auto bf = lookup(st, ln, base); typed(bf)) {
         return bf;
       }
     }

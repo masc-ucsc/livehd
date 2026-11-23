@@ -5321,28 +5321,10 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
   }
   profile.mark("finalize-and-verify");
 
-  livehd::sim::initialize_llvm_target();
-
-  const llvm::Triple  triple(llvm::sys::getDefaultTargetTriple());
-  std::string         lookup_error;
-  const llvm::Target* target = llvm::TargetRegistry::lookupTarget(triple, lookup_error);
-  if (target == nullptr) {
-    error = lookup_error;
-    return false;
-  }
-  llvm::TargetOptions                  options;
-  // PIC, explicitly. The object is linked into an executable the host driver
-  // builds, and every mainstream Linux toolchain defaults that link to PIE:
-  // the Static model LLVM picks for a null reloc model emits absolute
-  // relocations the PIE link then refuses.
-  std::unique_ptr<llvm::TargetMachine> machine(
-      target->createTargetMachine(triple, "generic", "", options, llvm::Reloc::PIC_, std::nullopt, llvm::CodeGenOptLevel::Default));
+  auto machine = livehd::sim::object_machine(*impl_->module, error);
   if (!machine) {
-    error = "LLVM could not create a native target machine";
     return false;
   }
-  impl_->module->setTargetTriple(triple);
-  impl_->module->setDataLayout(machine->createDataLayout());
   profile.mark("target-setup");
 
   // Reset-free fast path (speculate_input); the bitcode digest below sees it.
@@ -5573,8 +5555,8 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
       }
       if (level != 2) {
         const auto cg = level <= 0 ? llvm::CodeGenOptLevel::None : (level == 1 ? llvm::CodeGenOptLevel::Less : llvm::CodeGenOptLevel::Aggressive);
-        std::unique_ptr<llvm::TargetMachine> lowered(
-            target->createTargetMachine(triple, "generic", "", options, llvm::Reloc::PIC_, std::nullopt, cg));
+        std::string ignored;
+        auto        lowered = livehd::sim::object_machine(*impl_->module, ignored, cg);
         if (lowered) {
           lowered->setOptLevel(cg);
           machine = std::move(lowered);
@@ -5717,26 +5699,10 @@ bool Cgen_llvm::link_bitcode_object(std::string_view host_path, const std::vecto
   };
   normalize_stack_probe(*module);
 
-  livehd::sim::initialize_llvm_target();
-  llvm::Triple triple(module->getTargetTriple());
-  if (triple.getTriple().empty()) {
-    triple = llvm::Triple(llvm::sys::getDefaultTargetTriple());
-    module->setTargetTriple(triple);
-  }
-  std::string         lookup_error;
-  const llvm::Target* target = llvm::TargetRegistry::lookupTarget(triple, lookup_error);
-  if (target == nullptr) {
-    error = lookup_error;
-    return false;
-  }
-  llvm::TargetOptions                  options;
-  std::unique_ptr<llvm::TargetMachine> machine(
-      target->createTargetMachine(triple, "generic", "", options, llvm::Reloc::PIC_, std::nullopt, llvm::CodeGenOptLevel::Default));
+  auto machine = livehd::sim::object_machine(*module, error);
   if (!machine) {
-    error = "LLVM could not create a native target machine for linked simulator bitcode";
     return false;
   }
-  module->setDataLayout(machine->createDataLayout());
   for (auto& function : *module) {
     // Cold support may explicitly use optnone; LLVM forbids combining it
     // with optsize. Preserve that function-level override.

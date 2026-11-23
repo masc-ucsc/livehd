@@ -9,6 +9,8 @@
 
 namespace prp_tb {
 
+constexpr unsigned kMaxTbWidth = 16384;
+
 constexpr const char* kObject   = "drv.tb.o";
 constexpr const char* kManifest = "drv.tb.json";
 
@@ -48,11 +50,12 @@ struct Rt {
   int64_t* frame;        // the test's spilled locals
   int64_t  period;       // number of DUT steps already taken, across all tick blocks
   int64_t  tick_index;   // local clock index, saved and restored at a checkpoint
+  uint64_t* resolved_params;  // same word offsets as args, written for expression defaults
 };
 // Indices of the fields above in 64-bit words (the generated code addresses them that way).
 constexpr int         kRtAssert = 0, kRtPrint = 1, kRtCheckpoint = 2, kRtTrace = 3, kRtUnknown = 4, kRtStr = 5, kRtUndefined = 6,
                       kRtPlusarg = 7, kRtUser = 8, kRtCycle = 9, kRtCkptLeft = 10, kRtResume = 11, kRtResumeStmt = 12, kRtStop = 13,
-                      kRtFrame = 14, kRtPeriod = 15, kRtTickIndex = 16;
+                      kRtFrame = 14, kRtPeriod = 15, kRtTickIndex = 16, kRtResolvedParams = 17;
 constexpr const char* kTraceObject = "drv.tb.trace.o";
 
 }  // namespace prp_tb

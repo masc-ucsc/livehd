@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #pragma once
+#include "prp_string.hpp"
 
 #include <deque>
 #include <functional>
@@ -647,19 +648,7 @@ protected:
   Lnast_node dot_expression_to_node(TSNode n);
   Lnast_node function_call_expr_to_node(TSNode n);
   Lnast_node interpolated_string_to_node(TSNode n);
-  // A double-quoted string body split into pieces: literal text (escapes
-  // decoded; a hole with no expression — `{}` or `{/* c */}` — stays literal
-  // text with its comments removed) or one `{expr[:spec]}` hole. The holes are
-  // found with prpparse's own hole scanner (Lexer::istring_hole_end), so a
-  // `}`/`{`/`:`/`/*` inside a comment, nested string or backtick name in a hole
-  // never ends it, opens another, or starts a format spec.
-  struct Istring_piece {
-    std::string text;  // literal (when !is_hole)
-    TSNode      expr{};
-    std::string spec;  // format spec without the `:` (may be empty)
-    bool        is_hole = false;
-  };
-  std::vector<Istring_piece> istring_pieces(TSNode n) const;
+  std::vector<prp_ast::Istring_piece> istring_pieces(TSNode n) const;
   Lnast_node                 tuple_to_node(TSNode n, bool is_square, bool field_types_on_target = false);
   Lnast_node                 identifier_to_node(TSNode n, bool for_lvalue);
   Lnast_node                 constant_text_to_node(std::string_view text);

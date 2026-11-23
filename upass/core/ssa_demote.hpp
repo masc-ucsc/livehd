@@ -37,6 +37,24 @@ inline std::optional<std::pair<std::size_t, std::size_t>> stale_ssa_suffix(std::
   return std::pair{pos, digit_pos};
 }
 
+// Recover the declared name from compiler-created versions, including versions of
+// a demoted name. A source-authored x__w2 has no demotion record and stays intact.
+inline std::string_view ssa_base_name(const Lnast* ln, std::string_view name) {
+  for (;;) {
+    if (const auto suffix = stale_ssa_suffix(name); suffix && suffix->first > 0) {
+      name = name.substr(0, suffix->first);
+    } else if (ln && !ln->get_ssa_demoted().empty()) {
+      const auto demoted = ln->ssa_demoted_base(name);
+      if (demoted.empty()) {
+        return name;
+      }
+      name = demoted;
+    } else {
+      return name;
+    }
+  }
+}
+
 // Rename every private version under `root` to `<base>__w<N>` (N bumped past
 // any name already in the tree), consistently: every occurrence of one stale
 // name lands on the same demoted name, which preserves the def/use links.

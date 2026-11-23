@@ -134,6 +134,14 @@ cc_library(
 )
 
 cc_library(
+    name = "tb_integer",
+    hdrs = ["tb_integer.hpp"],
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = ["//core:sim_values", "@llvm-project//llvm:Support"],
+)
+
+cc_library(
     name = "inou_prp",
     srcs = glob(
         ["*.cpp"],
@@ -155,6 +163,8 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//core",
+        ":tb_integer",
+        "//core:serialization_hdrs",
         "//core:sim_values",
         "//inou/cgen:sim_llvm_target",
         "//lnast",

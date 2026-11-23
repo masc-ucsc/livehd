@@ -16,6 +16,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":wrap_sat_hdr",
+        "//upass/core:ssa_demote_hdr",
         "//core",
         "//lnast",
         "//pass/common:pass",

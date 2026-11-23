@@ -150,7 +150,7 @@ PRP
 "$LHD" sim division.prp --workdir wd +x=-9223372036854775808 +y=-1 >wd.log 2>&1 || fail "$(cat wd.log)"
 for bad in 9223372036854775808 -9223372036854775809 99999999999999999999; do
   "$SIMRT" wd/sim "+x=$bad" +y=-1 >arg.log 2>&1
-  [ "$?" -eq 1 ] && grep -Fq "+x expects an integer" arg.log || fail "out-of-range argument $bad: $(cat arg.log)"
+  [ "$?" -eq 1 ] && grep -Fq "+x is outside S64 range" arg.log || fail "out-of-range argument $bad: $(cat arg.log)"
 done
 python3 - good.json w/sim <<'PY' || fail "DUT accounting"
 import json, pathlib, re, sys

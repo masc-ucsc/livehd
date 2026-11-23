@@ -520,3 +520,40 @@ void Lnast::dump(const std::string& filename) const {
   }
   dump(ofs);
 }
+
+// The import bindings of `ln`'s top-level statements, binding -> unit text: an
+// `import` call's destination (`func_call(Cnt, 'import', 'lib.ent')`) and a
+// copy of one (`store(lib, %t)`). Before upass folds them, a call names its
+// callee through such a binding (`Cnt(...)`, `lib.ent(...)`).
+absl::flat_hash_map<std::string, std::string> Lnast::top_level_import_bindings() const {
+  absl::flat_hash_map<std::string, std::string> out;
+  for (auto top : children(get_root())) {
+    if (!Lnast_ntype::is_stmts(get_type(top))) {
+      continue;
+    }
+    for (auto stmt : children(top)) {
+      const auto dst = get_first_child(stmt);
+      const auto arg = dst.is_invalid() ? dst : get_sibling_next(dst);
+      if (arg.is_invalid() || !Lnast_ntype::is_ref(get_type(dst))) {
+        continue;
+      }
+      if (Lnast_ntype::is_func_call(get_type(stmt))) {
+        const auto txt = get_sibling_next(arg);
+        if (Lnast_ntype::is_const(get_type(arg)) && get_name(arg) == "import" && !txt.is_invalid()) {
+          std::string_view t = get_name(txt);
+          if (t.size() >= 2 && (t.front() == '\'' || t.front() == '"') && t.back() == t.front()) {
+            t = t.substr(1, t.size() - 2);
+          }
+          out.insert_or_assign(std::string(get_name(dst)), std::string(t));
+        }
+      } else if (Lnast_ntype::is_store(get_type(stmt)) && Lnast_ntype::is_ref(get_type(arg))
+                 && get_sibling_next(arg).is_invalid()) {
+        if (const auto it = out.find(get_name(arg)); it != out.end()) {
+          auto text = it->second;
+          out.insert_or_assign(std::string(get_name(dst)), std::move(text));
+        }
+      }
+    }
+  }
+  return out;
+}

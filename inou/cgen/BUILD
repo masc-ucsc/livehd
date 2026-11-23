@@ -137,7 +137,13 @@ cc_library(
     hdrs = ["sim_llvm_target.hpp"],
     includes = ["."],
     visibility = ["//inou/prp:__pkg__"],
-    deps = ["@llvm-project//llvm:Support"],
+    deps = [
+        "@llvm-project//llvm:Core",
+        "@llvm-project//llvm:MC",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//llvm:Target",
+        "@llvm-project//llvm:TargetParser",
+    ],
 )
 
 cc_library(

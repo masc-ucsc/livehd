@@ -13,7 +13,6 @@
 #include <limits>
 #include <map>
 #include <optional>
-#include <regex>
 #include <set>
 #include <sstream>
 #include <string>
@@ -46,10 +45,13 @@
 #include "prpparse/lexer.hpp"
 #include "prpparse/parser.hpp"
 #include "prpparse/source_buffer.hpp"
-#include "pyrope_literal.hpp"
+#include "tb_integer.hpp"
 #include "rapidjson/document.h"
 #include "sim_llvm_target.hpp"
 #include "str_tools.hpp"
+#include "test_signature.hpp"
+#include "prp_string.hpp"
+#include "json_util.hpp"
 
 namespace prp_tb {
 
@@ -137,76 +139,9 @@ int declared_uint_bits(const std::string& src, TSNode lv) {
   return 0;
 }
 
-struct Param_raw {
-  std::string name;
-  bool        required = false;
-  TSNode      default_node{};
-  std::string type;
-  bool        is_string = false;  // the default is a quoted string: the parameter is a string handle
-  bool        dynamic   = false;  // the default is an expression the test evaluates itself (not a literal)
-};
+using prp_sim::Param_raw;
 
-std::vector<Param_raw> read_params_raw(const std::string& src, TSNode test) {
-  std::vector<Param_raw> out;
-  TSNode                 inp = field(test, "input");
-  if (ts_node_is_null(inp)) {
-    return out;
-  }
-  Param_raw cur;
-  bool      have  = false;
-  const auto flush = [&]() {
-    if (!have) {
-      return;
-    }
-    cur.required = ts_node_is_null(cur.default_node) || text_of(src, cur.default_node) == "nil";
-    if (!cur.required) {
-      std::string d = text_of(src, cur.default_node);
-      while (!d.empty() && std::isspace(static_cast<unsigned char>(d.front())) != 0) {
-        d.erase(0, 1);
-      }
-      cur.is_string = d.size() >= 2 && (d.front() == '"' || d.front() == '\'') && d.back() == d.front();
-      const bool lit_int = !d.empty() && (std::isdigit(static_cast<unsigned char>(d.front())) != 0 || d.front() == '-');
-      cur.dynamic = !cur.is_string && !lit_int && d != "true" && d != "false";
-    }
-    out.push_back(cur);
-    have = false;
-  };
-  for (TSNode ci : ts_node_named_children(inp)) {
-    if (ntype(ci) == "typed_identifier") {
-      flush();
-      cur       = Param_raw{};
-      TSNode id = field(ci, "identifier");
-      cur.name  = ts_node_is_null(id) ? std::string{} : text_of(src, id);
-      for (TSNode child : ts_node_named_children(ci)) {
-        if (ntype(child) == "type_cast") {
-          for (TSNode type : ts_node_named_children(child)) {
-            cur.type = text_of(src, type);
-          }
-        }
-      }
-      have = true;
-    } else if (have) {
-      cur.default_node = ci;
-    }
-  }
-  flush();
-  return out;
-}
-
-std::string json_str(std::string_view s) {
-  std::string o = "\"";
-  for (const char c : s) {
-    switch (c) {
-      case '\\': o += "\\\\"; break;
-      case '"' : o += "\\\""; break;
-      case '\n': o += "\\n"; break;
-      case '\r': o += "\\r"; break;
-      case '\t': o += "\\t"; break;
-      default  : o += static_cast<unsigned char>(c) < 0x20 ? ' ' : c;
-    }
-  }
-  return o + "\"";
-}
+std::string json_str(std::string_view s) { return "\"" + livehd::json_util::escape(s) + "\""; }
 
 // ---- the DUT descriptors pass/lnast_llvm wrote (`<stem>.dut.json`) ---------------------------------
 struct Field {
@@ -329,7 +264,6 @@ bool tb_nsw() {
   return v;
 }
 
-constexpr unsigned kMaxTbWidth = 16384;   // a testbench value wider than this is an error, not a slow compile
 constexpr unsigned kDefaultTbWidth = 64;  // an un-annotated testbench local is at least this wide (the old driver's floor)
 
 // Every testbench value is an LLVM integer of EXACTLY the bits it needs: two's complement, `w` bits including
@@ -562,7 +496,7 @@ public:
       fail("test '" + name + "' has no body");
     }
     Test_result r;
-    r.params = read_params_raw(src_, test);
+    r.params = prp_sim::read_params_raw(src_, test);
     std::vector<TSNode> stmts;
     for (TSNode c : ts_node_named_children(code)) {
       stmts.push_back(c);
@@ -604,18 +538,35 @@ public:
     bind_params(r.params);
     // a parameter whose default is an expression (`derived:U8 = std.valueplusarg("k", 2)`): evaluated here when the
     // run supplies no `+derived=`
-    for (size_t i = 0; i < r.params.size(); ++i) {
-      const auto& p = r.params[i];
+    for (const auto& p : r.params) {
       if (!p.dynamic || p.required) {
         continue;
       }
-      Value* sup  = b_.CreateLoad(m_.i64_, b_.CreateGEP(m_.i64_, args_, {c64(static_cast<int64_t>(2 * i + 1))}));
+      Value* sup     = b_.CreateLoad(m_.i64_, b_.CreateGEP(m_.i64_, args_, {c64(static_cast<int64_t>(p.supplied_word))}));
       auto*  eval_bb = BasicBlock::Create(m_.ctx(), "param.default", fn_);
       auto*  cont    = BasicBlock::Create(m_.ctx(), "param.bound", fn_);
       b_.CreateCondBr(b_.CreateICmpNE(sup, c64(0)), cont, eval_bb);
       b_.SetInsertPoint(eval_bb);
       Val dv = dat(eval(p.default_node));
-      b_.CreateStore(resize(dv.v, dv.w, local_w_[p.name]), locals_.at(p.name));
+      Value* narrowed = resize(dv.v, dv.w, p.width);
+      if (!p.is_string && !p.type.empty() && p.type != "Bool") {
+        Value* ok = b_.CreateICmpEQ(dv.v, resize(narrowed, p.width, dv.w));
+        if (p.type.starts_with("U")) {
+          ok = b_.CreateAnd(ok, b_.CreateICmpSGE(narrowed, ConstantInt::get(ity(p.width), 0)));
+        }
+        Assert_site site;
+        site.line  = static_cast<int>(ts_node_start_point(p.default_node).row) + 1;
+        site.loc   = file_short_ + ":" + std::to_string(site.line);
+        site.cond  = "default for " + p.name + " fits " + p.type;
+        site.msg   = "test parameter '" + p.name + "' is outside " + p.type + " range";
+        auto* null = llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(m_.ptr_));
+        emit_check(ok, std::move(site), null, null);
+      }
+      b_.CreateStore(narrowed, locals_.at(p.name));
+      const unsigned words   = (p.width + 63) / 64;
+      Value*         result  = b_.CreateLoad(m_.ptr_, rt_word(prp_tb::kRtResolvedParams));
+      auto*          address = b_.CreateGEP(m_.i64_, result, {c64(p.supplied_word - words)});
+      b_.CreateAlignedStore(b_.CreateSExtOrTrunc(narrowed, wty(words * 64)), address, llvm::Align(8));
       b_.CreateBr(cont);
       b_.SetInsertPoint(cont);
     }
@@ -706,20 +657,38 @@ private:
     return p.type == "Bool" ? 2 : kDefaultTbWidth;
   }
 
-  void bind_params(const std::vector<Param_raw>& params) {
-    for (size_t i = 0; i < params.size(); ++i) {
-      const unsigned w         = local_w_[params[i].name];
-      auto*          slot      = alloca_named(params[i].name, w);
-      locals_[params[i].name]  = slot;
-      // the runtime passes (value, supplied) per parameter
-      Value*     raw           = b_.CreateLoad(m_.i64_, b_.CreateGEP(m_.i64_, args_, {c64(static_cast<int64_t>(2 * i))}));
-      const bool unsigned_word = params[i].type.starts_with("U") && w > 64;
-      b_.CreateStore(unsigned_word ? b_.CreateZExt(raw, ity(w)) : resize(raw, 64, w), slot);
-      if (params[i].is_string) {
-        str_locals_.insert(params[i].name);
+  void bind_params(std::vector<Param_raw>& params) {
+    size_t offset = 0;
+    for (auto& p : params) {
+      if (scratch_ && !p.required) {
+        const auto v = eval(p.default_node);
+        if (p.type.empty()) {
+          if (v.is_bool) {
+            p.type = "Bool";
+          }
+          p.is_string      = v.is_str;
+          local_w_[p.name] = std::max(param_width(p), v.w);
+        } else if ((p.type == "String") != v.is_str || (p.type == "Bool") != v.is_bool) {
+          fail("test parameter '" + p.name + "' default does not match " + p.type);
+        }
       }
-      if (const auto& ty = params[i].type; ty.size() >= 2 && ty[0] == 'U' && std::isdigit(static_cast<unsigned char>(ty[1])) != 0) {
-        ubits_[params[i].name] = std::atoi(ty.c_str() + 1);
+      p.width              = local_w_.at(p.name);
+      const unsigned words = (p.width + 63) / 64;
+      auto*          slot  = alloca_named(p.name, p.width);
+      locals_[p.name]      = slot;
+      auto* address        = b_.CreateGEP(m_.i64_, args_, {c64(offset)});
+      auto* value          = b_.CreateAlignedLoad(wty(words * 64), address, llvm::Align(8));
+      b_.CreateStore(wrap(value, p.width), slot);
+      p.supplied_word = offset + words;
+      offset          = p.supplied_word + 1;
+      if (p.is_string) {
+        str_locals_.insert(p.name);
+      }
+      if (p.type == "Bool") {
+        bool_params_.insert(p.name);
+      }
+      if (const auto& ty = p.type; ty.size() >= 2 && ty[0] == 'U' && std::isdigit(static_cast<unsigned char>(ty[1])) != 0) {
+        ubits_[p.name] = std::atoi(ty.c_str() + 1);
       }
     }
   }
@@ -736,30 +705,47 @@ private:
   }
 
   // ---- discovery ----
-  static std::string import_ref_of(const std::string& text) {
-    static const std::regex re(R"re(import\(\s*"(?:lg:|ln:)?([^"]+)"\s*\))re");
-    std::smatch             m;
-    return std::regex_search(text, m, re) ? m[1].str() : std::string{};
-  }
-
   const Dut* resolve_dut(TSNode rv) const {
-    while (!ts_node_is_null(rv) && (ntype(rv) == "expression_item" || ntype(rv) == "paren_group") && ts_node_named_child_count(rv) == 1) {
-      rv = ts_node_named_child(rv, 0);
-    }
-    if (ts_node_is_null(rv) || ntype(rv) != "identifier") {
+    rv = prp_ast::unwrap_expression(rv);
+    if (ntype(rv) != "identifier") {
       return nullptr;
     }
-    const std::string nm = text_of(src_, rv);
-    std::string       ref;
-    if (const auto it = fconsts_.find(nm); it != fconsts_.end()) {
-      ref = import_ref_of(text_of(src_, it->second));
-      if (ref.empty()) {
-        return nullptr;  // a plain constant, not an import
+    std::string nm = text_of(src_, rv);
+    std::string ref;
+    // File constants can alias another import binding, or a local module.
+    // Stopping at a scalar constant keeps ordinary test locals out of the DUT catalog.
+    size_t      remaining = fconsts_.size();
+    auto        it        = fconsts_.find(nm);
+    while (it != fconsts_.end()) {
+      const auto value = prp_ast::unwrap_expression(it->second);
+      if (ntype(value) != "identifier") {
+        break;
       }
+      if (remaining-- == 0) {
+        return nullptr;
+      }
+      nm = text_of(src_, value);
+      it = fconsts_.find(nm);
+    }
+    if (it != fconsts_.end()) {
+      const auto node = prp_ast::unwrap_expression(it->second);
+      TSNode     path;
+      if (ntype(node) == "import_statement") {
+        path = field(node, "module");
+      } else if (ntype(node) == "function_call_expression" && text_of(src_, field(node, "function")) == "import") {
+        path = ts_node_named_child(field(node, "argument"), 0);
+      } else {
+        return nullptr;
+      }
+      const auto unit = prp_ast::literal_string(path, src_);
+      if (!unit) {
+        return nullptr;
+      }
+      const bool artifact = unit->starts_with("lg:") || unit->starts_with("ln:");
+      ref                 = artifact ? unit->substr(3) : str_tools::canonical_escaped_path(*unit);
       // An artifact reference (`lg:`/`ln:`) is exact by construction: it must name a simulated module, never fall back
       // to "the sole module" or "the unique root" (a typo would simulate some other module and pass).
-      static const std::regex art(R"re(import\(\s*"(?:lg|ln):)re");
-      if (std::regex_search(text_of(src_, it->second), art)) {
+      if (artifact) {
         for (const auto& d : duts_) {
           if (d.module == ref || d.stem == ref) {
             return &d;
@@ -952,7 +938,7 @@ private:
     }
     return 0;
   }
-  void infer_widths(const std::vector<Param_raw>& params) {
+  void infer_widths(std::vector<Param_raw>& params) {
     scratch_ = true;
     const auto fty = llvm::FunctionType::get(m_.i64_, {m_.ptr_, m_.ptr_, m_.ptr_}, false);
     for (int pass = 0; pass < 4; ++pass) {
@@ -1441,15 +1427,13 @@ private:
       if (width > kMaxTbWidth) {
         fail("integer literal is wider than " + std::to_string(kMaxTbWidth) + " bits");
       }
-      return unknown_literal(raw, lit.digits, lit.radix, lit.signed_pattern, lit.negate);
+      return unknown_literal(raw, lit);
     }
-    llvm::APInt v(bits + 1, llvm::StringRef(lit.digits), static_cast<uint8_t>(lit.radix));
-    if (lit.negative_pattern()) {
-      v = v.trunc(bits).sext(bits + 1);
+    const auto parsed_value = integer_value(lit);
+    if (!parsed_value) {
+      fail("integer literal is too large: " + raw);
     }
-    if (lit.negate) {
-      v = -v;
-    }
+    const auto&    v     = *parsed_value;
     const unsigned width = v.isNegative() ? v.getSignificantBits() : std::max(2u, v.getActiveBits() + 1);
     if (width > kMaxTbWidth) {
       fail("integer literal is wider than " + std::to_string(kMaxTbWidth) + " bits");
@@ -1459,11 +1443,14 @@ private:
 
   // `0ub????????`, `0sb?`, `0x??`: known bits are fixed, each `?` bit is drawn ONCE per run (zero under
   // sim.unknown_zero). The runtime writes the words into a slot filled at function entry.
-  Val unknown_literal(const std::string& raw, const std::string& body, unsigned radix, bool sign, bool neg) {
-    if (neg) {
+  Val unknown_literal(const std::string& raw, const livehd::Pyrope_integer_spelling& literal) {
+    const auto& body  = literal.digits;
+    const auto  radix = literal.radix;
+    const bool  sign  = literal.signed_pattern;
+    if (literal.negate) {
       fail("a negative literal with `?` bits is not supported: " + raw);
     }
-    const unsigned bpd  = radix == 2 ? 1 : 4;
+    const unsigned bpd  = literal.bits_per_digit();
     const unsigned bits = static_cast<unsigned>(body.size()) * bpd;
     llvm::APInt    known(bits, 0), mask(bits, 0);
     for (size_t i = 0; i < body.size(); ++i) {
@@ -1532,11 +1519,7 @@ private:
 
   Val eval(TSNode n) {
     {
-      TSNode lit = n;
-      while (ts_node_named_child_count(lit) == 1
-             && (ntype(lit) == "expression_item" || ntype(lit) == "expression_list" || ntype(lit) == "paren_group" || ntype(lit) == "constant")) {
-        lit = ts_node_named_child(lit, 0);
-      }
+      const auto lit = prp_ast::unwrap_expression(n);
       if (ntype(lit) == "string_literal" || ntype(lit) == "interpolated_string_literal") {
         return string_value(lit);
       }
@@ -1551,6 +1534,9 @@ private:
       }
       if (const auto it = locals_.find(nm); it != locals_.end()) {
         Val x    = load_local(it->second);
+        if (bool_params_.contains(nm)) {
+          return boolean(to_i1(x));
+        }
         x.is_str = str_locals_.count(nm) != 0;
         return x;
       }
@@ -1878,183 +1864,44 @@ private:
     return data(y, w + 1);
   }
 
-  // The value of a `{name}` hole: a local, a parameter, the tick counter, or `inst.field`.
-  Val interp_expr(std::string name) {
-    name.erase(std::remove(name.begin(), name.end(), '`'), name.end());  // `d.`o`` == d.o
-    if (refs_.count(name) != 0) {
-      std::string base, fld;
-      ref_target(name, base, fld);
-      return port_read(base, fld);
-    }
-    if (const auto it = locals_.find(name); it != locals_.end()) {
-      Val x    = load_local(it->second);
-      x.is_str = str_locals_.count(name) != 0;
-      return x;
-    }
-    if (local_w_.count(name) != 0) {  // an assigned local not yet created (the width-inference pass reads it before its slot exists)
-      Val x    = load_local(local(name));
-      x.is_str = str_locals_.count(name) != 0;
-      return x;
-    }
-    if (const auto dot = name.find('.'); dot != std::string::npos && inst_index(name.substr(0, dot)) >= 0) {
-      return port_read(name.substr(0, dot), name.substr(dot + 1));
-    }
-    if (const auto dot = name.find('.'); dot != std::string::npos) {  // a field of a tuple constant: `T.hi`
-      if (const TSNode rv = file_const_field(name.substr(0, dot), name.substr(dot + 1)); !ts_node_is_null(rv)) {
-        return eval_file_const(name, rv);
-      }
-    }
-    if (const auto it = fconsts_.find(name); it != fconsts_.end()) {
-      return eval_file_const(name, it->second);
-    }
-    fail("the print hole `{" + name + "}` is not a local, a parameter or `instance.field` (expressions in a hole are not lowered yet)");
-  }
-
-  // `puts("text {var} {}", expr)` / `print(...)`: the format is split into literal segments and holes here;
-  // the run time renders each hole (decimal, `b`, `x`, `X`, a width, `s` separators) from its words.
-  // Append the decoded bytes of the Pyrope escape at lit[i] (a backslash) to `out`, leaving `i` on its last byte:
-  // \n \t \r \\ \" \' \` \0 \xNN \u{N}. A malformed escape keeps its backslash.
-  static void decode_escape(std::string_view lit, size_t& i, std::string& out) {
-    const auto hex = [](char c) -> int {
-      return (c >= '0' && c <= '9') ? c - '0' : (c >= 'a' && c <= 'f') ? 10 + (c - 'a') : (c >= 'A' && c <= 'F') ? 10 + (c - 'A') : -1;
-    };
-    if (i + 1 >= lit.size()) {
-      out.push_back('\\');
+  void format_literal(TSNode literal, Print_site& site, std::vector<Val>& vals) {
+    if (ntype(literal) == "string_literal") {
+      const auto text = text_of(src_, literal);
+      site.segs.push_back({.text = text.substr(1, text.size() - 2)});
       return;
     }
-    const char d = lit[i + 1];
-    switch (d) {
-      case 'n' : out.push_back('\n'); ++i; return;
-      case 't' : out.push_back('\t'); ++i; return;
-      case 'r' : out.push_back('\r'); ++i; return;
-      case '0' : out.push_back('\0'); ++i; return;
-      case '\\':
-      case '"' :
-      case '\'':
-      case '`' : out.push_back(d); ++i; return;
-      case 'x' :
-        if (i + 3 < lit.size() && hex(lit[i + 2]) >= 0 && hex(lit[i + 3]) >= 0) {
-          out.push_back(static_cast<char>((hex(lit[i + 2]) << 4) | hex(lit[i + 3])));
-          i += 3;
-          return;
-        }
-        break;
-      case 'u': {
-        const auto close = (i + 2 < lit.size() && lit[i + 2] == '{') ? lit.find('}', i + 3) : std::string_view::npos;
-        uint32_t   cp    = 0;
-        bool       ok    = close != std::string_view::npos && close > i + 3 && close - (i + 3) <= 6;
-        for (size_t k = i + 3; ok && k < close; ++k) {
-          ok = hex(lit[k]) >= 0;
-          cp = cp * 16 + static_cast<uint32_t>(std::max(hex(lit[k]), 0));
-        }
-        if (!ok || cp > 0x10FFFF) {
-          break;
-        }
-        if (cp < 0x80) {
-          out.push_back(static_cast<char>(cp));
-        } else if (cp < 0x800) {
-          out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
-          out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-        } else if (cp < 0x10000) {
-          out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
-          out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-          out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-        } else {
-          out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
-          out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
-          out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-          out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-        }
-        i = close;
-        return;
-      }
-      default: break;
+    if (ntype(literal) != "interpolated_string_literal") {
+      fail("expected a string literal");
     }
-    out.push_back('\\');
-  }
-
-  // A format string -> literal segments and value holes (`{name}`, `{}` = the next positional, `{name:spec}`).
-  // `cooked`: the string is a VALUE, so escapes decode; a `puts` format keeps every escape pair as text.
-  void parse_format(const std::string& lit, bool cooked, const std::vector<Val>& pos, Print_site& site, std::vector<Val>& vals) {
-    std::string text;
-    size_t      pi = 0;
-    const auto  flush_text = [&]() {
-      if (!text.empty()) {
-        Print_site::Seg sg;
-        sg.text = text;
-        site.segs.push_back(sg);
-        text.clear();
-      }
-    };
-    for (size_t i = 0; i < lit.size(); ++i) {
-      const char c = lit[i];
-      if (c == '\\' && cooked) {
-        decode_escape(lit, i, text);
+    const auto pieces = prp_ast::string_pieces(literal, src_, [](TSNode, std::string_view gap) {
+      fail("unexpected text after interpolation expression: " + std::string(gap));
+    });
+    for (const auto& piece : pieces) {
+      if (!piece.is_hole) {
+        site.segs.push_back({.text = piece.text});
         continue;
       }
-      if (c == '\\' && i + 1 < lit.size()) {  // an escape pair is text: the old driver keeps the backslash (but `\{` `\}` print the brace)
-        const char d = lit[++i];
-        if (d == '{' || d == '}') {
-          text += d;
-        } else {
-          text += '\\';
-          text += d;
+      const auto      v    = dat(eval(piece.expr));
+      const auto&     spec = piece.spec;
+      Print_site::Seg seg;
+      seg.hole = true;
+      seg.bits = v.w;
+      if (v.is_str) {
+        seg.base = 's';
+      } else {
+        size_t si = 0;
+        while (si < spec.size() && spec[si] >= '0' && spec[si] <= '9') {
+          seg.width = seg.width * 10 + static_cast<size_t>(spec[si++] - '0');
         }
-        continue;
+        seg.base = (si < spec.size() && spec[si] != 's') ? spec[si++] : 'd';
+        seg.sep  = si < spec.size() && spec[si] == 's';
+        if (seg.base != 'd' && seg.base != 'b' && seg.base != 'x' && seg.base != 'X') {
+          fail("print format spec `" + spec + "` is not lowered yet");
+        }
       }
-      if (c == '{') {
-        if (i + 1 < lit.size() && lit[i + 1] == '{') {
-          text += '{';
-          ++i;
-          continue;
-        }
-        const auto j = lit.find('}', i);
-        if (j == std::string::npos) {
-          text += c;
-          continue;
-        }
-        std::string name = trim(lit.substr(i + 1, j - i - 1));
-        std::string spec;
-        if (const auto c2 = name.rfind(':'); c2 != std::string::npos && name.find(']', c2) == std::string::npos) {
-          spec = trim(name.substr(c2 + 1));
-          name = trim(name.substr(0, c2));
-        }
-        if (cooked && name.empty()) {  // an expression-less hole is literal text in a string value
-          text += "{}";
-          i = j;
-          continue;
-        }
-        Val v = dat(name.empty() ? (pi < pos.size() ? pos[pi++] : data(cst(2, 0), 2)) : interp_expr(name));
-        Print_site::Seg seg;
-        seg.hole = true;
-        seg.bits = v.w;
-        if (v.is_str) {
-          seg.base = 's';
-        } else {
-          size_t si = 0;
-          while (si < spec.size() && spec[si] >= '0' && spec[si] <= '9') {
-            seg.width = seg.width * 10 + static_cast<size_t>(spec[si++] - '0');
-          }
-          seg.base = (si < spec.size() && spec[si] != 's') ? spec[si++] : 'd';
-          seg.sep  = si < spec.size() && spec[si] == 's';
-          if (seg.base != 'd' && seg.base != 'b' && seg.base != 'x' && seg.base != 'X') {
-            fail("print format spec `" + spec + "` is not lowered yet");
-          }
-        }
-        flush_text();
         site.segs.push_back(seg);
         vals.push_back(v);
-        i = j;
-      } else if (c == '}') {
-        if (i + 1 < lit.size() && lit[i + 1] == '}') {
-          ++i;
-        }
-        text += '}';
-      } else {
-        text += c;
-      }
     }
-    flush_text();
   }
 
   // the hole values as whole 64-bit words, one buffer the runtime reads
@@ -2077,21 +1924,9 @@ private:
   // A string VALUE (`"v={v}"` formats now, `'raw'` is verbatim): the run time formats it and hands back the interned
   // handle, so two equal strings compare equal as integers.
   Val string_value(TSNode lit_node) {
-    std::string lit = text_of(src_, lit_node);
-    if (lit.size() < 2 || (lit.front() != '"' && lit.front() != '\'') || lit.back() != lit.front()) {
-      fail("a string value must be a quoted literal");
-    }
-    const bool raw = lit.front() == '\'';
-    lit            = lit.substr(1, lit.size() - 2);
     Print_site       site;
     std::vector<Val> vals;
-    if (raw) {
-      Print_site::Seg sg;
-      sg.text = lit;
-      site.segs.push_back(sg);
-    } else {
-      parse_format(lit, /*cooked=*/true, {}, site, vals);
-    }
+    format_literal(lit_node, site, vals);
     const auto idx = static_cast<uint32_t>(strings_.size());
     if (!scratch_) {
       strings_.push_back(site);
@@ -2112,24 +1947,11 @@ private:
     std::vector<Val> vals;
     TSNode           args = field(n, "argument");
     if (!ts_node_is_null(args) && ts_node_named_child_count(args) >= 1) {
-      std::vector<Val> pos;
-      uint32_t         ai = 0;
-      for (TSNode a : ts_node_named_children(args)) {
-        if (ai++ != 0) {
-          pos.push_back(eval(a));
-        }
-      }
       TSNode lit_node = ts_node_named_child(args, 0);
       while (ts_node_named_child_count(lit_node) == 1 && (ntype(lit_node) == "expression_item" || ntype(lit_node) == "constant")) {
         lit_node = ts_node_named_child(lit_node, 0);
       }
-      std::string lit = text_of(src_, lit_node);
-      if (lit.size() >= 2 && (lit.front() == '"' || lit.front() == '\'') && lit.back() == lit.front()) {
-        lit = lit.substr(1, lit.size() - 2);
-      } else {
-        fail("`puts`/`print` need a string literal format");
-      }
-      parse_format(lit, /*cooked=*/false, pos, site, vals);
+      format_literal(lit_node, site, vals);
     }
     const auto idx = static_cast<uint32_t>(prints_.size());
     if (!scratch_) {
@@ -2941,6 +2763,10 @@ private:
       ok  = to_i1(eval(cond));
       lhs = rhs = llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(m_.ptr_));
     }
+    emit_check(ok, std::move(site), lhs, rhs);
+  }
+
+  void emit_check(Value* ok, Assert_site site, Value* lhs, Value* rhs) {
     const auto idx = static_cast<uint32_t>(sites_.size());
     if (!scratch_) {
       sites_.push_back(site);
@@ -2982,6 +2808,7 @@ private:
   std::set<std::string>                const_stack_;
   std::map<std::string, int>           ubits_;  // `U<N>` typed locals / aliases: the width a typed `~` flips
   int                                  last_select_w_ = 0;
+  std::set<std::string>                            bool_params_;
   std::set<std::string>                str_locals_;  // locals that hold a string handle
   std::vector<Print_site>              strings_;     // the `"..{x}.."` values, formatted by the runtime
   std::map<std::string, TSNode>        refs_;  // `mut c = regref(...)`: the name of the alias -> its call node
@@ -3006,23 +2833,10 @@ private:
 // ---- object emission --------------------------------------------------------------------------------------
 bool emit_object(llvm::Module& mod, const std::string& path, std::string& err, bool dump_bitcode,
                  std::optional<uint64_t> cache_salt) {
-  livehd::sim::initialize_llvm_target();
-  llvm::Triple triple(llvm::sys::getDefaultTargetTriple());
-  mod.setTargetTriple(triple);
-  std::string         lookup;
-  const llvm::Target* target = llvm::TargetRegistry::lookupTarget(triple, lookup);
-  if (target == nullptr) {
-    err = lookup;
-    return false;
-  }
-  llvm::TargetOptions                  options;
-  std::unique_ptr<llvm::TargetMachine> machine(
-      target->createTargetMachine(triple, "generic", "", options, llvm::Reloc::PIC_, std::nullopt, llvm::CodeGenOptLevel::Default));
+  auto machine = livehd::sim::object_machine(mod, err);
   if (!machine) {
-    err = "LLVM could not create a native target machine";
     return false;
   }
-  mod.setDataLayout(machine->createDataLayout());
   {
     std::string              why;
     llvm::raw_string_ostream os(why);
@@ -3123,6 +2937,10 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
 
     std::map<std::string, TSNode> fconsts;
     for (TSNode c : ts_node_named_children(root_node)) {
+      if (ntype(c) == "import_statement") {
+        fconsts[text_of(src, field(c, "alias"))] = c;
+        continue;
+      }
       TSNode decl = ntype(c) == "assignment" ? field(c, "decl") : TSNode{};
       TSNode kind = ts_node_is_null(decl) ? TSNode{} : field(decl, "storage");
       if (!ts_node_is_null(kind) && ntype(kind) == "const_decl") {
@@ -3205,16 +3023,24 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
     }
 
     std::set<std::string> used_stems;
-    std::string           j = std::format("{{\"schema_version\":2,\"kind\":\"sim_tb\",\"file\":{},\"tests\":[", json_str(file));
+    std::string           j = std::format("{{\"schema_version\":3,\"kind\":\"sim_tb\",\"file\":{},\"tests\":[", json_str(file));
     for (size_t t = 0; t < results.size(); ++t) {
       const auto& r = results[t];
       j += std::format("{}{{\"name\":{},\"symbol\":{},\"state_words\":{},\"params\":[", t ? "," : "", json_str(tests[t].name), json_str(r.symbol),
                        r.state_words);
       for (size_t p = 0; p < r.params.size(); ++p) {
-        j += std::format("{}{{\"name\":{},\"type\":{},\"required\":{},\"default\":{},\"string\":{},\"dynamic\":{}}}", p ? "," : "",
-                         json_str(r.params[p].name), json_str(r.params[p].type), r.params[p].required ? "true" : "false",
-                         json_str(r.params[p].required ? std::string{} : text_of(src, r.params[p].default_node)),
-                         r.params[p].is_string ? "true" : "false", r.params[p].dynamic ? "true" : "false");
+        j += std::format(
+            "{}{{\"name\":{},\"type\":{},\"required\":{},\"default\":{},\"string\":{},\"dynamic\":{},\"bits\":{},\"string_"
+            "default\":{}}}",
+            p ? "," : "",
+            json_str(r.params[p].name),
+            json_str(r.params[p].type),
+            r.params[p].required ? "true" : "false",
+            json_str(r.params[p].required ? std::string{} : text_of(src, r.params[p].default_node)),
+            r.params[p].is_string ? "true" : "false",
+            r.params[p].dynamic ? "true" : "false",
+            r.params[p].width,
+            r.params[p].string_default ? json_str(*r.params[p].string_default) : "null");
       }
       j += std::format("],\"frame_words\":{},\"frame\":[", r.frame_words);
       for (size_t f = 0; f < r.frame.size(); ++f) {

@@ -88,29 +88,6 @@ std::string slurp_file(std::string_view filename) {
 // below the overflow threshold.
 static constexpr int kMaxParseNesting = 4000;
 
-// `s[i]`/`s[i+1]` is the `/*` opening a Pyrope block comment. Block comments
-// NEST (`/* a /* b */ c */` is one comment, matching the prpparse lexer and the
-// tree-sitter scanner), so every raw-text comment skipper in this file must use
-// this instead of stopping at the first `*/`. Returns the offset just past the
-// matching `*/`, or s.size() for an unterminated comment.
-static size_t skip_nested_block_comment(std::string_view s, size_t i) {
-  int depth = 0;
-  while (i + 1 < s.size()) {
-    if (s[i] == '/' && s[i + 1] == '*') {
-      ++depth;
-      i += 2;
-    } else if (s[i] == '*' && s[i + 1] == '/') {
-      i += 2;
-      if (--depth == 0) {
-        return i;
-      }
-    } else {
-      ++i;
-    }
-  }
-  return s.size();
-}
-
 // Approximate the peak recursive-descent parser depth `src` would induce, so we
 // can reject stack-overflowing input before it reaches the parser. Two unbounded
 // recursion drivers exist: bracket nesting (`(`/`[`/`{` -> parse_paren etc.) and
@@ -2420,7 +2397,7 @@ std::string_view Prp2lnast::scan_overflow_in_gap(uint32_t prev_end, uint32_t gap
         ++k;  // line comment to EOL
       }
     } else if (k + 1 < g.size() && g[k] == '/' && g[k + 1] == '*') {
-      k = skip_nested_block_comment(g, k);  // comments nest
+      k = prp_ast::skip_nested_block_comment(g, k);  // comments nest
       stripped.push_back(' ');              // a comment separates tokens
     } else {
       stripped.push_back(g[k]);
@@ -8257,10 +8234,6 @@ void Prp2lnast::process_type_statement(TSNode n) {
   }
 }
 
-// Defined with the interpolated-string lowering below; needed early by the
-// import-argument validation.
-static std::string unescape_cooked_string(std::string_view raw);
-
 // The `import` builtin (the LiveHD docs).
 // Returns the unquoted body when `n` is a plain comptime string literal
 // expression — `'…'` (raw) or `"…"` with no `{…}` interpolation — else nullopt.
@@ -8751,235 +8724,14 @@ Lnast_node Prp2lnast::expr_to_node(TSNode n) {
   return constant_text_to_node(trim(get_text(n)));
 }
 
-// Decode a double-quoted string's literal text (docs 02-basics "Strings"): the
-// escapes \n \t \r \\ \" \' \` \0 \xNN \u{N}, and a DOUBLED brace is a
-// literal brace (`{{` is `{`, `}}` is `}`; `\{` is not an escape). The lexer
-// already rejected every other `\c` and a lone `}`, so a malformed sequence
-// here is kept verbatim. Single-quoted (raw) strings never reach here.
-static std::string unescape_cooked_string(std::string_view raw) {
-  auto hex_digit = [](char c) -> int {
-    if (c >= '0' && c <= '9') {
-      return c - '0';
-    }
-    if (c >= 'a' && c <= 'f') {
-      return 10 + (c - 'a');
-    }
-    if (c >= 'A' && c <= 'F') {
-      return 10 + (c - 'A');
-    }
-    return -1;
-  };
-  std::string out;
-  out.reserve(raw.size());
-  for (size_t i = 0; i < raw.size(); ++i) {
-    char c = raw[i];
-    if ((c == '{' || c == '}') && i + 1 < raw.size() && raw[i + 1] == c) {
-      out.push_back(c);  // `{{` / `}}`: one literal brace
-      ++i;
-      continue;
-    }
-    if (c != '\\' || i + 1 >= raw.size()) {
-      out.push_back(c);
-      continue;
-    }
-    char next = raw[i + 1];
-    switch (next) {
-      case 'n':
-        out.push_back('\n');
-        ++i;
-        break;
-      case 't':
-        out.push_back('\t');
-        ++i;
-        break;
-      case 'r':
-        out.push_back('\r');
-        ++i;
-        break;
-      case '0':
-        out.push_back('\0');
-        ++i;
-        break;
-      case '\\':
-      case '"':
-      case '\'':
-      case '`':
-        out.push_back(next);
-        ++i;
-        break;
-      case 'x': {
-        int hi = (i + 2 < raw.size()) ? hex_digit(raw[i + 2]) : -1;
-        int lo = (i + 3 < raw.size()) ? hex_digit(raw[i + 3]) : -1;
-        if (hi >= 0 && lo >= 0) {
-          out.push_back(static_cast<char>((hi << 4) | lo));
-          i += 3;
-        } else {
-          out.push_back(c);  // malformed \x — keep verbatim
-        }
-        break;
-      }
-      case 'u': {
-        // `\u{N}`: 1..6 hex digits, UTF-8 encoded (the backtick-name decoder
-        // in str_tools reads the identical set).
-        const auto close = (i + 2 < raw.size() && raw[i + 2] == '{') ? raw.find('}', i + 3) : std::string_view::npos;
-        uint32_t   cp    = 0;
-        bool       ok    = close != std::string_view::npos && close > i + 3 && close - (i + 3) <= 6;
-        for (size_t k = i + 3; ok && k < close; ++k) {
-          const int h = hex_digit(raw[k]);
-          ok          = h >= 0;
-          cp          = cp * 16 + static_cast<uint32_t>(std::max(h, 0));
-        }
-        if (!ok || cp > 0x10FFFF) {
-          out.push_back(c);  // malformed \u — keep verbatim
-          break;
-        }
-        if (cp < 0x80) {
-          out.push_back(static_cast<char>(cp));
-        } else if (cp < 0x800) {
-          out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
-          out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-        } else if (cp < 0x10000) {
-          out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
-          out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-          out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-        } else {
-          out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
-          out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
-          out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-          out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-        }
-        i = close;
-        break;
-      }
-      default:
-        out.push_back(c);  // unknown escape (the lexer rejects it) — keep backslash
-        break;
-    }
-  }
-  return out;
-}
-
-// `s` is code (a hole's text): drop `//` line comments (to, not including, the
-// newline) and NESTING `/* */` block comments, keep everything else verbatim.
-// Only used on hole text outside the expression (the format-spec gap, an
-// expression-less hole), which holds no strings or backtick names.
-static std::string strip_code_comments(std::string_view s) {
-  std::string out;
-  out.reserve(s.size());
-  for (size_t k = 0; k < s.size();) {
-    if (k + 1 < s.size() && s[k] == '/' && s[k + 1] == '/') {
-      while (k < s.size() && s[k] != '\n') {
-        ++k;
-      }
-    } else if (k + 1 < s.size() && s[k] == '/' && s[k + 1] == '*') {
-      k = skip_nested_block_comment(s, k);
-    } else {
-      out.push_back(s[k]);
-      ++k;
-    }
-  }
-  return out;
-}
-
-std::vector<Prp2lnast::Istring_piece> Prp2lnast::istring_pieces(TSNode n) const {
-  std::vector<Istring_piece> pieces;
-  const uint32_t             body_start = ts_node_start_byte(n) + 1;
-  const uint32_t             body_end   = ts_node_end_byte(n) > body_start ? ts_node_end_byte(n) - 1 : body_start;
-
-  std::vector<TSNode> exprs;  // the holes' expressions, in source order
-  for (TSNode c : ts_node_named_children(n)) {
-    if (std::string_view(ts_node_type(c)) != "comment") {
-      exprs.push_back(c);
-    }
-  }
-  size_t next_expr = 0;
-
-  std::string lit;                     // decoded literal text not yet emitted
-  uint32_t    seg       = body_start;  // start of the raw literal run not yet decoded
-  auto        flush_raw = [&](uint32_t upto) {
-    if (upto > seg) {
-      lit += unescape_cooked_string(text_between(seg, upto));
-    }
-  };
-
-  // Walk the body exactly like prpparse's Parser::parse_istring (the parser
-  // that produced the hole expressions): an escape pair is text, `{{` is a
-  // literal brace pair, and every other `{` opens a hole whose end the LEXER
-  // finds (comments, nested strings and backtick names are skipped there).
-  const prpparse::Lexer lex(*prp_buf);
-  uint32_t              i = body_start;
-  while (i < body_end) {
-    const char c = prp_file[i];
-    if (c == '\\') {
-      // `\u{N}` carries its own braces: skip them whole (they open no hole).
-      if (i + 2 < body_end && prp_file[i + 1] == 'u' && prp_file[i + 2] == '{') {
-        uint32_t k = i + 3;
-        while (k < body_end && prp_file[k] != '}') {
-          ++k;
-        }
-        i = k < body_end ? k + 1 : body_end;
-        continue;
-      }
-      i += 2;
-      continue;
-    }
-    if (c != '{') {
-      ++i;
-      continue;
-    }
-    if (i + 1 < body_end && prp_file[i + 1] == '{') {
-      i += 2;
-      continue;
-    }
-    const uint32_t hole_end = lex.istring_hole_end(i);  // past the matching '}'
-    const uint32_t close    = (hole_end > i + 1 && hole_end <= body_end) ? hole_end - 1 : body_end;
-    while (next_expr < exprs.size() && ts_node_start_byte(exprs[next_expr]) <= i) {
-      ++next_expr;  // defensive: an expression outside every hole
-    }
-    const bool has_expr = next_expr < exprs.size() && ts_node_start_byte(exprs[next_expr]) < close;
-    flush_raw(i);
-    if (!has_expr) {
-      // No expression (`{}`, `{ }`, `{/* c */}`): the hole is literal text, and
-      // a comment in it is a comment (removed), exactly like an empty hole.
-      lit += "{";
-      lit += strip_code_comments(text_between(i + 1, close));
-      if (close < body_end) {
-        lit += "}";
-      }
-    } else {
-      TSNode expr = exprs[next_expr++];
-      if (!lit.empty()) {
-        pieces.push_back(Istring_piece{.text = std::move(lit)});
-        lit.clear();
-      }
-      // Between the expression and the hole's `}`: only an optional `:spec`,
-      // whitespace and comments (a `:` or `}` inside a comment is neither a
-      // spec nor the hole's end).
-      const std::string gap_s = strip_code_comments(text_between(ts_node_end_byte(expr), close));
-      auto              gap   = trim(gap_s);
-      std::string       spec;
-      if (!gap.empty() && gap.front() == ':') {
-        spec = std::string(trim(gap.substr(1)));
-      } else if (!gap.empty()) {
-        report_error(expr,
-                     "bad-interpolation",
-                     "syntax",
-                     std::format("unexpected `{}` after the expression in a string interpolation hole", gap),
-                     "a hole holds one expression and an optional `:format` spec: \"{expr}\" or \"{expr:b}\"");
-      }
-      while (next_expr < exprs.size() && ts_node_start_byte(exprs[next_expr]) < close) {
-        ++next_expr;  // defensive: one expression per hole
-      }
-      pieces.push_back(Istring_piece{.expr = expr, .spec = std::move(spec), .is_hole = true});
-    }
-    i   = close < body_end ? close + 1 : body_end;
-    seg = i;
-  }
-  flush_raw(body_end);
-  if (!lit.empty() || pieces.empty()) {
-    pieces.push_back(Istring_piece{.text = std::move(lit)});
-  }
-  return pieces;
+std::vector<prp_ast::Istring_piece> Prp2lnast::istring_pieces(TSNode n) const {
+  return prp_ast::string_pieces(n, prp_file, [&](TSNode expr, std::string_view gap) {
+    report_error(expr,
+                 "bad-interpolation",
+                 "syntax",
+                 std::format("unexpected `{}` after the expression in a string interpolation hole", gap),
+                 "a hole holds one expression and an optional `:format` spec: \"{expr}\" or \"{expr:b}\"");
+  });
 }
 
 Lnast_node Prp2lnast::interpolated_string_to_node(TSNode n) {

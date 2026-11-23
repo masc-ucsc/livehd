@@ -5,6 +5,8 @@
 #include <format>
 
 #include "decl_facts.hpp"
+#include "literal_kind.hpp"
+#include "ssa_demote.hpp"
 #include "diag.hpp"
 #include "hlop/dlop.hpp"
 #include "lnast.hpp"
@@ -15,17 +17,11 @@
 // depends_on {"attributes"} so the resolver runs attributes first.
 static upass::uPass_plugin plugin_typecheck("typecheck", upass::uPass_wrapper<uPass_typecheck>::get_upass, {"attributes"});
 
-namespace {
-// `x___ssa_2` is a VERSION of the user variable `x` (upass.ssa versions every
-// re-assigned `mut`). A read-modify-write reads one version and writes the
-// next, so its two ends only ever agree on the base name.
-std::string_view ssa_base(std::string_view name) {
-  if (const auto pos = name.find("___ssa_"); pos != std::string_view::npos) {
-    return name.substr(0, pos);
-  }
-  return name;
+std::string_view uPass_typecheck::ssa_base_name(std::string_view name) const {
+  return upass::ssa_base_name(lm ? lm->get_lnast().get() : nullptr, name);
 }
 
+namespace {
 // The bool<->integer hint (upass::kBoolIntCastHint) after an operator's lead-in.
 std::string cast_hint() { return std::format("no implicit conversion — cast explicitly: {}", upass::kBoolIntCastHint); }
 }  // namespace
@@ -34,31 +30,7 @@ const char* uPass_typecheck::kind_name(Kind k) { return upass::op_kind::kind_nam
 
 int uPass_typecheck::eq_class(Kind k) { return upass::op_kind::eq_class(k); }
 
-uPass_typecheck::Kind uPass_typecheck::seed_kind_from_const(std::string_view t) {
-  // optable.md §Inference: literal text → kind. (The runner's operand
-  // resolution applies the same rules when minting const-operand bundles;
-  // this stays for the nullary control-flow checks that read raw children.)
-  if (t == "nil") {
-    return Kind::nil;
-  }
-  if (t == "true" || t == "false") {
-    return Kind::boolean;
-  }
-  // A single unknown bit `0sb?`/`0ub?` is TYPELESS (could be bool or int) → the
-  // unify-with-anything wildcard. `0sb??` (≥2 bits) is an int (handled below).
-  if (t == "0sb?" || t == "0ub?") {
-    return Kind::unknown;
-  }
-  if (!t.empty() && t.front() == '"') {
-    return Kind::string;  // double-quoted string const. (Single-quoted `'a'` is
-                          // a CHARACTER literal = integer — handled below.)
-  }
-  auto v = Dlop::from_pyrope(t);
-  if (v && v->is_integer()) {
-    return Kind::integer;  // includes multi-bit unknown literals like `0sb??`
-  }
-  return Kind::unknown;
-}
+uPass_typecheck::Kind uPass_typecheck::seed_kind_from_const(std::string_view t) { return upass::literal_kind(t); }
 
 uPass_typecheck::Kind uPass_typecheck::kind_of_bundle(const Bundle& b) { return upass::decl_facts::bundle_kind(b); }
 
@@ -455,7 +427,7 @@ upass::Vote uPass_typecheck::process_store(std::string_view dst_name, Bundle& ds
     // An OUTPUT port's declared kind rides io_meta, never its bundle, yet it is
     // a typed destination like a typed local: a `u1` output takes no bool and
     // a `bool` output no bit.
-    cur = declared_kind(ssa_base(dst_name));
+    cur = declared_kind(ssa_base_name(dst_name));
   }
   // "an unset/nil scalar destination does not infer a new tuple shape
   // from a tuple RHS": a never-typed dst whose current VALUE is the nil it
@@ -510,7 +482,7 @@ upass::Vote uPass_typecheck::process_store(std::string_view dst_name, Bundle& ds
     if (cur == Kind::tuple && rhs == Kind::integer && !dst.has_named_top() && !dst.get_attr("__elem_max").is_invalid()
         && !src.front().name.empty()) {
       const auto it = bitview_tmp_.find(src.front().name);
-      if (it != bitview_tmp_.end() && it->second == ssa_base(dst_name)) {
+      if (it != bitview_tmp_.end() && it->second == ssa_base_name(dst_name)) {
         return Vote::keep;
       }
     }
@@ -736,7 +708,7 @@ std::string_view uPass_typecheck::bitview_root_of(const upass::Operand& o) const
   if (!o.bundle || o.bundle->has_named_top() || o.bundle->get_attr("__elem_max").is_invalid()) {
     return {};
   }
-  return ssa_base(o.name);
+  return ssa_base_name(o.name);
 }
 
 // ── aggregates: passthrough kinds, no homogeneity check ─────────────────────

@@ -35,8 +35,11 @@ pub comb top(x:U4) -> (o:U4) {
 EOF
 
 cat >"$W/imp_tb.prp" <<'EOF'
-const r = import("imp_p1.top")
-const t = import("imp_p2.top")
+import 'imp_p1.top' as imported_r
+const r = imported_r
+const imported_t = import("imp_p2.top")
+const middle = imported_t
+const t = middle
 
 pub comb top(x:U4) -> (o:U4) {
   o = x ^ 2

@@ -20,14 +20,16 @@
 // takes its driver's width, so a top `n:Nib` / `m:Nib` alone cannot tell a
 // 1-bit port from a 4-bit one (a fix of `pk.Byte` alone still REFUTES here:
 // "diff k(ref=1 impl=15) @ c=1").
-const pk  = import("imported_alias_port_width/types")
+const imported = import("imported_alias_port_width/types")
+const intermediate = imported
+const pk = intermediate
 const Nib = import("imported_alias_port_width/types.Nib")
 
 mod nib_pass(x:Nib) -> (r:Nib@[0]) {
   r = x
 }
 
-pub mod top(a:pk.Byte, b:pk.Byte, c:S4) -> (y:pk.Byte@[], m:Nib@[], k:S4@[]) {
+pub mod top(a:imported.Byte, b:pk.Byte, c:S4) -> (y:pk.Byte@[], m:Nib@[], k:S4@[]) {
   y = a ^ b
   m = c
   k = nib_pass(x=c)

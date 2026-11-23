@@ -529,39 +529,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
   const auto import_text_of = [&](const Lnast& ln, std::string_view binding) -> std::optional<std::string> {
     auto [cached, fresh] = import_bindings.try_emplace(&ln);
     if (fresh) {
-      absl::flat_hash_map<std::string_view, std::string_view>    imports;  // call dst -> quoted unit text
-      std::vector<std::pair<std::string_view, std::string_view>> stores;   // binding <- call dst
-      if (const auto stmts = first_stmts(ln); !stmts.is_invalid()) {
-        for (auto stmt : ln.children(stmts)) {
-          const auto dst = ln.get_first_child(stmt);
-          const auto arg = dst.is_invalid() ? dst : ln.get_sibling_next(dst);
-          if (arg.is_invalid() || !Lnast_ntype::is_ref(ln.get_type(dst))) {
-            continue;
-          }
-          if (Lnast_ntype::is_func_call(ln.get_type(stmt))) {
-            const auto txt = ln.get_sibling_next(arg);
-            if (Lnast_ntype::is_const(ln.get_type(arg)) && ln.get_name(arg) == "import" && !txt.is_invalid()) {
-              imports.insert_or_assign(ln.get_name(dst), ln.get_name(txt));
-            }
-          } else if (Lnast_ntype::is_store(ln.get_type(stmt)) && Lnast_ntype::is_ref(ln.get_type(arg))) {
-            stores.emplace_back(ln.get_name(dst), ln.get_name(arg));
-          }
-        }
-      }
-      const auto unquote = [](std::string_view text) {
-        if (text.size() >= 2 && (text.front() == '\'' || text.front() == '"') && text.back() == text.front()) {
-          text = text.substr(1, text.size() - 2);
-        }
-        return std::string(text);
-      };
-      for (const auto& [dst, text] : imports) {
-        cached->second.try_emplace(std::string(dst), unquote(text));
-      }
-      for (const auto& [bind, tmp] : stores) {
-        if (const auto it = imports.find(tmp); it != imports.end() && !imports.contains(bind)) {
-          cached->second.insert_or_assign(std::string(bind), unquote(it->second));
-        }
-      }
+      cached->second = ln.top_level_import_bindings();
     }
     const auto it = cached->second.find(binding);
     return it == cached->second.end() ? std::nullopt : std::optional<std::string>(it->second);

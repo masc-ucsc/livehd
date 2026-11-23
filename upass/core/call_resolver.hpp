@@ -23,6 +23,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "hlop/dlop.hpp"
 #include "lnast.hpp"
+#include "lexical_callee.hpp"
 #include "lnast_manager.hpp"
 #include "str_tools.hpp"
 #include "symbol_table.hpp"
@@ -64,72 +65,27 @@ std::optional<std::vector<Call_actual>> collect_call_actuals(
     const absl::flat_hash_map<std::string, std::shared_ptr<Lnast>>&   function_registry,
     const std::function<std::optional<Dlop>()>& resolve_scalar_at_cursor);
 
-
-// Callee NAME resolution: the exact-name module plus any unique
-// "<module>.<name>" body; a candidate with a real comb signature (non-empty
-// io) wins over an empty-io top module of the same name (a file's top can
-// share its comb's name — the extracted body must win or the inline bails).
-// nullptr = not found / ambiguous suffix. Templated over the registry map; BOTH
-// callers key a case-sensitive map, so the exact `.find()` matches the full
-// name verbatim; the suffix scan uses str_tools::ends_with to match
-// `<module>.<name>` case-sensitively.
 template <typename Registry>
-std::shared_ptr<Lnast> lookup_callee(const Registry& function_registry, std::string_view name,
-                                     std::string_view caller_unit = {}) {
-  // Prefer a candidate carrying a real comb signature (non-empty io).
-  auto has_sig = [](const std::shared_ptr<Lnast>& l) { return l && !l->io_meta().empty(); };
-
-  std::shared_ptr<Lnast> exact;
-  if (auto it = function_registry.find(name); it != function_registry.end()) {  // heterogeneous string_view lookup: no std::string alloc
-    exact = it->second;
-  }
-  // Fast path: an exact name match WITH a signature always wins (see the
-  // has_sig(exact) return below), so skip the O(registry) suffix scan entirely
-  // for it. This is the overwhelmingly common case — a plain by-name comb call —
-  // and this resolver runs once per func_call from the inliner, tolg, and
-  // timecheck, so the scan made callee resolution O(calls * registry).
-  if (has_sig(exact)) {
-    return exact;
-  }
-
-  // Lexical resolution: streamed nested helpers register as
-  // "<file>.<outer>.<name>", so a bare call from "<file>.<outer>" must bind
-  // its OWN helper even when a sibling scope defines a same-named one (two
-  // "…​.inner" entries made the suffix scan below ambiguous and the call
-  // failed as undefined). Walk the caller's prefix chain innermost-first.
-  if (!caller_unit.empty()) {
-    std::string scoped;
-    for (std::string_view unit = caller_unit;;) {
-      scoped.assign(unit);
-      scoped.push_back('.');
-      scoped.append(name);
-      if (auto it = function_registry.find(scoped); it != function_registry.end() && has_sig(it->second)) {
-        return it->second;
-      }
-      const auto dot = unit.rfind('.');
-      if (dot == std::string_view::npos) {
-        break;
-      }
-      unit = unit.substr(0, dot);
-    }
-  }
-
-  const std::string      suffix = "." + std::string(name);
-  std::shared_ptr<Lnast> suffix_body;
-  int                    suffix_matches = 0;
-  for (const auto& [k, v] : function_registry) {
-    if (k.size() > suffix.size() && str_tools::ends_with(k, suffix)) {
-      suffix_body = v;
-      ++suffix_matches;
-    }
-  }
-  if (suffix_matches == 1 && has_sig(suffix_body)) {
-    return suffix_body;
-  }
-  if (exact) {
-    return exact;  // empty-io exact (e.g. void marker) — let try_inline decide
-  }
-  return suffix_matches == 1 ? suffix_body : nullptr;
+std::shared_ptr<Lnast> lookup_callee(const Registry& registry, std::string_view name, std::string_view caller_unit = {}) {
+  return upass::resolve_lexical_callee(
+      name,
+      caller_unit,
+      [&](std::string_view key) -> std::shared_ptr<Lnast> {
+        auto it = registry.find(key);
+        return it == registry.end() ? nullptr : it->second;
+      },
+      [&](std::string_view suffix) -> std::shared_ptr<Lnast> {
+        std::shared_ptr<Lnast> match;
+        for (const auto& [key, body] : registry) {
+          if (key.size() > suffix.size() && key.ends_with(suffix)) {
+            if (match) {
+              return nullptr;
+            }
+            match = body;
+          }
+        }
+        return match;
+      });
 }
 
 // `import("…")` resolution: `ln:` url → lambda tree-name string bind,
