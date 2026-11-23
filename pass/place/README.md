@@ -87,6 +87,8 @@ python3 tools/lhd_gui.py --workdir W history query=CSR
 python3 tools/lhd_gui.py --workdir W place-design
 ```
 
+With native clock synthesis (`synth.place.pcrs.clock=true`), `tools/lhd_gui.py --workdir W clock` reports the built tree and the page's **clock tree** layer draws it with its estimated arrivals, slews and local skew. See the [PCRS clock notes](pcrs/README.md#viewing-the-tree).
+
 A candidate can move a shared terminal with `{"io":{"net":17,"xy":[1200,2400]}}`. The control and each alternative advance the same incident homes sequentially. An unrelated worker stays frozen.
 
 Moves use die DBU. Add `"fix":"x"` to hold the requested axis. A trial reuses the selected macro or final handoff. It runs each candidate and an unchanged control for the same iteration budget. `scope=assembled` scores physical pins across the exported design. `scope=local` includes virtual cut terminals. Older exports without scoring summaries support local scoring. Re-export to obtain assembled scores. A preexisting final result without a forkable handoff needs one local final rerun before a final-stage trial. `keep` promotes the measured files at their parent revision. `undo` restores that revision. Search results, annotations and frame references persist under the manifest's `.chunk-work` directory. `discard` closes a trial and retains its measured frames for `replay`.
@@ -795,6 +797,42 @@ a number or `[x, y]`, and its `"halo"` also accepts `[x, y]`.
 
 After track alignment, the default macro legalizer checks whether a movable macro's halo leaves less than one usable row (top/bottom) or site (left/right) opposite a placed perimeter signal pin. It tries an inward move that preserves the routing phase, sizing local buffer space from the number of pins facing the macro. It skips blocked moves and keeps fixed macros and the selected power-grid alignment. This screens a common source of post-CTS placement failures; detailed placement and routing still require downstream checks.
 
+#### Native power grid
+
+A full placement with `synth.place.pcrs.clock=true` selects the power-grid strategy
+from the input LEFs when a registered power-grid profile matches. With other clock
+flows, `--set synth.place.pg=auto` requests the native grid. `synth.place.pg=off`
+keeps grid construction external. The native grid includes handoff taps and uses the
+profile's supply layers, connections and strap dimensions. Setting
+`synth.place.handoff.taps=false` suppresses automatic selection with native CTS.
+
+| Technology | Core strap layers | Default pitch on each layer (µm) |
+| --- | --- | --- |
+| ASAP7 | M5, M6 | 5.40, 5.40 |
+| Nangate45 | metal4, metal7 | 56.00, 30.00 |
+| SKY130HD | met4, met5 | 27.14, 27.20 |
+
+Pass an ordinary metadata file as a positional argument to tune the grid. This ASAP7
+example changes the M5 pitch to 4.32 µm for one design.
+
+```json
+[{
+  "class": "livehd.physical.power_grid",
+  "schema_version": 1,
+  "id": "core-supply",
+  "design": "lfsr_prbs_gen",
+  "stripes": {"M5": {"pitch": 4.32}}
+}]
+```
+
+A matching record enables grid generation when the command leaves `synth.place.pg`
+unspecified. At most one record may match the selected design. Within `stripes`,
+each key names a core strap layer from that technology's strategy. `width`, `spacing`,
+`pitch` and `offset` are optional dimensions in micrometres. Each omitted dimension
+keeps its technology value. The same strategy sets macro clearance, routing obstacles
+and the exported metal. `--emit-dir def:DIR` writes the supply metal in `out.def`
+and the effective dimensions, supply pins and wire lengths in `power_grid.json`.
+
 #### Power-grid aware macro spacing (`synth.place.macro.pdn`)
 
 `synth.place.macro.pdn` (default `auto`) raises the macro channel per axis to
@@ -1106,7 +1144,7 @@ A centroid is a point that pulls its members during placement. It is a record of
 - `position` is `free` (the default: the point is wherever the members are), `at` (pulled to coordinates) or `relative` (to another top-level centroid, at `dx_um`, `dy_um`). A nested centroid takes its position from its parent's layout.
 - `layout` is `floating` (the default: members pulled to the point), `row`, `column` or `array` (`columns`): the members are pulled to slots around the point, in member order, `gap_x_um` and `gap_y_um` apart, before final legalization, which may snap them to rows and sites. A nested centroid is a block in its parent's layout and keeps its own shape.
 - `strength` is the pull in inverse microns (the unit of `synth.place.cohesion`); a record without one takes `synth.place.centroid_strength` (default 0.1). Zero turns the centroid off.
-- `clock` carries the clock decisions for members that are clock sinks (leaf driver master, wanted arrival in ps); a field set on a centroid that contains others applies to all of them, the nearest setting winning. PCRS does not read them yet (todo 2p-pcrs, X1).
+- `clock` carries the clock decisions for members that are clock sinks: `arrival_ps` (the wanted arrival of their clock pins, as `synth.place.pcrs.arrival_targets` gives it; it needs `synth.place.pcrs.balance=true`) and `drive_steps` (the absolute drive step of the leaf that holds them, as `leaf_schedule` gives it). `drive` (a leaf driver master) is stored but not read: the planner's step depends on the load. A field set on a centroid that contains others applies to all of them, the nearest setting winning, and an explicit file input wins over a centroid. PCRS reads them both when it groups the flops during placement and when it builds the tree.
 - PCRS regenerates leaf groups around the instances owned by authored centroids. A clock gate shared by several leaves contributes its area once across those groups. Use `centroid_edit op=adopt` to save a generated leaf as an authored record. Color cohesion uses a separate set of generated groups.
 
 The final placement compiles the set to the native placer's cohesion groups: a layout is the negated slots as member offsets, a nested centroid adds the parent's group over the same members, a relative position adds one group over both blocks, a position `at` is the group's target, and the hint report (`livehd.placement.hint_results`) lists per centroid the members bound, those that did not resolve, the strength, whether it compiled and why not, and the largest distance of a member from its layout slot. The GUI and the agent socket edit the same records (`centroids`, `centroid_edit`), and dragging a centroid in the page writes its `at` position. Centroids are compiled in plain placement; in the macro stages (`synth.place.macro=h2d`, the floorplan) hint scopes are not bound and centroid records are not read.
@@ -1558,6 +1596,14 @@ netlist handed back to OpenROAD. The native API carries an explicit
 GP buffer-repair traces include `rejection_reasons` so timing rejection can be
 distinguished from absence of legal placement sites. Counts of inserted buffers
 alone do not show whether repeaters can occupy SRAM channels.
+
+A repair trial is kept when it does not lose setup WNS or TNS, hold WNS, delay or electrical margin, and gains something.
+Placement-time hold is an estimate before the clock tree, and the violations already there are repaired later, so one
+exception applies: when hold was already violating and setup is failing, a trial may lose up to 50 ps of hold slack if its
+setup WNS gain is at least four times the loss and total negative slack does not worsen. A hold that was clean and turns
+violating is still refused. Each trial records the hold WNS it measured (`hold_wns`), so a `hold_wns` refusal shows what it
+cost. Before this rule, a trial that took litepci from -7.3 ns to -0.2 ns of setup was refused for a hold loss in the noise,
+and whether that happened depended on the placement to the picosecond.
 
 ### Partial-size memory starts
 

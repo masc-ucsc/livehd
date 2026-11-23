@@ -112,7 +112,7 @@ void field(A& a, Options& o) {
       centroid_align_start, centroid_align_full, centroid_parent_weight, centroid_parent_outside, num_threads, seed,               \
       target_density, stop_overflow, min_iterations, post_density_factor, convergence_tolerance, post_density_patience,            \
       initial_density_weight, density_weight_seed, hold_overflow, fillers_in_whitespace, max_step, filler_width, filler_max_count, \
-      filler_area_fraction, filler_cell_space, filler_macro_fraction, filler_cell_scale, filler_bin_fraction, cohesion_weight,     \
+      filler_area_fraction, filler_cell_space, filler_macro_fraction, filler_cell_scale, filler_bin_fraction, cohesion_weight, cohesion_auxiliary, \
       order_weight, order_growth, schedule_iterations, route, route_external, route_external_interval, route_physical_snapshot,    \
       route_initialize, routability, route_capacity_h, route_capacity_v, route_cell_pin_capacity, density_upper_bound, add_fillers, \
       legalize,                                                                                                                    \

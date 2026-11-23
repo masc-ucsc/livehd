@@ -156,6 +156,14 @@ TEST(PrectsNetworks, DataThatAlsoClocksOneStateCellStaysData) {
   EXPECT_EQ(excluded.ignored, (std::vector<bool>{false, false, false, true, true, false, false}));
   EXPECT_FALSE(excluded.pins.contains("b0:o"));
   EXPECT_EQ(excluded.clock_nets, (std::vector<bool>{false, false, false, true, true, false, false}));
+  // The nets the closure reached and the data rule then took back are listed: their clock pins are in no tree or report.
+  std::set<std::string> demoted;
+  for (const auto& [name, pins] : excluded.demoted_clock_nets) {
+    demoted.insert(name);
+    EXPECT_GT(pins, 0u);
+  }
+  EXPECT_FALSE(demoted.contains("clk_leaf"));
+  EXPECT_FALSE(demoted.empty());
   EXPECT_FALSE(excluded.pins.contains("lat:c"));
   EXPECT_TRUE(excluded.pins.contains("f0:c"));
   // STA flags every state cell's clock pin: that is the same structural evidence, and changes nothing.

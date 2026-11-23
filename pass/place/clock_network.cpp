@@ -26,6 +26,8 @@
 #include "pass/place/pcrs/clock_tree.hpp"
 #include "pass/timing/physical_rank.hpp"
 #include "pass/timing/sdc.hpp"
+#include "gui/gui_session.hpp"
+#include "placement_hints.hpp"
 #include "placement_technology.hpp"
 #include "rapidjson/ostreamwrapper.h"
 #include "rapidjson/writer.h"
@@ -57,6 +59,7 @@ struct Pending_clock_report {
 struct Clock_distribution {
   Name                                source_master;
   bool                                gate_leaf = false;
+  std::string                         failure;  // why this domain has no tree (infeasible); its sinks stay on the original net
   std::optional<size_t>               merged_into;
   std::string                         net;
   size_t                              net_index   = 0;
@@ -733,10 +736,63 @@ std::set<std::string> build_clock_tree(Result& placed, const Options& options, c
   return build_clock_handoff(placed, options, macro_libraries, sdc_text, std::move(timer)).buffers;
 }
 
-static Clock_handoff build_clock_handoff_impl(Result& placed, const Options& options,
+// The clock decisions of the authored centroids (placement hints) joined with the explicit inputs of the options: a wanted
+// arrival or a leaf drive step on a centroid is the same decision as one in arrival_targets or leaf_schedule.
+static std::optional<Options> options_with_centroid_clock(const Options& options, Result& placed) {
+  std::shared_ptr<const metadata::Bundle> bundle = options.gui ? std::make_shared<const metadata::Bundle>(options.gui->intent())
+                                                               : options.metadata;
+  if (!bundle || !placed.graph) {
+    return std::nullopt;
+  }
+  const auto& tech = options.technology();
+  const auto& fp   = placed.floorplan;
+  bool        any  = false;
+  for (const auto* record : bundle->select("livehd.placement.hints", fp.design)) {
+    any = any || record->IsObject();
+  }
+  if (!any) {
+    return std::nullopt;
+  }
+  const auto scopes = placement_hint_scopes(*placed.graph, tech.lef);
+  Placement_hints hints(bundle, fp.design, scopes, {}, fp.dbu, true);
+  if (hints.centroids().empty()) {
+    return std::nullopt;
+  }
+  std::map<std::string, std::string> clock_pin;  // flop master -> its clock pin
+  for (const auto* family : {&tech.cells.dffs, &tech.cells.async_dffs}) {
+    for (const auto& flop : *family) {
+      clock_pin.emplace(flop.name, flop.clk_pin);
+    }
+  }
+  std::unordered_map<std::string, std::string> label;  // normalized instance name -> "instance:clock pin"
+  for (const auto& component : fp.components) {
+    if (const auto pin = clock_pin.find(component.macro); pin != clock_pin.end()) {
+      label.emplace(gu::logical_hier_name(component.name, true), component.name + ":" + pin->second);
+    }
+  }
+  const auto derived = centroid_clock_inputs(
+      hints.centroids(),
+      [&](const std::string& name) {
+        const auto found = label.find(name);
+        return found == label.end() ? std::string{} : found->second;
+      },
+      options.clock_arrival_targets,
+      options.clock_leaf_schedule);
+  if (derived.empty()) {
+    return std::nullopt;
+  }
+  Options merged = options;
+  merged.clock_arrival_targets.insert(derived.arrival.begin(), derived.arrival.end());
+  merged.clock_leaf_schedule.insert(derived.schedule.begin(), derived.schedule.end());
+  return merged;
+}
+
+static Clock_handoff build_clock_handoff_impl(Result& placed, const Options& base_options,
                                               const std::vector<std::string>& macro_libraries, std::string_view sdc_text,
                                               std::unique_ptr<timing::fast::Physical_ranker> timer,
                                               const Previous_clock_branches&                 previous) {
+  const auto  centroid_options = options_with_centroid_clock(base_options, placed);
+  const auto& options          = centroid_options ? *centroid_options : base_options;
   Clock_driver_pins driver_pins;
   const auto&       tech = options.technology();
   // Round up the largest per-design 99th percentile of pre-route optimism on near-hold paths (minimax, litedram, LiteEth).
@@ -1026,6 +1082,9 @@ static Clock_handoff build_clock_handoff_impl(Result& placed, const Options& opt
     }
   }
   const auto fixed_steps = schedule.drive_steps;
+  // The build that is kept may leave an infeasible domain without a tree (its sinks stay on the original net, and the report
+  // says why); a trial that would be accepted on a tree it cannot build still fails, so the search counts it as infeasible.
+  bool tolerate_infeasible = false;
   const auto plan = [&](const auto& requested) {
     auto unmatched_schedule = requested.drive_steps;
     auto remaining          = limits;
@@ -1116,15 +1175,27 @@ static Clock_handoff build_clock_handoff_impl(Result& placed, const Options& opt
         remaining.source_fork_cap_ff = std::accumulate(net.node_cap_ff.begin(), net.node_cap_ff.end(), pin_cap);
         remaining.allow_source_fork  = true;
       }
-      if (d.gate_leaf) {
-        auto source          = d.source_model;
-        source.direct        = d.loads;
-        auto direct_limits   = remaining;
-        direct_limits.fanout = 30;
-        d.tree               = pcrs::plan_clock_tree({}, drivers, direct_limits, source);
-      } else {
-        d.tree
-            = pcrs::plan_clock_tree(d.loads, drivers, remaining, d.source_model, reuse_trial_plans ? &plan_cache[index] : nullptr);
+      d.failure.clear();
+      try {
+        if (d.gate_leaf) {
+          auto source          = d.source_model;
+          source.direct        = d.loads;
+          auto direct_limits   = remaining;
+          direct_limits.fanout = 30;
+          d.tree               = pcrs::plan_clock_tree({}, drivers, direct_limits, source);
+        } else {
+          d.tree = pcrs::plan_clock_tree(d.loads, drivers, remaining, d.source_model,
+                                         reuse_trial_plans ? &plan_cache[index] : nullptr);
+        }
+      } catch (const pcrs::Clock_infeasible& e) {
+        if (!tolerate_infeasible) {
+          throw;
+        }
+        d.tree    = {};
+        d.failure = e.what();
+        assign_clock_names(d, previous, nodes, buffers);
+        visited[index] = 2;
+        return;
       }
       remaining.repeater_sites -= d.tree.wire_repeaters + d.tree.balance_buffers + d.tree.schedule_buffers;
       assign_clock_names(d, previous, nodes, buffers);
@@ -1184,6 +1255,34 @@ static Clock_handoff build_clock_handoff_impl(Result& placed, const Options& opt
     protect(path.to);
   }
   protect(sdc.disabled);
+  // A search that was asked for and could not run says why, instead of leaving its list empty.
+  std::vector<std::pair<std::string, std::string>> skipped_searches;
+  const auto skip_reason = [&](const char* name, unsigned requested, bool needs_resynthesis, bool needs_icg, bool no_leaf_steps) {
+    if (!requested) {
+      return;
+    }
+    std::string why;
+    if (needs_resynthesis && policy.no_resynthesis) {
+      why = "the mutation policy forbids resynthesis";
+    } else if (policy.no_buffer_edits) {
+      why = "the mutation policy forbids buffer edits";
+    } else if (needs_icg && tech.cells.icgs.empty()) {
+      why = "the library has no integrated clock gate cell";
+    } else if (no_leaf_steps && options.clock_leaf_drive_steps) {
+      why = "leaf_drive_steps is set";
+    } else if (sdc.clocks.empty()) {
+      why = "the SDC defines no clock";
+    } else if (!sdc.unsupported.empty()) {
+      why = "the SDC has a command the timing engine cannot express: " + sdc.unsupported.front();
+    }
+    if (!why.empty()) {
+      skipped_searches.emplace_back(name, std::move(why));
+    }
+  };
+  skip_reason("gate_merge", options.clock_gate_merge_trials, true, false, false);
+  skip_reason("gate_leaf", options.clock_gate_leaf_trials, false, true, true);
+  skip_reason("gate_raise", options.clock_gate_raise_trials, false, true, true);
+  skip_reason("gate_clone", options.clock_gate_clone_trials, true, true, false);
   if (options.clock_gate_merge_trials && !policy.no_resynthesis && !policy.no_buffer_edits && !sdc.clocks.empty()
       && sdc.unsupported.empty()) {
     for (size_t i = 0; i < plans.size(); ++i) {
@@ -1709,7 +1808,9 @@ static Clock_handoff build_clock_handoff_impl(Result& placed, const Options& opt
     }
     schedule = useful_skew->schedule;
   }
+  tolerate_infeasible = true;
   plan(schedule);
+  tolerate_infeasible = false;
   for (const auto& [index, pose] : phases.poses) {
     auto& c = fp.components.at(index);
     c.place = pose;
@@ -2055,6 +2156,30 @@ static Clock_handoff build_clock_handoff_impl(Result& placed, const Options& opt
       writer.Double(trial.score->hold);
     }
   };
+  if (!roles.demoted_clock_nets.empty()) {
+    // Clock pins on these nets are in no tree and no report below: the net looked like data (more ordinary pins than clock
+    // role pins and no name that says clock).
+    writer.Key("demoted_clock_nets");
+    writer.StartArray();
+    for (const auto& [name, pins] : roles.demoted_clock_nets) {
+      writer.StartObject();
+      writer.Key("net");
+      writer.String(name.c_str());
+      writer.Key("connections");
+      writer.Uint64(pins);
+      writer.EndObject();
+    }
+    writer.EndArray();
+  }
+  if (!skipped_searches.empty()) {
+    writer.Key("skipped_searches");
+    writer.StartObject();
+    for (const auto& [name, why] : skipped_searches) {
+      writer.Key(name.c_str());
+      writer.String(why.c_str());
+    }
+    writer.EndObject();
+  }
   writer.Key("gate_merge_trials");
   writer.StartArray();
   for (const auto& trial : gate_search.trials) {
@@ -2249,6 +2374,10 @@ static Clock_handoff build_clock_handoff_impl(Result& placed, const Options& opt
     writer.Double(d.tree.source_load_ff);
     writer.Key("source_far_slew_ps");
     writer.Double(d.tree.source_far_slew_ps);
+    if (!d.failure.empty()) {
+      writer.Key("infeasible");
+      writer.String(d.failure.c_str());
+    }
     writer.Key("minimize_source_latency");
     writer.Bool(d.minimize_source_latency(schedule.balance));
     writer.Key("source_repeaters");
@@ -2339,11 +2468,8 @@ static Clock_handoff build_clock_handoff_impl(Result& placed, const Options& opt
     for (const auto& branch : d.tree.branches) {
       const auto& name   = d.names.at(inputs.size());
       const auto& driver = drivers.at(branch.driver);
-      auto        node   = buffer_node(name,
-                              driver.master,
-                              driver.input,
-                              driver.output,
-                              clock_pose(branch, tech.lef.macros.at(driver.master), fp.dbu));
+      const auto  planned = clock_pose(branch, tech.lef.macros.at(driver.master), fp.dbu);
+      auto        node    = buffer_node(name, driver.master, driver.input, driver.output, planned);
       node.attr(attrs::pcrs_clock_buffer).set({});
       inputs.push_back(node.create_sink_pin(driver.input));
       auto output = node.create_driver_pin(driver.output);
@@ -2367,6 +2493,11 @@ static Clock_handoff build_clock_handoff_impl(Result& placed, const Options& opt
       writer.String(driver.master.c_str());
       writer.Key("leaf");
       writer.Bool(branch.leaf);
+      // Where the planner put the buffer: what the final placement moved it from.
+      writer.Key("planned_x_dbu");
+      writer.Int64(planned.x);
+      writer.Key("planned_y_dbu");
+      writer.Int64(planned.y);
       if (branch.leaf) {
         const auto& home = d.loads.at(branch.children.front()).chunk;
         if (!home.empty()) {
@@ -2613,8 +2744,33 @@ void record_final_clock_leaf_geometry(const Result& placed, const std::string& o
       owner.AddMember("final_placement", geometry, allocator);
     }
   };
+  // How far legalization and the later rounds moved each buffer of the tree from where it was planned (Manhattan, um).
+  std::map<std::string_view, const physical::Component*> components;
+  for (const auto& c : placed.floorplan.components) {
+    components.emplace(c.name.view(), &c);
+  }
+  size_t        moved = 0;
+  double        total = 0, worst = 0;
+  const auto    displacement = [&](rapidjson::Value& branch) {
+    if (!branch.HasMember("planned_x_dbu") || !branch.HasMember("instance")) {
+      return;
+    }
+    const auto found = components.find(std::string_view(branch["instance"].GetString(), branch["instance"].GetStringLength()));
+    if (found == components.end()) {
+      return;
+    }
+    const double d = (std::abs(double(found->second->place.x) - branch["planned_x_dbu"].GetInt64())
+                      + std::abs(double(found->second->place.y) - branch["planned_y_dbu"].GetInt64()))
+                     / placed.floorplan.dbu;
+    branch.RemoveMember("moved_um");
+    branch.AddMember("moved_um", d, allocator);
+    moved += d > 0;
+    total += d;
+    worst = std::max(worst, d);
+  };
   for (auto& network : report["networks"].GetArray()) {
     for (auto& branch : network["branches"].GetArray()) {
+      displacement(branch);
       if (branch["leaf"].GetBool()) {
         measure(branch, branch["children"]);
       }
@@ -2622,6 +2778,14 @@ void record_final_clock_leaf_geometry(const Result& placed, const std::string& o
     if (network.HasMember("gate_leaf_sinks")) {
       measure(network, network["gate_leaf_sinks"]);
     }
+  }
+  {
+    rapidjson::Value summary(rapidjson::kObjectType);
+    summary.AddMember("buffers_moved", static_cast<uint64_t>(moved), allocator);
+    summary.AddMember("total_um", total, allocator);
+    summary.AddMember("max_um", worst, allocator);
+    report.RemoveMember("buffer_displacement");
+    report.AddMember("buffer_displacement", summary, allocator);
   }
   Pending_clock_report pending(path);
   std::ofstream file(pending.path);

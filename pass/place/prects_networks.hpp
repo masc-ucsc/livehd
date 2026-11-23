@@ -41,6 +41,9 @@ struct Prects_networks {
   std::set<std::string> timing_cuts;
   // Physical net indices reached by clock classification, including already-buffered branches.
   std::vector<bool>     clock_nets;
+  // Nets that clock classification reached and the unnamed-net rule then turned into data (more ordinary pins than role pins):
+  // the clock pins on them are in no clock report. Net name and its connection count, for the handoff to list.
+  std::vector<std::pair<std::string, size_t>> demoted_clock_nets;
 };
 Prects_networks  prects_networks(const physical::Technology&, const physical::Floorplan&, const Prects_library&,
                                  const timing::Feedback& = {});

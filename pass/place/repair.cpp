@@ -1538,8 +1538,22 @@ std::vector<std::string_view> retention_failures(const Timing_feedback& before, 
   if (!not_worse(before.tns, after.tns)) {
     failures.emplace_back("setup_tns");
   }
+  // Hold at placement time is an estimate before the clock tree, and the violations already there are repaired later. A trial
+  // that gives up a little hold slack to remove a large setup violation is not a regression: refusing it on the last picosecond
+  // kept a net 1.2 mm long with 284 loads unbuffered (litepci: 7 ns of setup for a hold loss in the noise), and whether the
+  // refusal happened depended on the placement to the picosecond. The setup gain has to be at least four times the hold loss
+  // and the loss at most kHoldTradePs. A hold that was clean and becomes violating is still refused.
+  constexpr double kHoldTradePs = 50;
   if (!(!before.hold_wns || (after.hold_wns && std::min(0.0, *after.hold_wns) + epsilon >= std::min(0.0, *before.hold_wns)))) {
-    failures.emplace_back("hold_wns");
+    bool traded = false;
+    if (before.hold_wns && *before.hold_wns < 0 && after.hold_wns && before.wns && *before.wns < 0 && after.wns && *after.wns > *before.wns + epsilon
+        && not_worse(before.tns, after.tns)) {
+      const double loss = std::min(0.0, *before.hold_wns) - std::min(0.0, *after.hold_wns);
+      traded            = loss <= kHoldTradePs && (*after.wns - *before.wns) >= 4 * loss;
+    }
+    if (!traded) {
+      failures.emplace_back("hold_wns");
+    }
   }
   const bool setup_gain = (before.wns && *before.wns < 0 && after.wns && *after.wns > *before.wns + epsilon)
                           || (before.tns && *before.tns < 0 && after.tns && *after.tns > *before.tns + epsilon);
@@ -3296,6 +3310,10 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
             if (next.tns) {
               w.Key("setup_tns");
               w.Double(*next.tns);
+            }
+            if (next.hold_wns) {
+              w.Key("hold_wns");  // so that a refusal for hold shows how much hold slack the trial cost
+              w.Double(*next.hold_wns);
             }
             kept = retain(score, next);
             w.Key("rejection_reasons");

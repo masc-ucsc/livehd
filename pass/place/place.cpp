@@ -1589,6 +1589,8 @@ struct View {
   Prects_networks                               ignored;
   std::shared_ptr<const Technology>             anchor_technology;
   std::set<size_t>                              discrete_gate_nets;
+  // (gate node, latch node) of each discrete clock gate: the two pins a source keeps at their fork.
+  std::vector<std::pair<int, int>>              discrete_gate_pairs;
   dp::Design                                    design;
   bool                                          hierarchy_snap         = false;
   bool                                          native_orientations    = false;
@@ -2105,12 +2107,13 @@ struct Clock_leaf_group {
 };
 struct Clock_group_plan {
   std::vector<Centroid> centroids;  // one generated centroid per leaf group, members bound to nodes
-  size_t                leaves = 0, infeasible = 0, gate_members = 0, members = 0;
+  size_t                leaves = 0, infeasible = 0, gate_members = 0, members = 0, fork_pairs = 0;
   double                star_um = 0;
 };
 Clock_group_plan plan_clock_groups(const View& v, const dp::Design& d, const Options& options, const Clock_planning_model& model,
                                    const liberty::timing::Library& timing, const Clock_chunk_homes& homes,
-                                   const std::map<Name, Name>& clock_inputs, const std::set<Name>& gates, bool installed_leaves) {
+                                   const std::map<Name, Name>& clock_inputs, const std::set<Name>& gates, bool installed_leaves,
+                                   const std::unordered_map<int, Centroid_clock>& centroid_clock) {
   Clock_group_plan                plan;
   std::vector<Clock_leaf_group>   groups;
   std::vector<double>             criticality(d.num_movable, 1);
@@ -2204,22 +2207,32 @@ Clock_group_plan plan_clock_groups(const View& v, const dp::Design& d, const Opt
         }
         sink.chunk = homes.locate(false, key, {x + .5 * d.node_size_x[node], y + .5 * d.node_size_y[node]});
       }
+      // The decisions of an authored centroid are the same as the explicit inputs; an explicit input wins.
+      const auto centroid = centroid_clock.find(node);
       if (const auto target = options.clock_arrival_targets.find(label); target != options.clock_arrival_targets.end()) {
         sink.insertion_ps = target->second.first.value_or(sink.insertion_ps);
         sink.wanted_ps    = target->second.second;
+      } else if (centroid != centroid_clock.end() && centroid->second.arrival_ps) {
+        sink.wanted_ps = *centroid->second.arrival_ps;
       }
       std::pair<unsigned, double> target{};
       if (!installed_leaves) {
         const auto step = options.clock_leaf_schedule.find(label);
-        target.first    = options.clock_leaf_drive_steps;
+        std::optional<unsigned> requested;
+        if (step != options.clock_leaf_schedule.end()) {
+          requested = step->second;
+        } else if (centroid != centroid_clock.end()) {
+          requested = centroid->second.drive_steps;
+        }
+        target.first = options.clock_leaf_drive_steps;
         if (model.limits.balance) {
-          if (step != options.clock_leaf_schedule.end()) {
-            sink.drive_steps = step->second;
+          if (requested) {
+            sink.drive_steps = *requested;
           }
         } else {
           target.second = sink.wanted_ps;
-          if (step != options.clock_leaf_schedule.end()) {
-            target.first = step->second;
+          if (requested) {
+            target.first = *requested;
           }
         }
         const auto delay   = options.clock_leaf_delays_ps.find(label);
@@ -2271,6 +2284,16 @@ Clock_group_plan plan_clock_groups(const View& v, const dp::Design& d, const Opt
       ++gate_leaves[group.gate];
     }
   }
+  // A discrete gate and its latch sit at one fork of the clock and keep their edge there; they are one centroid, and the gate
+  // gives half of its area to it (the other half goes to its leaf groups) so that its shares still add up to one.
+  std::unordered_set<int> forked;
+  std::unordered_map<int, size_t> latch_forks;
+  for (const auto& [gate, latch] : v.discrete_gate_pairs) {
+    if (gate < d.num_movable && latch < d.num_movable && !d.legalization_fixed(gate) && !d.legalization_fixed(latch) && gate != latch) {
+      forked.insert(gate);
+      ++latch_forks[latch];
+    }
+  }
   for (const auto& group : groups) {
     if (group.members.empty() || group.members.size() + (group.gate >= 0) < 2) {
       continue;
@@ -2290,10 +2313,28 @@ Clock_group_plan plan_clock_groups(const View& v, const dp::Design& d, const Opt
     if (group.gate >= 0) {
       Centroid_member m;
       m.node  = group.gate;
-      m.share = 1. / static_cast<double>(gate_leaves.at(group.gate));
+      m.share = (forked.contains(group.gate) ? .5 : 1.) / static_cast<double>(gate_leaves.at(group.gate));
       c.members.push_back(m);
       plan.gate_members += 1;
     }
+    plan.centroids.push_back(std::move(c));
+  }
+  for (const auto& [gate, latch] : v.discrete_gate_pairs) {
+    if (!forked.contains(gate)) {
+      continue;
+    }
+    Centroid c;
+    c.id        = "pcrs:fork:" + std::to_string(gate);
+    c.generated = true;
+    c.origin    = "pcrs";
+    c.strength  = options.clock_leaf_pull;
+    Centroid_member g, l;
+    g.node  = gate;
+    g.share = gate_leaves.contains(gate) ? .5 : 1.;
+    l.node  = latch;
+    l.share = 1. / static_cast<double>(latch_forks.at(latch));
+    c.members = {g, l};
+    plan.fork_pairs += 1;
     plan.centroids.push_back(std::move(c));
   }
   return plan;
@@ -2312,6 +2353,16 @@ struct Centroid_stage {
   // New authored records (a GUI edit). The generated ones are kept: the next round regroups them around what is authored.
   void                                 reload(const Centroid_set& authored) {
     set.reload_authored(authored, [this](const std::string& name) { return resolve(name); });
+    rebuild_clock();
+  }
+  std::unordered_map<int, Centroid_clock> clock_nodes;  // node -> the clock decisions of the authored centroid that holds it
+  void                                    rebuild_clock() {
+    clock_nodes.clear();
+    for (const auto& [member, clock] : set.clock_leaves()) {
+      if (const int node = member.node >= 0 ? member.node : resolve(member.name); node >= 0) {
+        clock_nodes.emplace(node, clock);
+      }
+    }
   }
   int resolve(const std::string& name) {
     if (by_name.empty() && view) {
@@ -2572,8 +2623,13 @@ void make_arrays(View& v, const ph::Technology& tech) {
   v.ignored = prects_networks(tech, connectivity, v.prects);
   v.discrete_gate_nets.clear();
   if (v.anchor_technology) {
+    v.discrete_gate_pairs.clear();
     for (const auto& gate : pcrs::discrete_gate_paths(connectivity, v.anchor_technology->cells, v.ignored.clock_nets).gates) {
       v.discrete_gate_nets.insert(gate.output_net);
+      const auto from = v.cell.find(Name(gate.instance)), latch = v.cell.find(Name(gate.latch));
+      if (from != v.cell.end() && latch != v.cell.end()) {
+        v.discrete_gate_pairs.emplace_back(static_cast<int>(from->second), static_cast<int>(latch->second));
+      }
     }
   }
   v.pins.clear();
@@ -12956,7 +13012,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                                   gates  = std::move(gates),
                                   installed_leaves,
                                   first = true](const dp::Design& current, int iteration) mutable {
-        auto       plan = plan_clock_groups(v, current, options, *model, *clock_library, *homes, clocks, gates, installed_leaves);
+        auto       plan = plan_clock_groups(v, current, options, *model, *clock_library, *homes, clocks, gates, installed_leaves,
+                                           centroid_stage->clock_nodes);
         const auto dropped = centroid_stage->set.replace_generated("pcrs", std::move(plan.centroids), [&](const std::string& name) {
           return centroid_stage->resolve(name);
         });
@@ -12968,11 +13025,12 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           authored += !c.generated;
         }
         report << std::format(
-            R"({{"iteration":{},"groups":{},"members":{},"gate_members":{},"authored_centroids":{},"dropped":{},"cohesion_groups":{},"installed_leaves":{},"infeasible_domains":{},"star_um":{}}})",
+            R"({{"iteration":{},"groups":{},"members":{},"gate_members":{},"fork_pairs":{},"authored_centroids":{},"dropped":{},"cohesion_groups":{},"installed_leaves":{},"infeasible_domains":{},"star_um":{}}})",
             iteration,
             plan.leaves,
             plan.members,
             plan.gate_members,
+            plan.fork_pairs,
             authored,
             dropped.size(),
             groups.size(),
@@ -13116,6 +13174,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       stage.base             = options.cohesion > 0 ? options.cohesion : 1;
       stage.set              = placement_hints ? placement_hints->centroids() : Centroid_set{};
       stage.by_name.clear();
+      const bool has_authored = std::ranges::any_of(stage.set.items(), [](const Centroid& c) { return !c.generated; });
+      stage.rebuild_clock();
       stage.fixed.assign(
           v.design.cohesion_groups.begin(),
           v.design.cohesion_groups.begin() + static_cast<long>(std::min(v.color_groups, v.design.cohesion_groups.size())));
@@ -13127,6 +13187,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       const bool gui_centroids = options.gui && !hint_scopes.empty();
       if (stage.active() || leaf_centroids || gui_centroids) {
         control.cohesion_weight = stage.base / tech.dbu;
+        // PCRS leaf groups are a weak guide: they must not switch off the placer's best-sample, routing-plateau and adaptive
+        // density features (a positive cohesion weight does, for an objective that those cannot measure). Authored centroids and
+        // color cohesion are objectives and keep that behaviour.
+        control.cohesion_auxiliary = !has_authored && !gui_centroids && options.cohesion <= 0;
       }
     }
     size_t plan_residual = 0;  // what the last measured legroute plan round left (Legroute_plan_report::residual)
@@ -16773,6 +16837,17 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       block.AddMember("max_depth", max_depth, allocator);
       block.AddMember("domains", domains, allocator);
+      // Buffers and inverters of the synthesized reset logic that stay one sink of a tree although many pins hang behind
+      // them: no flop level reaches those loads, so they can be a long, slow reset path that pipelining cannot shorten.
+      rapidjson::Value opaque(rapidjson::kArrayType);
+      for (const auto& o : pcrs_stats.opaque) {
+        rapidjson::Value one(rapidjson::kObjectType);
+        one.AddMember("cell", rapidjson::Value(o.name.c_str(), allocator), allocator);
+        one.AddMember("loads_behind", o.loads, allocator);
+        one.AddMember("reason", rapidjson::Value(o.reason.c_str(), allocator), allocator);
+        opaque.PushBack(one, allocator);
+      }
+      block.AddMember("opaque_sinks", opaque, allocator);
       json.AddMember("pcrs", block, allocator);
     }
     if (options.domino_rail_fanout && !options.domino_rail_pins.empty()) {

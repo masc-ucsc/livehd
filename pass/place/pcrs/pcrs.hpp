@@ -64,7 +64,14 @@ struct Domain_stats {
   std::vector<std::string> flop_pins;
 };
 
+// A buffer or inverter that the pass kept as one sink of a tree because it cannot be taken out: the fanout behind it is whatever
+// the synthesized logic gave it, and no flop level of the tree reaches it.
+struct Opaque_sink {
+  std::string name, reason;
+  unsigned    loads = 0;
+};
 struct Stats {
+  std::vector<Opaque_sink>  opaque;       // see Opaque_sink
   unsigned                  fanout   = 0;  // the cap the trees were built with
   unsigned                  networks = 0;  // reset roots rebuilt
   unsigned                  sinks    = 0;

@@ -2982,6 +2982,43 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     if (pg.empty() && (!records.empty() || (native_cts_default && livehd::physical::detect_tech_profile(
           place_options.technology().lef, livehd::physical::Tech_policy::power_grid)))) {
       place_options.pg = "auto";
+      // The grid turned on by the native clock tree is a default, not a request: when a block macro of the LEF has no pin for
+      // a grid net it cannot be connected, and failing the whole run for it hides the cause ("too dense"). Say so and run
+      // without the grid; synth.place.pg=auto asks for it, and then the macro is reported by name.
+      if (records.empty()) {
+        const auto&       lef     = place_options.technology().lef;
+        const auto* const profile = livehd::physical::detect_tech_profile(lef, livehd::physical::Tech_policy::power_grid);
+        const auto        grid    = livehd::placement::power_grid_profile(*profile);
+        for (const auto& [name, macro] : lef.macros) {
+          if (!macro.klass.starts_with("BLOCK") || !livehd::physical::hard_macro(macro)) {
+            continue;
+          }
+          for (int n = 0; n < 2; ++n) {
+            if (std::ranges::none_of(grid.pin_names[n], [&](const auto& pin) { return macro.pins.contains(pin); })) {
+              std::fprintf(stderr,
+                           "lhd synth: native power grid left off: macro %s has no %s pin; set synth.place.pg=auto to require it\n",
+                           name.c_str(),
+                           grid.nets[n].c_str());
+              place_options.pg = "none";
+              break;
+            }
+          }
+          if (place_options.pg == "none") {
+            break;
+          }
+        }
+        if (place_options.pg != "none" && !place_options.floorplan.empty()) {
+          // A floorplan DEF that already carries its power grid (SPECIALNETS with entries) keeps it: a second grid over it
+          // is not a default to turn on, and ended in final legalization as "too dense".
+          const auto frame = livehd::physical::read_def(place_options.floorplan);
+          if (std::ranges::any_of(frame.special_nets, [](const auto& net) {
+                return (net.use == "POWER" || net.use == "GROUND") && !net.wires.empty();
+              })) {
+            std::fprintf(stderr, "lhd synth: preserving existing DEF power grid in %s\n", place_options.floorplan.c_str());
+            place_options.pg = "none";
+          }
+        }
+      }
     }
     if (place_options.pg != "none" && place_options.pg != "off") {
       if (taps.empty()) {
@@ -5198,7 +5235,24 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         set_crash_context({}, {});
       }
       if (build_pcrs_clock) {
-        build_clock(true);
+        // The final tree gets the same containment as the first one: its output stays off the protocol stdout, a crash names
+        // the phase and its log, and a failure of the build is an error of this step, not an internal one.
+        phase_step = "pass.pcrs.clock.final";
+        phase_log  = next_log_path(opts, phase_step);
+        set_crash_context(phase_step, phase_log);
+        try {
+          Stdout_to_log redirect(phase_log);
+          build_clock(true);
+        } catch (const livehd::placement::Placement_area_restart&) {
+          throw;  // the whole command runs again with a larger core (synth_command)
+        } catch (const Lhd_error&) {
+          throw;
+        } catch (const std::exception& e) {
+          throw Lhd_error{"unsupported", std::string("final clock tree build failed: ") + e.what(), "see " + phase_log};
+        }
+        phase_step.clear();
+        phase_log.clear();
+        set_crash_context({}, {});
       }
       if (place_options.optimization_pending || experimental_repair) {
         Phase_timer   phase(res, "pass.place.final_legalize");

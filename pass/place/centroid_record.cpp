@@ -190,6 +190,12 @@ Centroid parse_centroid(const J& v, const Centroid_names& names) {
       throw std::invalid_argument("clock must be an object");
     }
     c.clock.drive = str(k, "drive");
+    if (k.HasMember("drive_steps")) {
+      if (!k["drive_steps"].IsUint()) {
+        throw std::invalid_argument("drive_steps must be a nonnegative integer");
+      }
+      c.clock.drive_steps = k["drive_steps"].GetUint();
+    }
     if (k.HasMember("arrival_ps")) {
       c.clock.arrival_ps = number(k, "arrival_ps", 0);
     }
@@ -259,6 +265,9 @@ void write_centroid(const Centroid& c, J& out, rapidjson::Document::AllocatorTyp
     J k(rapidjson::kObjectType);
     if (!c.clock.drive.empty()) {
       k.AddMember("drive", text(c.clock.drive), a);
+    }
+    if (c.clock.drive_steps) {
+      k.AddMember("drive_steps", *c.clock.drive_steps, a);
     }
     if (c.clock.arrival_ps) {
       k.AddMember("arrival_ps", *c.clock.arrival_ps, a);
@@ -525,11 +534,62 @@ Centroid_clock Centroid_set::effective_clock(const std::string& id) const {
       if (out.drive.empty()) {
         out.drive = c->clock.drive;
       }
+      if (!out.drive_steps) {
+        out.drive_steps = c->clock.drive_steps;
+      }
       if (!out.arrival_ps) {
         out.arrival_ps = c->clock.arrival_ps;
       }
     }
     at = parent_of(at);
+  }
+  return out;
+}
+std::vector<std::pair<Centroid_member, Centroid_clock>> Centroid_set::clock_leaves() const {
+  std::vector<std::pair<Centroid_member, Centroid_clock>> out;
+  if (std::ranges::none_of(items_, [](const Centroid& c) { return !c.clock.empty(); })) {
+    return out;
+  }
+  std::set<std::string> rejected, nested;
+  for (const auto& issue : validate()) {
+    rejected.insert(issue.id);
+  }
+  for (const auto& c : items_) {
+    if (!rejected.contains(c.id)) {
+      for (const auto& member : c.members) {
+        if (member.centroid) {
+          nested.insert(member.name);
+        }
+      }
+    }
+  }
+  const auto walk = [&](const auto& self, const Centroid& c, Centroid_clock clock) -> void {
+    if (rejected.contains(c.id)) {
+      return;
+    }
+    if (!c.clock.drive.empty()) {
+      clock.drive = c.clock.drive;
+    }
+    if (c.clock.drive_steps) {
+      clock.drive_steps = c.clock.drive_steps;
+    }
+    if (c.clock.arrival_ps) {
+      clock.arrival_ps = c.clock.arrival_ps;
+    }
+    for (const auto& member : c.members) {
+      if (member.centroid) {
+        if (const auto* child = find(member.name)) {
+          self(self, *child, clock);
+        }
+      } else if (!clock.empty()) {
+        out.emplace_back(member, clock);
+      }
+    }
+  };
+  for (const auto& c : items_) {
+    if (!nested.contains(c.id)) {
+      walk(walk, c, {});
+    }
   }
   return out;
 }
@@ -628,6 +688,37 @@ std::vector<Centroid_issue> Centroid_set::validate() const {
           break;
         }
         t = find(t->to);
+      }
+    }
+  }
+  return out;
+}
+
+Centroid_clock_inputs centroid_clock_inputs(const Centroid_set& set, const std::function<std::string(const std::string&)>& label_of,
+                                            const std::map<std::string, std::pair<std::optional<double>, double>>& explicit_arrival,
+                                            const std::map<std::string, unsigned>&                                 explicit_schedule) {
+  Centroid_clock_inputs out;
+  for (const auto& [member, clock] : set.clock_leaves()) {
+    if (member.name.empty() || (!clock.arrival_ps && !clock.drive_steps)) {
+      continue;
+    }
+    const auto label = label_of(member.name);
+    if (label.empty()) {
+      ++out.unmatched;
+      continue;
+    }
+    if (clock.arrival_ps) {
+      if (explicit_arrival.contains(label)) {
+        ++out.overridden;
+      } else {
+        out.arrival[label] = {std::nullopt, *clock.arrival_ps};
+      }
+    }
+    if (clock.drive_steps) {
+      if (explicit_schedule.contains(label)) {
+        ++out.overridden;
+      } else {
+        out.schedule[label] = *clock.drive_steps;
       }
     }
   }

@@ -304,6 +304,30 @@ samples = [json.loads(line) for line in
 assert any(not record.get('installed_leaves', False) and record['members'] >= len(ordinary_pins)
            and record['infeasible_domains'] == 0 for record in samples), samples
 
+# A wanted arrival on a centroid is the same decision as an arrival_targets entry: the tree built from the placement hints equals
+# the tree built from the file, and both differ from the tree without it.
+early_pins = ordinary_pins[:8]
+early_targets = root / 'early-clock-targets.json'
+early_targets.write_text(json.dumps({pin: dict(wanted_ps=-400) for pin in early_pins}))
+centroid_hints = root / 'centroid-early.json'
+centroid_hints.write_text(json.dumps([{'class': 'livehd.placement.hints', 'schema_version': 2, 'id': 'early', 'design': 'dut',
+                                       'templates': [{'module': 'dut', 'hints': [{
+                                           'id': 'early-flops', 'kind': 'centroid', 'members': [p.rsplit(':', 1)[0] for p in early_pins],
+                                           'strength': 0, 'clock': {'arrival_ps': -400}}]}]}]))
+run('early_file', ['--set', 'synth.place.pcrs.clock=true', '--set', 'synth.place.pcrs.balance=true',
+                  '--set', f'synth.place.pcrs.arrival_targets={early_targets}'])
+run('early_centroid', ['--set', 'synth.place.pcrs.clock=true', '--set', 'synth.place.pcrs.balance=true', str(centroid_hints)])
+
+
+def shape(name):
+    tree = json.loads((root / name / 'synth/place/pcrs_clock.json').read_text())
+    return [(n['source_pin'], [(b['master'], b['leaf'], sorted(b['children'])) for b in n['branches']]) for n in tree['networks']]
+
+
+run('early_base', ['--set', 'synth.place.pcrs.clock=true', '--set', 'synth.place.pcrs.balance=true'])
+assert shape('early_centroid') == shape('early_file'), 'a centroid arrival must build the tree an arrival target builds'
+assert shape('early_file') != shape('early_base'), 'the early arrival must change the tree'
+
 # Each requested pin delay owns its leaf even before the clock tree is installed.
 isolated_schedule = root / 'isolated-clock-pins.json'
 isolated_schedule.write_text(json.dumps({p: {'steps': 0, 'delay_ps': 0.001} for p in ordinary_pins}))
@@ -340,7 +364,7 @@ run('discrete_anchors', ['--set', 'compile.slang.liberty_cells=true', '--set', '
     design=gated_source)
 samples = [json.loads(line) for path in (root / 'discrete_anchors/synth/place').rglob('pcrs_clock_clusters.jsonl')
            for line in path.read_text().splitlines()]
-assert any(s['gate_members'] >= 1 and s['members'] == 8 for s in samples), samples
+assert any(s['gate_members'] >= 1 and s['members'] == 8 and s['fork_pairs'] == 1 for s in samples), samples
 gated_tree = json.loads((root / 'discrete_anchors/synth/place/pcrs_clock.json').read_text())
 parent = next(n for n in gated_tree['networks'] if n['source_instance'] == 'PIN' and n['source_pin'] == 'clk')
 assert not parent['minimize_source_latency'], parent  # independently buffered feeder sizing belongs to the balance trial

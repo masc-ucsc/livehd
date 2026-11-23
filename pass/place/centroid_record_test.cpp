@@ -558,3 +558,37 @@ TEST(CentroidCompile, UnusedArrayColumnsDoNotAllocateSlots) {
   EXPECT_DOUBLE_EQ(offsets[0].second, offsets[1].second);
   EXPECT_DOUBLE_EQ(offsets[0].first - offsets[1].first, 4.);
 }
+TEST(CentroidClock, FieldsOfAContainingCentroidReachItsInstancesAndTheNearestWins) {
+  Centroid_set set;
+  auto         outer = centroid("outer", {"f0"}, {"inner"});
+  outer.clock.arrival_ps  = 100;
+  outer.clock.drive_steps = 1;
+  auto inner              = centroid("inner", {"f1", "f2"});
+  inner.clock.arrival_ps  = 140;  // the nearest setting wins; drive_steps is inherited
+  set.add(outer);
+  set.add(inner);
+  set.add(centroid("free", {"f3"}));  // no clock fields: not listed
+  const auto leaves = set.clock_leaves();
+  ASSERT_EQ(leaves.size(), 3u);
+  std::map<std::string, Centroid_clock> by_name;
+  for (const auto& [m, k] : leaves) {
+    by_name[m.name] = k;
+  }
+  EXPECT_DOUBLE_EQ(*by_name["f0"].arrival_ps, 100);
+  EXPECT_DOUBLE_EQ(*by_name["f1"].arrival_ps, 140);
+  EXPECT_EQ(*by_name["f2"].drive_steps, 1u);
+  // As the clock builder's inputs: by the label of the clock pin, with explicit inputs winning.
+  const auto labels = [](const std::string& name) { return name == "f2" ? std::string{} : name + ":CLK"; };
+  const auto inputs = centroid_clock_inputs(set, labels, {{"f0:CLK", {std::nullopt, 5}}}, {});
+  EXPECT_EQ(inputs.arrival.size(), 1u);  // f1; f0's arrival is explicit
+  EXPECT_DOUBLE_EQ(inputs.arrival.at("f1:CLK").second, 140);
+  EXPECT_FALSE(inputs.arrival.at("f1:CLK").first.has_value());
+  EXPECT_EQ(inputs.schedule.size(), 2u);  // f0 and f1 get step 1; f2 has no clock pin
+  EXPECT_EQ(inputs.unmatched, 1u);
+  EXPECT_EQ(inputs.overridden, 1u);
+  rapidjson::Document doc;
+  write_centroid(outer, doc, doc.GetAllocator());
+  EXPECT_EQ(doc["clock"]["drive_steps"].GetUint(), 1u);
+  EXPECT_EQ(parse(dump(outer).c_str()), outer);
+  EXPECT_THROW(parse(R"({"id":"g","members":["a"],"clock":{"drive_steps":-1}})"), std::invalid_argument);
+}

@@ -752,6 +752,75 @@ TEST_F(Pcrs, AnOutputPortBehindABufferGoesBackOnTheRootAndTheFlopsGetTheirTree) 
   }
 }
 
+TEST_F(Pcrs, AnOutputPortBehindAnInverterIsServedByOneInverterAndTheFlopsGetTheirTree) {
+  // rst -> INV -> {40 flops, output port}: the port sees the inverted reset, and it used to keep the inverter (and every flop
+  // behind it) as one sink that no flop level could reach. The port now gets its own inverter from the root, and the flops the tree.
+  graph->get_io()->add_output("rst_n_out", 0);
+  graph->get_io()->set_bits("rst_n_out", 1);
+  auto inverter = gu::create_typed_node(*graph, Ntype_op::Sub);
+  inverter.set_subnode(io_of("INVx1", {"A"}, "Y"));
+  inverter.set_name("synth_inv");
+  inverter.create_sink_pin("A").connect_driver(reset);
+  auto inverted = inverter.create_driver_pin("Y");
+  gu::set_bits(inverted, 1);
+  for (int i = 0; i < 40; ++i) {
+    flop("core.r" + std::to_string(i), inverted, clock);
+  }
+  inverted.connect_sink(graph->get_output_pin("rst_n_out"));
+  const auto lib   = cells();
+  const auto stats = build_reset(*graph, tech, lib, {.fanout = 8}, depth(1));
+  EXPECT_EQ(stats.sinks, 80u);  // as for the buffer case: the flops' reset and data pins
+  EXPECT_TRUE(stats.opaque.empty());
+  for (auto node : graph->body().nodes()) {
+    EXPECT_NE(node.get_name(), "synth_inv");  // the synthesized inverter is gone
+  }
+  // The port is driven by exactly one inverter whose input is the root.
+  const auto driver = graph->get_output_pin("rst_n_out").get_driver_pin();
+  ASSERT_FALSE(driver.is_invalid());
+  const auto cell = driver.get_master_node();
+  ASSERT_TRUE(cell.get_subnode_io());
+  EXPECT_EQ(cell.get_subnode_io()->get_name(), "INVx1");
+  EXPECT_EQ(cell.get_sink_pin("A").get_driver_pin(), reset);
+  EXPECT_EQ(fanout(driver), 1u);
+  // A second call finds the same network and keeps the port served.
+  build_reset(*graph, tech, lib, {.fanout = 8}, depth(1));
+  const auto again = graph->get_output_pin("rst_n_out").get_driver_pin();
+  ASSERT_FALSE(again.is_invalid());
+  EXPECT_EQ(again.get_master_node().get_sink_pin("A").get_driver_pin(), reset);
+}
+
+TEST_F(Pcrs, AUnitSignExtendAdapterOnTheResetIsAWireNotAnOpaqueSink) {
+  // rst -> BUF -> sext(., 1) -> 40 flops: the flattener's signed-port adapter on a one-bit reset has no cell and no delay. It used
+  // to stop the scan, so the buffer in front of it stayed one sink however many flops hung behind it (litepci: 1,600 pins).
+  auto buffer = gu::create_typed_node(*graph, Ntype_op::Sub);
+  buffer.set_subnode(io_of("BUFx1", {"A"}, "Y"));
+  buffer.set_name("synth_buf");
+  buffer.create_sink_pin("A").connect_driver(reset);
+  auto buffered = buffer.create_driver_pin("Y");
+  gu::set_bits(buffered, 1);
+  auto adapter = gu::create_typed_node(*graph, Ntype_op::Sext);
+  adapter.set_name("port_adapter");
+  buffered.connect_sink(gu::setup_sink_by_name(adapter, "a"));
+  gu::create_const(*graph, *Dlop::create_integer(1)).connect_sink(gu::setup_sink_by_name(adapter, "b"));
+  auto widened = adapter.create_driver_pin(0);
+  gu::set_sbits(widened, 1);
+  for (int i = 0; i < 40; ++i) {
+    flop("core.r" + std::to_string(i), widened, clock);
+  }
+  const auto lib   = cells();
+  const auto stats = build_reset(*graph, tech, lib, {.fanout = 8}, depth(1));
+  EXPECT_EQ(stats.sinks, 80u);
+  EXPECT_TRUE(stats.opaque.empty());
+  for (auto node : graph->body().nodes()) {
+    EXPECT_NE(node.get_name(), "synth_buf");
+    EXPECT_NE(node.get_name(), "port_adapter");  // the adapter is stripped with the chain
+    if (const auto io = node.get_subnode_io(); io && io->get_name() == "BUFx1") {
+      EXPECT_LE(fanout(node.get_driver_pin("Y")), 8u) << node.get_name();
+    }
+  }
+  expect_uniform(1, 0);
+}
+
 TEST_F(Pcrs, TheHeadIsCappedAcrossDomainsAndARegroupRebuildsAnUnchangedTree) {
   // Three clock domains, each small enough to hang on the head by itself: together they are 24 loads on it.
   auto gate = [&](const std::string& name) {

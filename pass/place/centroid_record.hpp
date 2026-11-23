@@ -35,10 +35,11 @@ struct Centroid_member {
   bool        operator==(const Centroid_member&) const = default;
 };
 struct Centroid_clock {
-  std::string           drive;       // leaf driver master; empty keeps the planner's choice
-  std::optional<double> arrival_ps;  // wanted arrival of the members' clock pins
-  bool                  operator==(const Centroid_clock&) const = default;
-  bool                  empty() const { return drive.empty() && !arrival_ps; }
+  std::string             drive;       // leaf driver master, kept with the record; PCRS reads drive_steps (a master is not a fixed step)
+  std::optional<double>   arrival_ps;  // wanted arrival of the members' clock pins (needs synth.place.pcrs.balance=true)
+  std::optional<unsigned> drive_steps;  // absolute drive step of the leaf that holds the members' clock pins (leaf_schedule)
+  bool                    operator==(const Centroid_clock&) const = default;
+  bool                    empty() const { return drive.empty() && !drive_steps && !arrival_ps; }
 };
 struct Centroid {
   std::string                  id;
@@ -109,9 +110,25 @@ public:
   std::string                  parent_of(const std::string& id) const;
   // Clock fields with inheritance: a field set on a containing centroid applies to its nested ones (the nearest wins).
   Centroid_clock               effective_clock(const std::string& id) const;
+  // Every instance member that has clock fields, with the fields that apply to it (the nearest containing centroid wins).
+  std::vector<std::pair<Centroid_member, Centroid_clock>> clock_leaves() const;
   // Instances of a centroid, nested ones included, in member order.
   std::vector<Centroid_member> leaves(const std::string& id) const;
 };
+
+// The clock decisions of the authored centroids as the clock builder's own inputs: the wanted arrival and the leaf drive step of
+// each sink pin label, as synth.place.pcrs.arrival_targets and leaf_schedule give them. `label_of` maps a member's qualified
+// instance name to the label of its clock pin ("instance:pin"), or "" when it has no clock pin to schedule. A label the explicit
+// inputs already hold keeps the explicit value.
+struct Centroid_clock_inputs {
+  std::map<std::string, std::pair<std::optional<double>, double>> arrival;
+  std::map<std::string, unsigned>                                 schedule;
+  size_t                                                          unmatched = 0, overridden = 0;
+  bool                                                            empty() const { return arrival.empty() && schedule.empty(); }
+};
+Centroid_clock_inputs centroid_clock_inputs(const Centroid_set&, const std::function<std::string(const std::string&)>& label_of,
+                                            const std::map<std::string, std::pair<std::optional<double>, double>>& explicit_arrival,
+                                            const std::map<std::string, unsigned>&                                 explicit_schedule);
 
 struct Centroid_compile_options {
   double                                 dbu              = 1;  // database units per micron

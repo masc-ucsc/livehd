@@ -57,7 +57,7 @@ public:
   // The per-centroid outcome of the latest compile (members bound, unresolved, strength, layout residual), for the report.
   void note_centroids(Centroid_compiled);
   Placement_hints(std::shared_ptr<const metadata::Bundle>, std::string design, const std::vector<Hint_scope>&,
-                  std::vector<Hint_object>, double                     dbu);
+                  std::vector<Hint_object>, double                     dbu, bool centroids_only = false);
   void                                       rebind(std::vector<Hint_object>);
   void                                       seed(DreamPlace::native::Design&);
   std::vector<DreamPlace::native::MacroPull> pulls(const DreamPlace::native::Design&) const;

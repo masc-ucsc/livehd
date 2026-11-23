@@ -968,6 +968,41 @@ TEST(PhysicalAcceptance, SetupProgressDoesNotRequireChangingTheLongestArrival) {
   after.wns  = 2;
   EXPECT_FALSE(timing_improves(before, after));
 }
+TEST(PhysicalAcceptance, ALargeSetupGainMayCostALittleOfAHoldViolationThatWasAlreadyThere) {
+  Timing_feedback before;
+  before.delay    = 11000;
+  before.area     = 10;
+  before.wns      = -7000;
+  before.tns      = -5.0e6;
+  before.hold_wns = -266;
+  auto after      = before;
+  after.delay     = 4000;
+  after.wns       = -200;
+  after.tns       = -8000;
+  after.hold_wns  = -270;  // 4 ps of hold for 6.8 ns of setup
+  EXPECT_TRUE(timing_improves(before, after));
+  after.hold_wns = -266 - 60;  // more than the trade allows
+  EXPECT_FALSE(timing_improves(before, after));
+  after.hold_wns = -266 - 40;  // the loss must also be small against the gain
+  after.wns      = -7000 + 100;
+  after.tns      = -4.9e6;
+  after.delay    = 10000;
+  EXPECT_FALSE(timing_improves(before, after));
+  // A hold that was clean and turns violating is not traded.
+  before.hold_wns = 0;
+  after           = before;
+  after.delay     = 4000;
+  after.wns       = -200;
+  after.tns       = -8000;
+  after.hold_wns  = -4;
+  EXPECT_FALSE(timing_improves(before, after));
+  // Without any setup gain a hold loss is refused as before.
+  before.hold_wns = -266;
+  after           = before;
+  after.area      = 9;
+  after.hold_wns  = -267;
+  EXPECT_FALSE(timing_improves(before, after));
+}
 TEST(SteinerRepair, SplitsLongEdgesAndVisitsEverySinkExactlyOnce) {
   const std::vector<Point> locations{
       {10000,    0},

@@ -142,6 +142,56 @@ TEST_F(ClockGateMerge, MeasuresLeafStarAfterItsMembersAreLegalized) {
   EXPECT_DOUBLE_EQ(network["final_placement"]["star_wire_um"].GetDouble(), 0);
 }
 
+TEST_F(ClockGateMerge, RecordsHowFarEachClockBufferMovedFromItsPlannedPose) {
+  const auto path = std::filesystem::path(opts.output_dir) / "pcrs_clock.json";
+  std::ofstream(path) << R"({"networks":[{"branches":[)"
+                         R"({"instance":"buf0","leaf":true,"children":["a:CK"],"planned_x_dbu":1000,"planned_y_dbu":2000},)"
+                         R"({"instance":"buf1","leaf":false,"children":["buf0"],"planned_x_dbu":5000,"planned_y_dbu":5000},)"
+                         R"({"instance":"gone","leaf":false,"children":["buf1"],"planned_x_dbu":0,"planned_y_dbu":0}]}]})";
+  Result placed;
+  placed.floorplan.dbu = 1000;
+  placed.pin_locations = {{"a:CK", {0, 0}}};
+  placed.floorplan.components.push_back({"buf0", "BUF", {}});
+  placed.floorplan.components.back().place.x = 1000 + 3000;  // 3 um right
+  placed.floorplan.components.back().place.y = 2000 - 1000;  // 1 um down
+  placed.floorplan.components.push_back({"buf1", "BUF", {}});
+  placed.floorplan.components.back().place.x = 5000;
+  placed.floorplan.components.back().place.y = 5000;  // did not move
+  record_final_clock_leaf_geometry(placed, opts.output_dir);
+  rapidjson::Document report;
+  report.Parse(file_utils::read_file(path.string()).value().c_str());
+  const auto& branches = report["networks"][0]["branches"];
+  EXPECT_DOUBLE_EQ(branches[0]["moved_um"].GetDouble(), 4);
+  EXPECT_DOUBLE_EQ(branches[1]["moved_um"].GetDouble(), 0);
+  EXPECT_FALSE(branches[2].HasMember("moved_um"));  // a buffer the final netlist no longer has
+  EXPECT_EQ(report["buffer_displacement"]["buffers_moved"].GetUint64(), 1u);
+  EXPECT_DOUBLE_EQ(report["buffer_displacement"]["total_um"].GetDouble(), 4);
+  EXPECT_DOUBLE_EQ(report["buffer_displacement"]["max_um"].GetDouble(), 4);
+}
+TEST_F(ClockGateMerge, AnInfeasibleDomainLeavesItsSinksOnTheNetAndIsReportedNotFatal) {
+  // No clock driver can meet this transition: every domain is infeasible. The build still completes, the sinks keep their
+  // original net, and the report names the reason for each domain instead of the run aborting.
+  opts.clock_max_slew_ps = 0.001;
+  const auto run         = build(pair(), 10, 0);
+  size_t     infeasible  = 0;
+  for (const auto& network : run.report["networks"].GetArray()) {
+    if (network.HasMember("infeasible")) {
+      ++infeasible;
+      EXPECT_TRUE(network["branches"].Empty());
+      EXPECT_GT(std::string_view(network["infeasible"].GetString()).size(), 0u);
+    }
+  }
+  EXPECT_GT(infeasible, 0u);
+  EXPECT_TRUE(run.buffers.empty());
+}
+TEST_F(ClockGateMerge, ASearchThatCannotRunSaysWhyInTheReport) {
+  const auto run = build(pair(), 10, 2, .05, "set_clock_gating_check_nonsense 1 [get_ports en]\n");
+  ASSERT_TRUE(run.report.HasMember("skipped_searches")) << "an unsupported SDC command must be reported";
+  EXPECT_NE(std::string_view(run.report["skipped_searches"]["gate_merge"].GetString()).find("SDC"), std::string_view::npos);
+  EXPECT_TRUE(run.report["gate_merge_trials"].Empty());
+  const auto plain = build(pair(), 10, 0);
+  EXPECT_FALSE(plain.report.HasMember("skipped_searches"));  // nothing was asked for
+}
 TEST_F(ClockGateMerge, ObservedEnableDutySelectsTheLowerCostLegalGate) {
   opts.clock_activity = {
       {"g0", .5},

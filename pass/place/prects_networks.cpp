@@ -346,6 +346,9 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
     }
     std::erase_if(pending, [&](size_t n) {
       if (data[n]) {
+        if (clock_nets[n]) {
+          result.demoted_clock_nets.emplace_back(std::string(fp.nets[n].name), fp.nets[n].connections.size());
+        }
         result.ignored[n] = false;
         clock_nets[n]     = false;
       }

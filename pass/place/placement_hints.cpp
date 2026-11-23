@@ -178,7 +178,7 @@ void Placement_hints::reject(Hint& h, const std::string& reason) {
   diag::warn("pass.place", "placement-hint", "unsupported").msg("placement hint '{}': {}; ignored", h.id, reason).emit();
 }
 Placement_hints::Placement_hints(std::shared_ptr<const metadata::Bundle> input, std::string design,
-                                 const std::vector<Hint_scope>& scopes, std::vector<Hint_object> objects, double dbu)
+                                 const std::vector<Hint_scope>& scopes, std::vector<Hint_object> objects, double dbu, bool centroids_only)
     : input_(std::move(input)), design_(std::move(design)), objects_(std::move(objects)), dbu_(dbu) {
   if (!input_) {
     return;
@@ -275,7 +275,7 @@ Placement_hints::Placement_hints(std::shared_ptr<const metadata::Bundle> input, 
     return std::vector<int>(members.begin(), members.end());
   };
   for (const auto& t : templates) {
-    if (t.value->HasMember("groups")) {
+    if (!centroids_only && t.value->HasMember("groups")) {
       Hint h;
       h.id = t.id + ":" + join(t.scope.path, '/') + ":groups";
       try {
@@ -373,6 +373,10 @@ Placement_hints::Placement_hints(std::shared_ptr<const metadata::Bundle> input, 
       rapidjson::Document merged;
       const J*            value = &authored;
 
+      if (centroids_only && !(authored.IsObject() && authored.HasMember("kind") && authored["kind"].IsString()
+                              && std::string_view(authored["kind"].GetString()) == "centroid")) {
+        continue;  // a reader of the centroid records only (the clock builder) does not judge macro hints
+      }
       Hint h;
       h.id = t.id + ":" + join(t.scope.path, '/') + ":";
       try {

@@ -34,6 +34,12 @@ Key key_of(const Node& node) { return {node.get_debug_nid(), 0}; }
 struct Lib {
   const physical::Technology&                     tech;
   std::map<std::string, const liberty::Comb_cell*> buffers, inverters;
+  // Identity buffers and inverters of the Liberty that the pass does not take as transit (a physical barrier, or no placeable
+  // LEF cell with those pins): a netlist that uses one keeps it as an opaque sink, and the report says why.
+  struct Excluded {
+    std::string input, output, reason;
+  };
+  std::map<std::string, Excluded> excluded;
   std::map<std::string, const liberty::Dff_cell*>  flops, async_flops;
   std::map<std::string, const liberty::Icg_cell*>  icgs;
   const liberty::Comb_cell*                        buffer   = nullptr;  // smallest identity buffer
@@ -59,7 +65,15 @@ struct Lib {
       return !b || a->area < b->area || (a->area == b->area && a->name < b->name);
     };
     for (const auto& cell : cells.combinational) {
-      if (cell.physical_barrier || cell.inputs.size() != 1 || !placeable(cell.name, {&cell.inputs.front(), &cell.output})) {
+      if (cell.inputs.size() != 1) {
+        continue;
+      }
+      if (cell.physical_barrier || !placeable(cell.name, {&cell.inputs.front(), &cell.output})) {
+        const auto truth = liberty::cell_truth(cell);
+        if (truth == uint64_t{0xaaaaaaaaaaaaaaaa} || truth == uint64_t{0x5555555555555555}) {
+          excluded[cell.name] = {cell.inputs.front(), cell.output,
+                                 cell.physical_barrier ? "a physical barrier cell" : "no placeable LEF cell with its pins"};
+        }
         continue;
       }
       const auto truth = liberty::cell_truth(cell);
@@ -182,10 +196,28 @@ bool minted(const Node& node) {
 struct Transit {
   std::string input, output;
   bool        inverting = false;
+  bool        wire      = false;  // an adapter node with no cell: its one driver pin is port 0
 };
+// The signed-port adapter the flattener leaves on a one-bit signal (`sext(a, 1)`): no cell, no delay, and for the one-bit
+// pins of the mapped cells behind it the same signal. A reset that crosses a hierarchy port carries one, and it used to
+// stop the scan: everything behind it stayed one opaque sink.
+bool unit_sext(const Node& node) {
+  if (gu::type_op_of(node) != Ntype_op::Sext) {
+    return false;
+  }
+  const auto pos = gu::get_driver_of_sink_name(node, "b");
+  const auto src = gu::get_driver_of_sink_name(node, "a");
+  return !pos.is_invalid() && pos.is_const() && gu::const_of(pos).is_just_i64() && gu::const_of(pos).to_just_i64() == 1
+         && !src.is_invalid() && gu::bits_of(src) == 1 && gu::bits_of(node.get_driver_pin(hhds::Port_id(0))) == 1;
+}
+Pin transit_sink(const Node& node, const Transit& t) { return t.wire ? gu::setup_sink_by_name(node, "a") : node.get_sink_pin(t.input); }
+Pin transit_driver(const Node& node, const Transit& t) { return t.wire ? node.get_driver_pin(hhds::Port_id(0)) : node.get_driver_pin(t.output); }
 std::optional<Transit> transit_of(const Lib& lib, const Node& node) {
   const auto name = master_name(node);
   if (name.empty()) {
+    if (unit_sext(node)) {
+      return Transit{"a", {}, false, true};
+    }
     return std::nullopt;
   }
   if (const auto it = lib.buffers.find(name); it != lib.buffers.end()) {
@@ -213,11 +245,17 @@ struct Leaf {
   Pin  sink;
   bool negative = false;
 };
+struct Opaque_leaf {
+  std::string name, reason;
+  unsigned    loads = 0;  // sink pins behind it, through buffers and inverters
+};
 struct Network {
-  Pin               head;
-  std::vector<Leaf> leaves;
+  Pin                      head;
+  std::vector<Opaque_leaf> opaque;
+  std::vector<Leaf>        leaves;
   std::vector<Node> dead;
-  std::vector<Pin>  ports;  // graph outputs found behind a transit cell: they go back on the head
+  // Graph outputs found behind a transit cell: they go back on the head, behind one inverter when the chain inverted them.
+  std::vector<Leaf> ports;
 };
 
 class Scanner {
@@ -236,18 +274,35 @@ public:
     const auto t = transit_of(lib_, node);
     bool       ok = t.has_value();
     if (ok) {
-      const auto out      = node.get_driver_pin(t->output);
+      const auto out      = transit_driver(node, *t);
       const bool inverted = negative != t->inverting;
       for (const auto& edge : out.out_edges()) {
         const auto sink = edge.sink;
         const auto next = sink.get_master_node();
         const auto nt   = transit_of(lib_, next);
         const bool through
-            = nt && sink.get_port_id() == next.get_sink_pin(nt->input).get_port_id() && transit_ok(next, inverted);
+            = nt && sink.get_port_id() == transit_sink(next, *nt).get_port_id() && transit_ok(next, inverted);
         const bool leaf = is_core_cell(lib_, next) && sink.get_driver_pins().size() == 1;
-        const bool port = next.is_output_node() && !inverted && sink.get_driver_pins().size() == 1;
+        const bool port = next.is_output_node() && (!inverted || lib_.inverter) && sink.get_driver_pins().size() == 1;
         if (!through && !leaf && !port) {
           ok = false;
+          if (nt && sink.get_port_id() == transit_sink(next, *nt).get_port_id()) {
+            const auto inner = refused_.find(key_of(next));
+            refused_[key] = "behind " + master_name(next) + ": " + (inner == refused_.end() ? std::string("refused") : inner->second);
+          } else if (next.is_output_node()) {
+            refused_[key] = "a graph output sees the inverted reset and the library has no inverter";
+          } else if (!is_core_cell(lib_, next)) {
+            refused_[key] = "load " + (master_name(next).empty() ? "'" + std::string(next.get_name()) + "' (" + std::string(Ntype::get_name(gu::type_op_of(next)))
+                                                                         + ", no cell master)"
+                                                                   : master_name(next))
+                            + " is not a core cell";
+          } else if (sink.get_driver_pins().size() != 1) {
+            refused_[key] = "a load pin has several drivers";
+          } else if (next.is_output_node()) {
+            refused_[key] = "a graph output sees the inverted reset";
+          } else {
+            refused_[key] = "load not supported";
+          }
           break;
         }
       }
@@ -261,13 +316,27 @@ public:
       const auto sink = edge.sink;
       const auto node = sink.get_master_node();
       const auto t    = transit_of(lib_, node);
-      if (t && sink.get_port_id() == node.get_sink_pin(t->input).get_port_id() && transit_ok(node, negative)) {
+      if (t && sink.get_port_id() == transit_sink(node, *t).get_port_id() && transit_ok(node, negative)) {
         net.dead.push_back(node);
-        walk(node.get_driver_pin(t->output), negative != t->inverting, net, true);
+        walk(transit_driver(node, *t), negative != t->inverting, net, true);
       } else if (is_core_cell(lib_, node) && sink.get_driver_pins().size() == 1) {
         net.leaves.push_back({sink, negative});
+        if (!t) {
+          if (const auto skip = lib_.excluded.find(master_name(node)); skip != lib_.excluded.end()) {
+            net.opaque.push_back({std::string(node.get_name()),
+                                  "master " + skip->first + " is " + skip->second.reason,
+                                  loads_behind(node.get_driver_pin(skip->second.output))});
+          }
+        }
+        if (t && sink.get_port_id() == transit_sink(node, *t).get_port_id()) {
+          // A buffer or inverter that stays a plain sink: whatever it drives is not regrouped, and the fanout behind it
+          // is not bounded by the tree. Say what stopped the walk.
+          const auto why = refused_.find(key_of(node));
+          net.opaque.push_back({std::string(node.get_name()), why == refused_.end() ? std::string("refused") : why->second,
+                                loads_behind(transit_driver(node, *t))});
+        }
       } else if (below && node.is_output_node()) {
-        net.ports.push_back(sink);
+        net.ports.push_back({sink, negative});
       }
     }
   }
@@ -277,10 +346,12 @@ public:
     for (int guard = 0; guard < 4096 && !driver.is_invalid(); ++guard) {
       const auto node = driver.get_master_node();
       const auto t    = transit_of(lib_, node);
-      if (!t || node.get_driver_pin(t->output).get_port_id() != driver.get_port_id()) {
+      if (!t || transit_driver(node, *t).get_port_id() != driver.get_port_id()) {
         break;
       }
-      const auto up = driver_of(node, t->input);
+      const auto sink_pin = transit_sink(node, *t);
+      const auto drivers  = sink_pin.get_driver_pins();
+      const auto up       = drivers.size() == 1 ? drivers.front() : Pin{};
       if (up.is_invalid() || up.is_const()) {
         break;
       }
@@ -289,9 +360,25 @@ public:
     return driver;
   }
 
+  // Sink pins behind a driver, through buffers and inverters (bounded: it is a diagnostic).
+  unsigned loads_behind(const Pin& driver, unsigned depth = 0) {
+    unsigned count = 0;
+    for (const auto& edge : driver.out_edges()) {
+      const auto node = edge.sink.get_master_node();
+      const auto t    = transit_of(lib_, node);
+      if (t && depth < 8 && edge.sink.get_port_id() == transit_sink(node, *t).get_port_id()) {
+        count += loads_behind(transit_driver(node, *t), depth + 1);
+      } else {
+        ++count;
+      }
+    }
+    return count;
+  }
+
 private:
   const Lib&                 lib_;
   std::map<Key, bool>        ok_;
+  std::map<Key, std::string> refused_;
 };
 
 // The unconditional clock a flop is on: through integrated clock gates and identity buffers.
@@ -467,6 +554,21 @@ public:
   // flop level, or the sinks of a flat domain): with many small domains the head itself is the unbuffered net
   // (NVDLA partition_p: 214 loads over 60 gated-clock domains). Put them behind one buffer tree, neighbours
   // together. Buffers add no latency, so every domain keeps its depth.
+  // Graph outputs that must see the reset inverted (the synthesized logic had an inverter between them and the head): one
+  // inverter from the head serves all of them, so the block's interface keeps the undelayed reset in its own polarity.
+  void serve_inverted_ports(const Pin& head, const std::vector<Pin>& ports) {
+    if (ports.empty() || !lib_.inverter) {
+      return;
+    }
+    const auto& master = lib_.inverter_sizes.empty() ? *lib_.inverter : *lib_.inverter_sizes.front();
+    auto        inv    = mint(identity_io(library_, master), head.get_master_node(), "p", 0, identity_of(ports));
+    auto        out    = inv.create_driver_pin(master.output);
+    gu::set_bits(out, 1);
+    inv.create_sink_pin(master.inputs.front()).connect_driver(head);
+    for (auto port : ports) {
+      port.connect_driver(out);
+    }
+  }
   void cap_head(const Pin& head, const Position_of& position_of, Domain_stats& domain) {
     position_of_ = &position_of;
     std::vector<Leaf> loads;
@@ -1172,6 +1274,11 @@ Stats build_reset(hhds::Graph& graph, const physical::Technology& tech, const li
     Planned p;
     p.net.head = head;
     scanner.walk(head, false, p.net);
+    for (const auto& o : p.net.opaque) {
+      if (o.loads > options.fanout) {
+        stats.opaque.push_back({o.name, o.reason, o.loads});
+      }
+    }
     if (p.net.leaves.empty()) {
       continue;
     }
@@ -1260,8 +1367,10 @@ Stats build_reset(hhds::Graph& graph, const physical::Technology& tech, const li
       gu::drop_drivers(dead);
     }
     for (auto& port : p.net.ports) {
-      gu::drop_drivers(port);
-      port.connect_driver(p.net.head);
+      gu::drop_drivers(port.sink);
+      if (!port.negative) {
+        port.sink.connect_driver(p.net.head);
+      }
     }
   }
   for (auto& p : plan) {
@@ -1297,6 +1406,15 @@ Stats build_reset(hhds::Graph& graph, const physical::Technology& tech, const li
         ds.flop_pins = builder.pins_since(first_cell);
       }
       stats.domains.push_back(std::move(ds));
+    }
+    if (!p.keep) {
+      std::vector<Pin> inverted;
+      for (const auto& port : p.net.ports) {
+        if (port.negative) {
+          inverted.push_back(port.sink);
+        }
+      }
+      builder.serve_inverted_ports(p.net.head, inverted);
     }
     if (!p.keep && stats.domains.size() > first_domain) {
       builder.cap_head(p.net.head, position_of, stats.domains[first_domain]);
