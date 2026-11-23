@@ -1,8 +1,9 @@
 # The `lhdcert-ckpt v1` checkpoint format
 
 A checkpoint is the state of one design at one step: every flop, and every memory word that a
-step can read. The Lean simulators share one format. The IR, VC and FP routes write the same
-bytes for the same state, and each route can continue from a checkpoint that any route wrote.
+step can read. The Lean simulators share one format. The IR, VC, FP, TV and legacy routes write
+the same bytes for the same state, and each route can continue from a checkpoint that any route
+wrote.
 
 The format, `save`, `restore` and every load-time check are in
 `formal/lean/LeanSemanticPrimitives/Compiler/Ckpt.lean`. The driver is
@@ -205,6 +206,8 @@ the printed `STEP` lines alike. So its lines equal the same lines of a run from 
 ```
 cert_trace <cert> <cycles> <stim> [route:ir|route:vc] ... [ckpt-in:<file>] [ckpt-at:<k>:<file>] [ckpt-out:<file>]
 dcert2_memroute <cert> <stepFuel> <workFuel> <cycles> ckpt:<file> ... [ckpt-at:<k>:<file>] [ckpt-out:<file>]
+<Name>TvSim <cycles> <stim> ... [ckpt-in:<file>] [ckpt-at:<k>:<file>] [ckpt-out:<file>]
+<Top>_LegacyTrace <cert> <cycles> <stim> ... [ckpt-in:<file>] [ckpt-at:<k>:<file>] [ckpt-out:<file>]
 ```
 
 - `ckpt-in:<file>` (`cert_trace`) and the start `ckpt:<file>` (`dcert2_memroute`, the FP route)
@@ -222,8 +225,31 @@ that table from a checkpoint (`toStateM`) and proves it denotes `restore c` (`to
 T6). The FP route saves through the state it denotes (`saveM`), so it writes the IR route's
 bytes.
 
-The legacy model (`make_legacy_sim.py`) has no checkpoint option yet. Its state is a record of
-named fields, and its memories have no depth.
+The TV and legacy routes are compiled per design, so each has its own driver, with
+`cert_trace`'s arguments and lines (`HDLProof/Run/Trace.lean`, `traceRun`):
+
+- TV: `pass/lean/tools/scripts/make_tv_sim.py <cert> --out <dir> [--build <root>]` writes one
+  file, `<Name>TvSim.lean`: the certificate, its step reified by `reify_design_chunked`
+  (`Compiler/ReifyGen`, run while the file is compiled) and `traceMain`. The step has
+  `interpretDesign`'s type, so checkpoints are taken of its state as it is, and it compacts as
+  `cert_trace` does. Where `prove_reified_chunked` (`Compiler/ReifyProof`; `prove_reified` for
+  the plain reifier) proves the step equal to
+  `interpretDesign`, T4 and T5 make its resume exact; this driver does not run that proof.
+- Legacy: `make_legacy_sim.py <Top>_Lgraph.lean --trace [--io <cert _io.json>] [--build <root>]`
+  writes `<Top>_LegacyTrace.lean`, the model then its driver, which takes the certificate as its
+  first argument. The model keeps its own record. A checkpoint converts it by the certificate's
+  names (`_io.json`): flop `<name>` is field `st_<name>`, memory `<name>` is field `st_<name>`,
+  a function of the address; a memory restored from a checkpoint is a table of its words below
+  its depth, built once, and its default past them. The generator refuses a name the record
+  lacks, a width that differs, and a state field no flop or memory names, because the
+  checkpoint would not hold the whole state. A model with one clock domain has no quiet cycle
+  (`edges:third` is refused). Its memories are closures that grow with every write, so it
+  compacts as `cert_trace` does: the state is replaced by its restored checkpoint every 256
+  cycles of a long run of a design with memories, or every `compact:<K>`. Legacy has no proof against `interpretDesign`: its checkpoints are
+  tested (below).
+
+Both are built with `build-opt.sh` and `EXTRA_MODULES` (`Compiler/ReifyGen` for TV,
+`Translation/LegacyFast` for legacy), which adds those modules to that build only.
 
 ## Tests
 
@@ -233,4 +259,7 @@ four steps). It then checks every `lhd_ckpt` command, the digest, and one refusa
 Last, on a design with a 12-word RAM and on one with two clocks, an asynchronous reset and a
 ROM, it runs the IR, VC and FP routes. All three must print the same trace and write the same
 checkpoint bytes. A run resumed from each route's checkpoint, on each route, must print the
-full run's remaining lines and end in the same checkpoint.
+full run's remaining lines and end in the same checkpoint. The same holds for TV and legacy,
+built for each design: their traces and checkpoints equal IR's, TV resumes every route's
+checkpoint, legacy resumes IR's and IR resumes theirs (the one-clock design is compared under
+`edges:all`, the schedule its legacy model runs).

@@ -317,6 +317,14 @@ With `--stim`, the driver takes an optional second file: an `edges v1` schedule
 `edges:file:<path>`. Without it, every domain fires on every step (cert_trace's
 `edges:all`). A design with one clock domain emits exactly what it did before.
 
+`--trace` writes one file instead, `<Top>_LegacyTrace.lean`: the model followed by
+a driver that takes cert_trace's arguments, with the certificate first
+(`<exe> <cert.dcert> <cycles> <stim> [edges:...] [init:...] [ckpt-in:<file>]
+[ckpt-at:<k>:<file>] [ckpt-out:<file>]`), and reads and writes `lhdcert-ckpt v1`
+checkpoints by the certificate's names (`--io`, the certificate's `_io.json`).
+Build it with `build-opt.sh` and `EXTRA_MODULES=Translation/LegacyFast`
+(`--build <root>`). See `pass/lean/tools/formats/ckpt.md`.
+
 Checked on B05 (`shirecache_mesh_master`, clocks `clk_i` and `noc_clk_i`): 20
 steps, identical to `cert_trace` both with every clock firing and with an
 independent random schedule per clock. That run emitted B05 without
@@ -593,7 +601,7 @@ them too.
 | `emit_legacy_fast_bridge.*` | optional per-node bridge — the §3 equivalence theorems |
 | `legacy_emit_options.hpp` | `LegacyEmitOptions`, split out to break a header cycle |
 | `legacy_model_test.cpp` | the unit tests (`//pass/lean:legacy_model_test`) |
-| `scripts/make_legacy_sim.py` | driver generator: the `main` that runs a design (§4) |
+| `scripts/make_legacy_sim.py` | driver generator: the `main` that runs a design (§4); `--trace`: cert_trace's arguments and checkpoints |
 | `scripts/nary_bridge_check.sh` | elaborates 14 fresh n-ary / Or bridge fixtures |
 | `tests/legacy_fixtures.cpp` | fixture-graph generator (`//pass/lean:lean_legacy_fixtures`) |
 | `tests/replay_legacy_proofs.py` | serial corpus replay: time, RSS, axiom audit |
