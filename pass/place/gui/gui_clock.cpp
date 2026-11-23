@@ -1080,7 +1080,7 @@ std::string clock_edit(const Scene& scene, Clock_edits& edits, const rapidjson::
                                              "skew_period_fraction",
                                              "skew_hold_margin_ps",
                                              "hold_area_um2",
-                                             "cluster_strength",
+                                             "leaf_pull",
                                              "gate_merge_trials",
                                              "gate_leaf_trials",
                                              "gate_clone_trials",

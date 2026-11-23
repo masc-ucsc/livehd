@@ -144,6 +144,7 @@ authoritative reference for the running build.
 | paint | `highlight`, `highlight_names`, `select`, `clear_highlight`, `highlights` | Show findings in the page; the user's clicks come back through `selection` |
 | edit | `move`, `batch`, `macro_move`, `macro_scan`, `pin`, `unpin`, `relax`, `legalize`, `evaluate`, `command_status`, `cmd` | Change the main placement (DBU); `macro_move` places an already-placed macro (restart); `cmd` reaches any page command (run, pause, run_until, stage, area, restart, fork, screenshot, finish, ...) |
 | explore | `whatif`, `explore`, `explore_begin`, `explore_wait`, `explorations`, `compare`, `similarity`, `explore_discard`, `score_config` | Test candidates without touching main: tiers T0 (geometry) to T4 (routed); compare at a matched baseline |
+| centroids | `centroids`, `centroid_edit` | Group cells, flops, memories and macros around a point; edit the records the placement reads |
 | collateral | `export`, `intent_preview`, `intent_apply` | Save the result |
 
 ## Loop
@@ -191,6 +192,22 @@ labels).
 - `describe` → `allowed_orientations` lists what the solver itself may choose. A fixed node reports only `N` even when `macro_move` can flip it.
 - Exploration patches (`move`/`pin`/`unpin`) only accept nodes that are movable at the chosen gate. A placed macro cannot be moved inside a T2 fork today, so use `macro_move` plus a restart for those. Plan geometry experiments at a gate where the macros you want to move are still movable when you can.
 - Restarts keep every `macro_move` pose because the poses are replayed from the action trace. The exception is `cmd command={"cmd":"restart","checkpoint":-1}` (from the start), which **drops all edits**. To try a flag on the current layout, restart from a recorded checkpoint index (`state.cps`) with `"set":{...}`. Afterwards check that the poses survived, by comparing `macros` with what you sent.
+
+## Centroids
+
+A centroid is a point that pulls its members during placement (kind `centroid` of `livehd.placement.hints`; the page draws it as a circle with a cross, layer `centroids`). Create one from instance names or from the page selection, give it a position (`free`, coordinates, or relative to another centroid), a layout for its members (`floating`, `row`, `column`, `array`: slots around the point before final legalization) and a strength. A centroid can hold other centroids. The records are collateral: the same file a batch run reads, written under the hints record `gui-centroids`, and a clean `lhd synth` reads them back.
+
+```
+gui centroids                                                # authored records, and the groups the flow compiled (PCRS leaf groups are pcrs:N)
+gui centroid_edit op=create id=regs 'members=["u/f0","u/f1","u/f2"]' layout=row strength=0.2
+gui centroid_edit op=create members=selected position=[120,80]    # from the page selection
+gui centroid_edit op=set id=regs 'layout={"kind":"array","columns":2,"gap_x_um":0.5}' strength_scale=2
+gui centroid_edit op=move to=regs 'members=["u/f9"]'         # a member lives in one centroid
+gui centroid_edit op=adopt id=pcrs:1234                      # edit a leaf group PCRS formed: it becomes authored, with its members
+gui centroid_edit op=set id=regs apply=false ...             # preview without applying
+```
+
+An edit is applied through `intent_apply` at a placement gate (so `expect` and the intent revision protect it), and the hint report lists, per centroid, the members bound, those that did not resolve, the strength, and the largest distance of a member from its layout slot. Dragging a centroid in the page writes its `at` position. The pull is weak by default; raise `strength` (or scale it) on the centroids that matter and judge the result with `evaluate`. Records apply to plain placement; in the macro stages they are not read. A `clock` field (`drive`, `arrival_ps`) is stored on the record for the clock tree (todo 2p-pcrs, X1) and is not read by PCRS yet.
 
 ## Reading results after a restart
 

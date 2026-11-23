@@ -64,6 +64,7 @@
 #else
 #include <sys/prctl.h>
 #endif
+#include "centroid_record.hpp"
 #include "gui/gui_session.hpp"
 #include "h2d.hpp"
 #include "handoff_pins.hpp"
@@ -743,8 +744,8 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     for (const auto& [pin, delay] : o.clock_leaf_delays_ps) {
       h = hash_text(std::format("clock-delay:{}:{}:{}", pin.size(), pin, delay), h);
     }
-    if (o.clock_cluster_strength > 0) {
-      h = hash_text(std::format("clock-leaf-anchors-v6:{}", o.clock_cluster_strength), h);
+    if (o.clock_leaf_pull > 0) {
+      h = hash_text(std::format("clock-leaf-centroids-v1:{}", o.clock_leaf_pull), h);
     }
     for (const auto& [pin, steps] : o.clock_leaf_schedule) {
       h = hash_text(std::format("{}:{}:{}", pin.size(), pin, steps), h);
@@ -1199,6 +1200,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.cohesion > 0) {
     h = hash_text(std::format("cohesion:{}", o.cohesion), h);
   }
+  if (o.centroid_strength != 0.1) {
+    h = hash_text(std::format("centroid-strength:{}", o.centroid_strength), h);
+  }
   if (o.preserve_imported_ties) {
     h = hash_text("preserve-imported-ties", h);
   }
@@ -1591,6 +1595,10 @@ struct View {
   bool                                          align_macros           = false;
   bool                                          global_macro_alignment = false;
   bool                                          centroids              = false;
+  double                                          cohesion_pull          = 0;  // options.cohesion: the pull of the color centroids
+  size_t                                          color_groups = 0;  // leading design.cohesion_groups that are color centroids
+  // The centroid records the stage compiled (authored and generated, not colors), by id with their node members, for the GUI.
+  std::vector<std::pair<std::string, std::vector<int>>> centroid_view;
   bool                                          color_centroids        = false;
   bool                                          placement_colors       = false;
   bool                                          memory_colors          = false;
@@ -2090,16 +2098,21 @@ void snapshot_frame(ph::Floorplan& frame, const Geometry_view& geometry) {
     frame.components.push_back({c.name, c.macro, geometry.pose(i)});
   }
 }
-struct Clock_anchor_plan {
-  std::vector<dp::PairAnchor> pairs;
-  size_t                      leaves = 0, infeasible = 0, gate_anchors = 0, retained_anchors = 0;
-  double                      star_um = 0;
+// A clock leaf group: the flops one leaf driver feeds and the gate that drives them, when the source is one.
+struct Clock_leaf_group {
+  int              gate = -1;
+  std::vector<int> members;
 };
-Clock_anchor_plan plan_clock_anchors(const View& v, const dp::Design& d, const Options& options, const Clock_planning_model& model,
-                                     const liberty::timing::Library& timing, const Clock_chunk_homes& homes,
-                                     const std::map<Name, Name>& clock_inputs, const std::set<Name>& gates, bool installed_leaves) {
-  Clock_anchor_plan               plan;
-  std::vector<Clock_anchor_group> groups;
+struct Clock_group_plan {
+  std::vector<Centroid> centroids;  // one generated centroid per leaf group, members bound to nodes
+  size_t                leaves = 0, infeasible = 0, gate_members = 0, members = 0;
+  double                star_um = 0;
+};
+Clock_group_plan plan_clock_groups(const View& v, const dp::Design& d, const Options& options, const Clock_planning_model& model,
+                                   const liberty::timing::Library& timing, const Clock_chunk_homes& homes,
+                                   const std::map<Name, Name>& clock_inputs, const std::set<Name>& gates, bool installed_leaves) {
+  Clock_group_plan                plan;
+  std::vector<Clock_leaf_group>   groups;
   std::vector<double>             criticality(d.num_movable, 1);
   for (size_t pin = 0; pin < d.pin2node.size(); ++pin) {
     const int node = d.pin2node[pin], net = d.pin2net[pin];
@@ -2250,15 +2263,91 @@ Clock_anchor_plan plan_clock_anchors(const View& v, const dp::Design& d, const O
     }
   }
   plan.leaves = groups.size();
+  // The same gate drives every leaf of its distribution, so it counts once over them: an equal share of its area in each leaf,
+  // singleton leaves included. A flop that sits on a critical data path counts less, so the leaf does not drag it from the data.
+  std::unordered_map<int, size_t> gate_leaves;
   for (const auto& group : groups) {
-    if (group.gate >= 0) {
-      plan.gate_anchors += group.members.size();
+    if (group.gate >= 0 && !group.members.empty()) {
+      ++gate_leaves[group.gate];
     }
   }
-  plan.retained_anchors = retained_clock_anchors(groups, d.pair_anchors, d.node_x.size());
-  plan.pairs = clock_leaf_anchors(groups, options.clock_cluster_strength, criticality);
+  for (const auto& group : groups) {
+    if (group.members.empty() || group.members.size() + (group.gate >= 0) < 2) {
+      continue;
+    }
+    Centroid c;
+    c.id        = "pcrs:" + std::to_string(*std::ranges::min_element(group.members));
+    c.generated = true;
+    c.origin    = "pcrs";
+    c.strength  = options.clock_leaf_pull;
+    for (const int node : group.members) {
+      Centroid_member m;
+      m.node  = node;
+      m.share = 1 / std::max(1., criticality.at(node));
+      c.members.push_back(m);
+    }
+    plan.members += group.members.size();
+    if (group.gate >= 0) {
+      Centroid_member m;
+      m.node  = group.gate;
+      m.share = 1. / static_cast<double>(gate_leaves.at(group.gate));
+      c.members.push_back(m);
+      plan.gate_members += 1;
+    }
+    plan.centroids.push_back(std::move(c));
+  }
   return plan;
 }
+// The centroid records of one placement stage: the authored ones (placement hints) and those a tool generates each round, bound
+// to this stage's nodes and turned into the native placer's cohesion groups. `fixed` holds the groups that are not records.
+struct Centroid_stage {
+  Centroid_set                   set;
+  std::vector<dp::CohesionGroup> fixed;
+  double                         base = 1;  // the coefficient the group weights are relative to (control.cohesion_weight * dbu)
+  double                         dbu = 1, default_strength = 0;
+  View*                          view = nullptr;
+  std::unordered_map<std::string, int> by_name;        // built on first use: the one name -> node map of this stage
+  Centroid_compiled                    last;           // the latest compile, for the report
+  bool                                 active() const { return !set.empty(); }
+  // New authored records (a GUI edit). The generated ones are kept: the next round regroups them around what is authored.
+  void                                 reload(const Centroid_set& authored) {
+    set.reload_authored(authored, [this](const std::string& name) { return resolve(name); });
+  }
+  int resolve(const std::string& name) {
+    if (by_name.empty() && view) {
+      by_name.reserve(view->cells.size());
+      for (size_t i = 0; i < view->cells.size(); ++i) {
+        by_name.emplace(gu::logical_hier_name(view->cells[i].name, true), static_cast<int>(i));
+      }
+    }
+    const auto it = by_name.find(name);
+    return it == by_name.end() ? -1 : it->second;
+  }
+  std::vector<dp::CohesionGroup> groups(const dp::Design& d) {
+    Centroid_compile_options o;
+    o.dbu              = dbu;
+    o.default_strength = default_strength;
+    o.resolve          = [this](const std::string& name) { return resolve(name); };
+    last               = compile_centroids(set, d, o);
+    if (view) {
+      constexpr size_t kViewLimit = 4000;  // a page with more circles than this is not readable
+      view->centroid_view.clear();
+      for (const auto& r : last.results) {
+        if (r.group < 0 || r.id.starts_with("color:") || view->centroid_view.size() >= kViewLimit) {
+          continue;
+        }
+        view->centroid_view.push_back({r.id, last.groups[static_cast<size_t>(r.group)].nodes});
+      }
+    }
+    auto out = fixed;
+    for (auto g : last.groups) {
+      g.weight /= base;
+      out.push_back(std::move(g));
+    }
+    last.groups.clear();
+    return out;
+  }
+};
 void make_arrays(View& v, const ph::Technology& tech) {
   v.design             = {};
   // Pin offsets below are built in each cell's current orientation, and the
@@ -2434,13 +2523,33 @@ void make_arrays(View& v, const ph::Technology& tech) {
         groups[found->second].push_back(static_cast<int>(v.cell.at(c.name)));
       }
     }
+    // Each synthesis color is a generated centroid: floating, every member at its full area. The pull is the stage base
+    // coefficient (v.cohesion_pull) itself, so a group weight of one reproduces the plain color cohesion exactly.
+    Centroid_set colors;
     for (auto& [name, members] : groups) {
-      (void)name;
-      if (members.size() > 1) {
-        d.cohesion_groups.push_back({std::move(members), 1, {}});
+      if (members.size() < 2) {
+        continue;
       }
+      Centroid c;
+      c.id        = "color:" + name;
+      c.generated = true;
+      c.origin    = "color";
+      for (const int node : members) {
+        Centroid_member m;
+        m.node = node;
+        c.members.push_back(m);
+      }
+      colors.add(std::move(c));
     }
+    Centroid_compile_options compile;
+    compile.dbu              = 1;
+    compile.default_strength = v.cohesion_pull > 0 ? 1 : 0;
+    auto compiled            = compile_centroids(colors, d, compile);
+    d.cohesion_groups.insert(d.cohesion_groups.end(),
+                             std::make_move_iterator(compiled.groups.begin()),
+                             std::make_move_iterator(compiled.groups.end()));
   }
+  v.color_groups = d.cohesion_groups.size();
   ph::Floorplan connectivity;
   for (const auto& c : v.cells) {
     connectivity.components.push_back({c.name, c.macro, c.place});
@@ -5819,6 +5928,27 @@ std::shared_ptr<const gui::Scene> gui_scene(const View& v, const ph::Technology&
       scene->centroids.push_back({d.centroid_groups[g].name, samples[g].x, samples[g].y, samples[g].radius, true});
     }
   }
+  for (const auto& [id, nodes] : v.centroid_view) {  // authored centroids and PCRS leaf groups: a point with its members
+    double area = 0, cx = 0, cy = 0;
+    for (const int node : nodes) {
+      const double a  = d.node_size_x[node] * d.node_size_y[node];
+      area           += a;
+      cx             += a * (d.node_x[node] + d.node_size_x[node] / 2);
+      cy             += a * (d.node_y[node] + d.node_size_y[node] / 2);
+    }
+    if (area <= 0) {
+      continue;
+    }
+    cx            /= area;
+    cy            /= area;
+    double spread  = 0;
+    for (const int node : nodes) {
+      spread = std::max(spread,
+                        std::hypot(d.node_x[node] + d.node_size_x[node] / 2 - cx, d.node_y[node] + d.node_size_y[node] / 2 - cy));
+    }
+    scene->groups["rec:" + id] = nodes;
+    scene->centroids.push_back({"rec:" + id, cx, cy, spread, true});
+  }
   scene->build_index();
   if (options.has_physical_clock_tree()) {
     // The native clock tree, by solver node: each physical clock net's driver (its first pin) and loads. The session
@@ -8476,6 +8606,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                                : std::vector<Hint_scope>{};
   const std::string              hint_design(source.get_name());
   std::optional<Placement_hints> placement_hints;
+  const auto                     centroid_stage = std::make_shared<Centroid_stage>();
   std::optional<Macro_hierarchy> hierarchy;
   if (macro_active) {
     hierarchy = macro_hierarchy(source, tech, options.liberty);
@@ -8506,9 +8637,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   View       v;
   v.chunk_plan=options.accepted_chunk_plan;
   auto weight_roles       = prects_library(options.technology().cells, options.control_ports);
-  if (options.clock_cluster_strength > 0 && !options.fp_place) {
+  if (options.clock_leaf_pull > 0 && !options.fp_place) {
     v.anchor_technology = options.technology_cache;
   }
+  v.cohesion_pull            = options.cohesion;
   weight_roles.reset_is_data = pcrs_active(options);
   v.prects                = weight_roles;
   v.native_orientations   = macro_active;
@@ -10189,6 +10321,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       auto report = trial.preview(physical);
       if (apply) {
         *placement_hints = std::move(trial);
+        // Intent edits run at a gate. Recompile the design before the solver or its native owner takes a copy.
+        centroid_stage->reload(placement_hints->centroids());
+        if (centroid_stage->view) {
+          v.design.cohesion_groups = centroid_stage->groups(v.design);
+        }
       }
       return metadata::canonical(report);
     };
@@ -12790,7 +12927,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
     const bool installed_leaves = control.max_iterations == 0 && options.has_physical_clock_tree() && options.legroute
                                   && options.legroute_plan.rounds > 0;
-    if (final_timing && options.clock_cluster_strength > 0 && (control.max_iterations > 0 || installed_leaves)) {
+    std::function<void()> install_leaf_centroids;  // runs once the authored centroids are bound, after the placement hints
+    bool                  leaf_centroids = false;
+    if (final_timing && options.clock_leaf_pull > 0 && (control.max_iterations > 0 || installed_leaves)) {
+      leaf_centroids             = true;
       const auto&          cells = options.technology().cells;
       std::map<Name, Name> clocks;
       std::set<Name>       gates;
@@ -12805,36 +12945,63 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       auto       clock_library = options.technology().clock_library();
       auto       model         = std::make_shared<Clock_planning_model>(clock_planning_model(options, *clock_library, tech.dbu));
       auto homes = std::make_shared<Clock_chunk_homes>(options.accepted_chunk_plan);
-      auto make_pairs = [&, clock_library, model, homes, clocks = std::move(clocks), gates = std::move(gates),
-                         installed_leaves, first = true](const dp::Design& current, int iteration) mutable {
-        auto plan = plan_clock_anchors(v, current, options, *model, *clock_library, *homes, clocks, gates, installed_leaves);
+      // Each round regroups the leaves as generated centroids. An authored centroid keeps its members: a flop it owns is left
+      // out of the generated group, and a generated group that a hand edit adopted is no longer replaced.
+      using Group_fn           = std::function<std::vector<dp::CohesionGroup>(const dp::Design&, int)>;
+      auto make_groups         = [&,
+                                  clock_library,
+                                  model,
+                                  homes,
+                                  clocks = std::move(clocks),
+                                  gates  = std::move(gates),
+                                  installed_leaves,
+                                  first = true](const dp::Design& current, int iteration) mutable {
+        auto       plan = plan_clock_groups(v, current, options, *model, *clock_library, *homes, clocks, gates, installed_leaves);
+        const auto dropped = centroid_stage->set.replace_generated("pcrs", std::move(plan.centroids), [&](const std::string& name) {
+          return centroid_stage->resolve(name);
+        });
+        auto       groups  = centroid_stage->groups(current);
         fs::create_directories(options.output_dir);
         std::ofstream report(options.output_dir + "/pcrs_clock_clusters.jsonl", first ? std::ios::trunc : std::ios::app);
+        size_t        authored = 0;
+        for (const auto& c : centroid_stage->set.items()) {
+          authored += !c.generated;
+        }
         report << std::format(
-            R"({{"iteration":{},"groups":{},"anchors":{},"gate_anchors":{},"previous_anchors":{},"retained_anchors":{},"installed_leaves":{},"infeasible_domains":{},"star_um":{}}})",
-            iteration, plan.leaves, plan.pairs.size(), plan.gate_anchors, current.pair_anchors.size(), plan.retained_anchors,
-            installed_leaves, plan.infeasible, plan.star_um) << '\n';
+            R"({{"iteration":{},"groups":{},"members":{},"gate_members":{},"authored_centroids":{},"dropped":{},"cohesion_groups":{},"installed_leaves":{},"infeasible_domains":{},"star_um":{}}})",
+            iteration,
+            plan.leaves,
+            plan.members,
+            plan.gate_members,
+            authored,
+            dropped.size(),
+            groups.size(),
+            installed_leaves,
+            plan.infeasible,
+            plan.star_um)
+               << '\n';
         if (!report) {
-          throw std::runtime_error("cannot write PCRS clock anchor report");
+          throw std::runtime_error("cannot write PCRS clock centroid report");
         }
         first = false;
-        return std::move(plan.pairs);
+        return groups;
       };
+      const auto groups_fn = std::make_shared<Group_fn>(std::move(make_groups));
       if (installed_leaves) {
-        v.design.pair_anchors = make_pairs(v.design, 0);
+        install_leaf_centroids = [&, groups_fn] { v.design.cohesion_groups = (*groups_fn)(v.design, 0); };
       }
       const auto prior = control.checkpoint;
       if (!installed_leaves || prior) {
         if (!prior || control.checkpoint_interval <= 0) {
           control.checkpoint_interval = std::max(12, control.max_iterations / 8);
         }
-        control.checkpoint = [prior, make_pairs = std::move(make_pairs)](const dp::Design& snapshot, int iteration) mutable {
+        control.checkpoint = [prior, groups_fn](const dp::Design& snapshot, int iteration) mutable {
           auto update = prior ? prior(snapshot, iteration) : dp::GpUpdate{};
           if (iteration > 0 && update.action != dp::GpCheckpointAction::restore) {
             if (update.replacement) {
-              update.replacement->pair_anchors = make_pairs(*update.replacement, iteration);
+              update.replacement->cohesion_groups = (*groups_fn)(*update.replacement, iteration);
             } else {
-              update.pair_anchors = make_pairs(snapshot, iteration);
+              update.cohesion_groups = (*groups_fn)(snapshot, iteration);
             }
           }
           return update;
@@ -12938,6 +13105,29 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       placement_hints->rebind(hint_objects());
       placement_hints->attach(control, hint_objects, bool(options.gui));
+    }
+    {
+      // Centroid records: the authored ones from the hints, and the leaf groups PCRS regroups at each checkpoint, all compiled
+      // to cohesion groups relative to one base coefficient so that color cohesion keeps its exact weight.
+      auto& stage            = *centroid_stage;
+      stage.view             = &v;
+      stage.dbu              = tech.dbu;
+      stage.default_strength = options.centroid_strength;
+      stage.base             = options.cohesion > 0 ? options.cohesion : 1;
+      stage.set              = placement_hints ? placement_hints->centroids() : Centroid_set{};
+      stage.by_name.clear();
+      stage.fixed.assign(
+          v.design.cohesion_groups.begin(),
+          v.design.cohesion_groups.begin() + static_cast<long>(std::min(v.color_groups, v.design.cohesion_groups.size())));
+      if (install_leaf_centroids) {
+        install_leaf_centroids();
+      } else if (stage.active()) {
+        v.design.cohesion_groups = stage.groups(v.design);
+      }
+      const bool gui_centroids = options.gui && !hint_scopes.empty();
+      if (stage.active() || leaf_centroids || gui_centroids) {
+        control.cohesion_weight = stage.base / tech.dbu;
+      }
     }
     size_t plan_residual = 0;  // what the last measured legroute plan round left (Legroute_plan_report::residual)
     if (refinement_active && !terminal_active && !live_session) {
@@ -16191,6 +16381,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
     if (placement_hints) {
       placement_hints->rebind(hint_objects());
+      placement_hints->note_centroids(centroid_stage->last);
       placement_hints->append_results(out, v.design);
     }
     // Use exactly the handoff's names, orientations and integer lower-lefts, including when the solver skipped GP.

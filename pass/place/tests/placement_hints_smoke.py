@@ -103,4 +103,28 @@ endmodule
     report=next(x for x in bundle if x['class']=='livehd.placement.hint_results')
     assert len(report['hints'])==4,report
     assert not any('movable hard-macro subjects only' in h.get('reason','') for h in report['hints']),report
+    # A centroid record binds its members to the final placement's nodes: a layout compiles, a member that does not exist is
+    # reported, and the hint report carries the outcome of each centroid.
+    centroid_metadata = root/'centroid.json'
+    centroid_metadata.write_text(json.dumps([
+        {'class':'livehd.placement.hints','schema_version':2,'id':'centroids','design':'hint_top',
+         'templates':[{'module':'bank','hints':[
+             {'id':'row','kind':'centroid','members':['a','b'],'layout':{'kind':'row','gap_x_um':1},'strength':0.5},
+             {'id':'ghost','kind':'centroid','members':['nowhere','missing']},
+             {'id':'dup','kind':'centroid','members':['a']}]}]}]))
+    centroid_cmd=[str(root/'work_centroid') if arg==str(root/'work') else arg for arg in cmd]
+    p=subprocess.run(centroid_cmd+[str(centroid_metadata),'--result-json',str(root/'centroid.result.json')],text=True,
+                     stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=60)
+    assert p.returncode==0,p.stdout
+    bundle=json.loads((root/'work_centroid/synth/place/metadata.json').read_text())
+    report=next(x for x in bundle if x['class']=='livehd.placement.hint_results')
+    assert len(report['hints'])==6 and all(h['status']!='discarded' for h in report['hints']),report
+    centroids={c['id']:c for c in report['centroids']}
+    assert len(centroids)==6,report
+    row=centroids['centroids:g0:row']
+    assert row['members']==2 and row['unresolved']==0 and row['compiled'] and row['strength']==0.5,row
+    assert 'layout_residual_um' in row,row
+    ghost=centroids['centroids:g1:ghost']
+    assert ghost['members']==2 and ghost['unresolved']==2 and not ghost['compiled'] and ghost['reason'],ghost
+    assert 'already a member' in centroids['centroids:g1:dup']['reason'] and not centroids['centroids:g1:dup']['compiled']
     print('scoped hints, discarded coordinates, authored/foreign preservation, selective cache replay, and timing handoff passed')

@@ -203,6 +203,7 @@ void field(A& a, Config& v) {
          v.intent,
          v.input_identity,
          v.source_identity,
+         v.centroid_strength,
          v.score,
          v.score_estimator,
          v.policy,

@@ -329,29 +329,30 @@ platform and one design (sensitivity: 5% of capacitance moves the error by about
 global-route sweeps are on OpenROAD's. Run the tree through the HighTide hand-off once the other session's routes are free.</li>
 </ul>
 
-<h3>Track C — centroids (in parallel with A)</h3>
+<h3>Track C — centroids</h3>
 <ul>
-<li><strong class="item-id">G1</strong> <strong>The record.</strong> The <code>centroid</code> hint: members,
-position (free, coordinates, relative), layout (floating, row, column, array), strength, nesting, and the
-clock fields (drive, wanted arrival). Validation and the generated-state split.</li>
-<li><strong class="item-id">G2</strong> <strong>The placer side.</strong> One implementation on the native
-placer's centroid groups for all stages; a layout is a set of target offsets from the centroid; a nested
-centroid is a member with its own point.</li>
-<li><strong class="item-id">G6</strong> <strong>Fold in what exists (K22).</strong> The plan stage's groups
-become plan-level centroids, keeping what the floorplanner needs from them (candidate colors, repulsion,
-replication). <code>synth.place.cohesion</code> becomes the weak default pull of a color's centroid and the
-option goes. A <code>cluster</code> hint is read as a floating centroid, so existing files still load. Done
-when the floorplan and placement results of the regression designs do not change with the helper in place of
-each mechanism, one at a time.</li>
-<li><strong class="item-id">G3</strong> <strong>GUI and socket.</strong> Create from selection, add, remove,
-move between centroids, set position, layout and strength, export. Draw centroids with their members.</li>
-<li><strong class="item-id">G4</strong> <strong>Clock groups as centroids.</strong> PCRS forms them, the hard
-leaf groups come from the same rule, the gate is a member. The pins a source keeps (a discrete gate and its
-latch at their fork) form a centroid too, with the pair kept together.</li>
-<li><strong class="item-id">G5</strong> <strong>The default strength.</strong> Find the largest strength that
-does not lose setup slack on coralnpu, litepci and NVDLA/partition_c, measured as in P0, and make it the
-default. Report leaf star wire and clock capacitance at that strength.</li>
+<li><strong class="item-id">G1</strong> <strong>Implemented.</strong> Placement hints read and write scoped centroid records with
+instance and nested members, position, layout, strength and inherited clock fields. Validation checks ownership, targets and cycles.
+Deleting an empty nested group also repairs its ancestors and relative references.</li>
+<li><strong class="item-id">G2</strong> <strong>Implemented for plain placement.</strong> The final placer compiles layouts into member
+offsets and absolute or relative positions into DREAMPlace cohesion groups. The hint report records unresolved members and layout
+residuals. The plan and macro stages still need the same record binding.</li>
+<li><strong class="item-id">G3</strong> <strong>Socket editing and page dragging implemented.</strong> The socket can create from selection,
+move members, adopt a PCRS leaf, edit fields and export the placement hints. The page draws compiled groups and writes a position
+when a GUI-owned centroid is dragged. Applying an edit at a gate preserves the other generated leaves.</li>
+<li><strong class="item-id">G4</strong> <strong>Leaf groups implemented.</strong> Planned and installed leaves use
+<code>synth.place.pcrs.leaf_pull</code>. A shared gate contributes its area once across its leaves. Grouping the gate and latch
+retained at the source fork and consuming the inherited clock decisions remain open.</li>
+<li><strong class="item-id">G5</strong> <strong>Open.</strong> Sweep the pull on coralnpu, litepci and NVDLA/partition_c using P0.
+Report setup slack, leaf star wire and clock capacitance before selecting the default.</li>
+<li><strong class="item-id">G6</strong> <strong>Color cohesion uses the centroid compiler.</strong> The floorplanner still owns candidate
+colors, repulsion and replication. The <code>cluster</code> hint and <code>synth.place.cohesion</code> option retain their existing paths.
+Migrating those interfaces and comparing floorplan and placement on the regression designs remain open.</li>
 </ul>
+<p>The regression targets are <code>//pass/place:centroid_record_test</code>, <code>//pass/place:gui_centroid_test</code>,
+<code>//pass/place:placement_hints_test</code> and the placement hints and PCRS smoke tests. The DREAMPlace native suite covers
+target forces and checkpoint replacement. On 2026-11-22, all 41 native tests passed. LiveHD passed all 3,961 optimized targets
+and all 3,960 debug-compatible targets. Bazel enables <code>//benchmark:constprop_contract</code> only in optimized builds.</p>
 
 <h3>Track B — chunks (after A4)</h3>
 <ul>

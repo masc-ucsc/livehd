@@ -20,7 +20,7 @@ void field(A& a, RelativeOrder& v) {
 }
 template <class A>
 void field(A& a, CohesionGroup& v) {
-  livehd::binary_message::fields(a, v.nodes, v.weight, v.areas, v.offsets);
+  livehd::binary_message::fields(a, v.nodes, v.weight, v.areas, v.offsets, v.has_target, v.target_x, v.target_y, v.target_weight);
 }
 template <class A>
 void field(A& a, CentroidGroup& v) {

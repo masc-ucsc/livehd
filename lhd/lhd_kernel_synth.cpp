@@ -738,6 +738,10 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (out.cohesion < 0) {
     throw Lhd_error{"usage", "synth.place.cohesion must be nonnegative", ""};
   }
+  out.centroid_strength = number("place.centroid_strength", "0.1");
+  if (!std::isfinite(out.centroid_strength) || out.centroid_strength < 0) {
+    throw Lhd_error{"usage", "synth.place.centroid_strength must be nonnegative", ""};
+  }
   out.utilization         = number("place.utilization", "0.30");
   out.allow_increase_area = truthy(synth_set(opts, "place.allow_increase_area", "true"));
   out.area_restarts       = integer("place.area_restarts", "12");
@@ -1353,12 +1357,11 @@ livehd::placement::Options placement_options(const Options& opts) {
     if (skew_rounds && !out.clock_tree) {
       throw Lhd_error{"usage", "positive synth.place.pcrs.skew_rounds requires synth.place.pcrs.clock=true", ""};
     }
-    out.clock_cluster_strength = number("place.pcrs.cluster_strength", "0");
-    if (!std::isfinite(out.clock_cluster_strength) || out.clock_cluster_strength < 0 || out.clock_cluster_strength > 1
-        || (out.clock_cluster_strength > 0 && !out.clock_tree)) {
+    out.clock_leaf_pull = number("place.pcrs.leaf_pull", "0");
+    if (!std::isfinite(out.clock_leaf_pull) || out.clock_leaf_pull < 0 || (out.clock_leaf_pull > 0 && !out.clock_tree)) {
       throw Lhd_error{"usage",
-                      "invalid PCRS clock cluster strength",
-                      "use a fraction in [0,1] and enable PCRS clock synthesis for clustering"};
+                      "invalid PCRS clock leaf pull",
+                      "use a nonnegative number and enable PCRS clock synthesis for leaf centroids"};
     }
     out.clock_hold_area_um2 = number("place.pcrs.hold_area_um2", "0");
     if (out.clock_hold_area_um2 < 0 || (out.clock_hold_area_um2 > 0 && !out.clock_tree)) {
@@ -2256,6 +2259,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
       throw Lhd_error{"usage", "--gui needs placement", "add --set synth.place=true"};
     }
     livehd::placement::gui::Config gc;
+    gc.centroid_strength = place_options.centroid_strength;
     // A replay may run later, after an input file was replaced at the same path.
     // Compare the physical inputs by content. Execution shares are local to the worker.
     auto                           inputs = place_options.lefs;

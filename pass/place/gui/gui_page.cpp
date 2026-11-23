@@ -1424,7 +1424,7 @@ function selMove(dx,dy,final){const ns=[],xs=[],ys=[],fn=[],fx=[],fy=[];for(cons
 function sendMove(m){if(m.nodes.length)cmd({cmd:'move',nodes:m.nodes,x:m.x,y:m.y,final:m.final});if(m.final&&m.fixed.nodes.length)cmd({cmd:'macro_move',nodes:m.fixed.nodes,x:m.fixed.x,y:m.fixed.y,final:true})}
 function hitCen(px,py){if(!D||!$('l_cen').checked||!D.centroids.length)return -1;for(let i=D.centroids.length-1;i>=0;i--){const c=C&&C.x.length>i?{x:C.x[i],y:C.y[i]}:D.centroids[i];if(Math.hypot(sx(c.x)-px,sy(c.y)-py)<=10)return i}return -1}
 cv.addEventListener('mousedown',e=>{if(!D||e.button!==0)return;if(beginGeometry(e))return;if(e.altKey&&D.phase==='fp'){drag={pan:true,px:e.offsetX,py:e.offsetY,ox:view.ox,oy:view.oy};return}if(rev!==null){drag={pan:true,px:e.offsetX,py:e.offsetY,ox:view.ox,oy:view.oy};return}{const eg=e.shiftKey||resultView()?null:hitEdge(e.offsetX,e.offsetY);if(eg){aEdge=eg;aStepSet=false;if(!aPend){aPend=D.die.slice();aBase=D.die.join()}drag={edge:eg};areaInfo();dirty=true;return}}const ci=hitCen(e.offsetX,e.offsetY);
- if(ci>=0&&!e.shiftKey&&!resultView()){if(!C||C.x.length<=ci)C={x:Float32Array.from(D.centroids,c=>c.x),y:Float32Array.from(D.centroids,c=>c.y),r:Float32Array.from(D.centroids,c=>c.r)};drag={cen:ci,px:e.offsetX,py:e.offsetY,x0:C.x[ci],y0:C.y[ci],t:0,moved:false};dirty=true;return}
+ if(ci>=0&&(!D.centroids[ci].name.startsWith('rec:')||D.centroids[ci].name.startsWith('rec:gui-centroids::')||D.centroids[ci].name.startsWith('rec:pcrs:'))&&!e.shiftKey&&!resultView()){if(!C||C.x.length<=ci)C={x:Float32Array.from(D.centroids,c=>c.x),y:Float32Array.from(D.centroids,c=>c.y),r:Float32Array.from(D.centroids,c=>c.r)};drag={cen:ci,px:e.offsetX,py:e.offsetY,x0:C.x[ci],y0:C.y[ci],t:0,moved:false};dirty=true;return}
  const i=hit(e.offsetX,e.offsetY);
  if(i>=0){if(e.shiftKey){sel.has(i)?sel.delete(i):sel.add(i);selUi();dirty=true;return}
   if(!sel.has(i)){sel.clear();sel.add(i)}selUi();const items=resultView()?[]:[...sel].filter(canMove);
@@ -1447,7 +1447,7 @@ window.addEventListener('mousemove',e=>{const r=cv.getBoundingClientRect(),px=e.
  if(!drag){if(!D||!X)return;const i=hit(px,py);if(i!==hover){hover=i;const t=$('tip');if(i<0)t.style.display='none';else{showTip(i);t.style.display='block';if(names[i]===undefined&&rev===null)fetchName(i)}}
   if(hover>=0){const t=$('tip');t.style.left=px+14+'px';t.style.top=py+14+'px'}return}
  if(drag.chunk){geometryMotion(drag,wx(px),wy(py));return}
- if(drag.cen!==undefined){if(!drag.moved&&Math.hypot(px-drag.px,py-drag.py)<3)return;drag.moved=true;const x=drag.x0+(px-drag.px)/view.s,y=drag.y0-(py-drag.py)/view.s;C.x[drag.cen]=x;C.y[drag.cen]=y;dirty=true;const now=performance.now();if(now-drag.t>40){drag.t=now;cmd({cmd:'centroid',name:D.centroids[drag.cen].name,x,y,final:false})}}
+ if(drag.cen!==undefined){if(!drag.moved&&Math.hypot(px-drag.px,py-drag.py)<3)return;drag.moved=true;const x=drag.x0+(px-drag.px)/view.s,y=drag.y0-(py-drag.py)/view.s;C.x[drag.cen]=x;C.y[drag.cen]=y;dirty=true;const now=performance.now();if(now-drag.t>40){drag.t=now;if(!D.centroids[drag.cen].name.startsWith('rec:'))cmd({cmd:'centroid',name:D.centroids[drag.cen].name,x,y,final:false})}}
  else if(drag.pan){view.ox=drag.ox+px-drag.px;view.oy=drag.oy+py-drag.py;dirty=true}
  else if(drag.box){drag.bx1=px;drag.by1=py;dirty=true}
  else if(drag.edge){const e2=drag.edge;areaSet(e2,Math.round(e2==='left'||e2==='right'?wx(px):wy(py)))}
@@ -1461,7 +1461,15 @@ window.addEventListener('mouseup',e=>{if(!drag)return;const r=cv.getBoundingClie
    return}
  if(drag.box){const x0=Math.min(drag.bx0,drag.bx1),x1=Math.max(drag.bx0,drag.bx1),y0=Math.min(drag.by0,drag.by1),y1=Math.max(drag.by0,drag.by1);
   for(let i=0;i<X.length;i++){const k=kd(i);if(k===4||k===3)continue;const cx=sx(X[i]+D.w[i]/2),cy=sy(Y[i]+D.h[i]/2);if(cx>=x0&&cx<=x1&&cy>=y0&&cy<=y1)sel.add(i)}selUi()}
- else if(drag.cen!==undefined){if(drag.moved)cmd({cmd:'centroid',name:D.centroids[drag.cen].name,x:C.x[drag.cen],y:C.y[drag.cen],final:true})}
+ else if(drag.cen!==undefined&&drag.moved){
+   const name=D.centroids[drag.cen].name,x=C.x[drag.cen],y=C.y[drag.cen];
+   if(name.startsWith('rec:')){
+     const generated=name.startsWith('rec:pcrs:'),dragIndex=drag.cen,originalX=drag.x0,originalY=drag.y0,frame=C;
+     xcommand({cmd:'centroid_edit',target:exploration||'main',expect:{frame:S.frame,intent:S.intent_revision},
+       op:generated?'adopt':'set',id:name.slice(generated?4:'rec:gui-centroids::'.length),position:[x/D.dbu,y/D.dbu],apply:true})
+       .catch(e=>{frame.x[dragIndex]=originalX;frame.y[dragIndex]=originalY;dirty=true;$('msg').textContent=e.message});
+   }else cmd({cmd:'centroid',name,x,y,final:true});
+ }
  else if(drag.items&&drag.moved){sendMove(selMove((px-drag.px)/view.s,-(py-drag.py)/view.s,true))}
  drag=null;dirty=true});
 let HL=[],hlV=-1,selV=-1,selExpect=0,applyingSel=false,selTimer=null;

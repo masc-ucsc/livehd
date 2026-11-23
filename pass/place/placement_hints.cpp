@@ -315,6 +315,7 @@ Placement_hints::Placement_hints(std::shared_ptr<const metadata::Bundle> input, 
     return resolve_object(t.scope.path, ref);
   };
   std::set<std::string> ids;
+  std::map<std::string, Centroid> pending_centroids;
   for (const auto& t : templates) {
     if (!t.value->HasMember("hints") || !(*t.value)["hints"].IsArray()) {
       Hint h;
@@ -563,6 +564,16 @@ Placement_hints::Placement_hints(std::shared_ptr<const metadata::Bundle> input, 
               throw std::invalid_argument("invalid direction");
             }
           }
+        } else if (h.kind == "centroid") {
+          // Members are instances of any kind (flops, cells, memories, macros) or other centroids, named relative to the scope.
+          // They bind to placement nodes when a stage compiles the set, not here: only hard macros are hint objects.
+          const auto     prefix = t.id + ":" + join(t.scope.path, '/') + ":";
+          Centroid_names qualify;
+          qualify.member   = [&](const std::vector<std::string>& ref) { return scoped(t.scope.path, ref); };
+          qualify.centroid = [&](const std::string& local) { return prefix + local; };
+          auto record      = parse_centroid(v, qualify);
+          record.origin    = record.origin.empty() ? "file" : record.origin;
+          pending_centroids.emplace(h.id, std::move(record));
         } else {
           throw std::invalid_argument("unknown hint kind '" + h.kind + "'");
         }
@@ -589,6 +600,11 @@ Placement_hints::Placement_hints(std::shared_ptr<const metadata::Bundle> input, 
   for (auto& h : hints_) {
     if (counts[h.id] > 1) {
       reject(h, "duplicate scoped hint id; no file-order precedence");
+    } else if (auto it = pending_centroids.find(h.id); it != pending_centroids.end()) {
+      std::string why;
+      if (!centroids_.add(std::move(it->second), &why)) {
+        reject(h, why);
+      }
     }
   }
 }
@@ -1098,7 +1114,7 @@ rapidjson::Document Placement_hints::report(const dp::Design& d, bool warnings) 
     }
     // Clusters request attraction without a maximum radius. An advisory seed
     // is applied only at initialization. Neither requires zero final distance.
-    if (h.status == "accepted" && h.kind != "cluster" && h.kind != "position"
+    if (h.status == "accepted" && h.kind != "cluster" && h.kind != "position" && h.kind != "centroid"
         && (!fits_core || residual > std::max(d.layout.site_width, d.layout.row_height))) {
       h.status = "relaxed";
       h.reason = fits_core ? "soft relationship exceeds one placement pitch in the measured frame"
@@ -1125,7 +1141,28 @@ rapidjson::Document Placement_hints::report(const dp::Design& d, bool warnings) 
     results.PushBack(r, a);
   }
   report.AddMember("hints", results, a);
+  if (!centroid_report_.results.empty()) {
+    J cs(rapidjson::kArrayType);
+    for (const auto& c : centroid_report_.results) {
+      J r(rapidjson::kObjectType);
+      r.AddMember("id", string(c.id), a);
+      r.AddMember("members", static_cast<uint64_t>(c.members), a);
+      r.AddMember("unresolved", static_cast<uint64_t>(c.unresolved), a);
+      r.AddMember("strength", c.strength, a);
+      r.AddMember("compiled", c.group >= 0, a);
+      r.AddMember("reason", string(c.reason), a);
+      if (const auto it = centroid_report_.layout_residual.find(c.id); it != centroid_report_.layout_residual.end()) {
+        r.AddMember("layout_residual_um", it->second / dbu_, a);
+      }
+      cs.PushBack(r, a);
+    }
+    report.AddMember("centroids", cs, a);
+  }
   return report;
+}
+void Placement_hints::note_centroids(Centroid_compiled compiled) {
+  compiled.groups.clear();
+  centroid_report_ = std::move(compiled);
 }
 void Placement_hints::append_results(metadata::Bundle& out, const dp::Design& d) {
   out.replace(report(d, true));

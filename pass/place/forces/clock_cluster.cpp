@@ -65,68 +65,6 @@ bool data_move_pays(const dp::Design& d, int i, Offset proposed, double clock_sa
 }
 }  // namespace
 
-std::vector<dp::PairAnchor> clock_leaf_anchors(const std::vector<Clock_anchor_group>& groups, double strength,
-                                               const std::vector<double>& criticality) {
-  std::vector<dp::PairAnchor> pairs;
-  if (strength <= 0) {
-    return pairs;
-  }
-  std::unordered_map<int, size_t> gate_leaves;
-  size_t                          count = 0;
-  for (const auto& [gate, members] : groups) {
-    const size_t n = members.size();
-    if (n == 0) {
-      continue;
-    }
-    count += n * (n - 1) / 2;
-    if (gate >= 0) {
-      ++gate_leaves[gate];
-      count += n;
-    }
-  }
-  pairs.reserve(count);
-  for (const auto& [gate, members] : groups) {
-    const size_t degree = members.size() + (gate >= 0);
-    if (degree < 2) {
-      continue;
-    }
-    const auto append = [&](int first, int second, size_t leaves) {
-      const double weight = strength / ((degree - 1) * std::max({1., criticality.at(first), criticality.at(second)}));
-      pairs.push_back({std::min(first, second), std::max(first, second), weight / leaves});
-    };
-    // The same gate participates in every leaf of its distribution. Each leaf
-    // gets an equal share of the gate's weight, including singleton leaves.
-    const auto leaves = gate < 0 ? 1 : gate_leaves.at(gate);
-    for (size_t i = 0; i < members.size(); ++i) {
-      for (size_t j = 0; j < i; ++j) {
-        append(members[i], members[j], 1);
-      }
-      if (gate >= 0) {
-        append(members[i], gate, leaves);
-      }
-    }
-  }
-  return pairs;
-}
-
-size_t retained_clock_anchors(const std::vector<Clock_anchor_group>& groups, const std::vector<dp::PairAnchor>& previous,
-                              size_t node_count) {
-  if (previous.empty()) {
-    return 0;
-  }
-  std::vector<const Clock_anchor_group*> membership(node_count);
-  for (const auto& group : groups) {
-    for (const int node : group.members) {
-      membership.at(node) = &group;
-    }
-  }
-  return std::ranges::count_if(previous, [&](const auto& pair) {
-    const auto* a = membership.at(pair.first);
-    const auto* b = membership.at(pair.second);
-    return (a && (a == b || a->gate == pair.second)) || (b && b->gate == pair.first);
-  });
-}
-
 Clock_cluster_step clock_cluster_step(const dp::Design& d, std::vector<std::vector<int>> domains, double strength, double density) {
   Clock_cluster_step step;
   if (domains.empty() || strength <= 0) {

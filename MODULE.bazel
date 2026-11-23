@@ -94,7 +94,7 @@ bazel_dep(name = "zlib", version = "1.4")
 # Native CPU placement; the repository uses LiveHD's HHDS/HLOP repositories.
 git_repository(
     name = "dreamplace",
-    commit = "8ec797495982159f5a0f113aca89b3c435b6d3fd",
+    commit = "989adf53626b66c61d7909e2ff30d91984ae6e02",
     remote = "https://github.com/masc-ucsc/DREAMPlace.git",
 )
 # For local co-development swap the git_repository above for:

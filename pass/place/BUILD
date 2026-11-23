@@ -468,6 +468,8 @@ filegroup(
         "gui/gui_gp_owner.cpp",
         "place.cpp",
         "placement_hints.cpp",
+        "centroid_record.cpp",
+        "centroid_record.hpp",
         "placement_technology.cpp",
         "place.hpp",
         "placement_hints.hpp",
@@ -743,19 +745,36 @@ cc_library(
     deps = ["@dreamplace//dreamplace/native:placer"],
 )
 
+# The centroid helper's record, its validation and its compilation to the native placer's cohesion groups (todo 2p-pcrs, G1/G2).
+cc_library(
+    name = "centroid_record",
+    srcs = ["centroid_record.cpp"],
+    hdrs = ["centroid_record.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = ["@dreamplace//dreamplace/native:placer", "@rapidjson"],
+)
+
 # 2i-interact: the interactive placement session, its HTTP server and the embedded page.
 cc_library(
     name = "gui",
-    srcs = ["gui/gui_worker.cpp","gui/gui_geometry.cpp","gui/gui_session.cpp", "gui/gui_server.cpp", "gui/gui_page.cpp", "gui/gui_render.cpp", "gui/gui_agent.cpp", "gui/gui_ipc.cpp", "gui/gui_scan.cpp", "gui/gui_clock.cpp"],
-    hdrs = ["gui/gui_clock.hpp", "gui/gui_scan.hpp", "gui/gui_tracks.hpp", "gui/gui_chunks.hpp", "macro_state.hpp", "gui/gui_policy.hpp","gui/gui_worker.hpp","gui/gui_geometry.hpp","gui/gui_session.hpp", "gui/gui_page.hpp", "gui/gui_render.hpp", "gui/gui_ipc.hpp", "gui/gui_wire.hpp"],
+    srcs = ["gui/gui_worker.cpp","gui/gui_geometry.cpp","gui/gui_session.cpp", "gui/gui_server.cpp", "gui/gui_page.cpp", "gui/gui_render.cpp", "gui/gui_agent.cpp", "gui/gui_ipc.cpp", "gui/gui_scan.cpp", "gui/gui_clock.cpp", "gui/gui_centroid.cpp"],
+    hdrs = ["gui/gui_clock.hpp", "gui/gui_centroid.hpp", "gui/gui_scan.hpp", "gui/gui_tracks.hpp", "gui/gui_chunks.hpp", "macro_state.hpp", "gui/gui_policy.hpp","gui/gui_worker.hpp","gui/gui_geometry.hpp","gui/gui_session.hpp", "gui/gui_page.hpp", "gui/gui_render.hpp", "gui/gui_ipc.hpp", "gui/gui_wire.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":macro_dead_space", "//core", "@rapidjson", "@re2//:re2"],
+    deps = [":centroid_record", ":macro_dead_space", "//core", "@rapidjson", "@re2//:re2"],
 )
 
 cc_test(
     name = "gui_session_test",
     srcs = ["gui/gui_session_test.cpp"],
+    copts = COPTS,
+    deps = [":gui", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "gui_centroid_test",
+    srcs = ["gui/gui_centroid_test.cpp"],
     copts = COPTS,
     deps = [":gui", "@googletest//:gtest_main"],
 )
@@ -898,6 +917,7 @@ cc_library(
     deps = [
         ":row_occupancy",
         "//pass/usyn:usyn_logic",
+        ":centroid_record",
         ":gui",
         ":macro_dead_space",
         ":region_mesh",
@@ -1430,6 +1450,13 @@ cc_test(
     srcs = ["growth_budget_test.cpp"],
     copts = COPTS,
     deps = [":place", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "centroid_record_test",
+    srcs = ["centroid_record_test.cpp"],
+    copts = COPTS,
+    deps = [":centroid_record", "@googletest//:gtest_main"],
 )
 
 cc_test(

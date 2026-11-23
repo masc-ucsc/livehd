@@ -17,7 +17,7 @@ options produce a migration diagnostic. Tuning export paths remain outputs, and 
 validation gates. Generic attribute-loader file labels, external JSON protocols, query arguments, and JSON design
 formats are not tuning-file selection options.</p>
 <table><tr><th>Removed input selector</th><th>Positional JSON record</th><th>Behavior</th></tr>
-<tr><td><code>synth.metadata</code></td><td><code>livehd.placement.hints</code></td><td>Advisory hints during FP/macro placement.</td></tr>
+<tr><td><code>synth.metadata</code></td><td><code>livehd.placement.hints</code></td><td>Advisory hints during FP/macro placement, and <code>kind: "centroid"</code> records (members, position, layout, strength, nesting, clock fields) that the final placement turns into pull toward a point; see <code>pass/place/README.md</code>.</td></tr>
 <tr><td><code>synth.tune.file</code></td><td><code>livehd.synth.tuning</code></td><td>Existing schema_version=1 and decisions fields; validation gates retained.</td></tr>
 <tr><td><code>sim.tune.file</code></td><td><code>livehd.sim.tuning</code></td><td>Existing schema, knobs/vector and provenance fields; explicit knobs win.</td></tr>
 <tr><td><code>synth.place.row_access</code></td><td><code>livehd.physical.row_access</code></td><td>Strict convention payload; selected by provisional domino generation.</td></tr></table>
@@ -59,7 +59,7 @@ agreed. Existing contract tests remain unchanged.</li>
 </ul>
 <h2>Subtasks — landed</h2>
 <ul><li>Shared <code>core/metadata</code> bundle reader/writer: canonical compact records, duplicate validation, unknown-record preservation, atomic publication and selected-class identity.</li>
-<li>positional JSON placement consumer: hierarchical templates, groups, soft cluster/direction/snap/alignment, validated movable coordinate seeds, structured diagnostics and generated state/results.</li>
+<li>positional JSON placement consumer: hierarchical templates, groups, soft cluster/direction/snap/alignment, centroids (members that may be flops, cells, memories, macros or other centroids; free, fixed or relative position; floating, row, column or array layout; strength), validated movable coordinate seeds, structured diagnostics and generated state/results.</li>
 <li>Completed-placement cache keys include the selected design’s hints and explicitly supplied macro state. Cache restore merges generated records into the current input bundle; inner block reuse is bypassed for hints.</li>
 <li>Unit coverage for repeated hierarchy, name rebinding, invalid/overlapping coordinates, contradictory soft relationships, and metadata round trips. Synthetic and CoralNPU experiments are tracked in the placement guide.</li></ul>
 <p>This is an incremental migration. Existing standalone synthesis/simulation tuning, report and cache formats are still read through their original APIs. Source HDL attributes and automatic admission of exported coordinate-state bundles are not implemented. No existing option default changed.</p>

@@ -293,6 +293,7 @@ struct Summary_metrics {
 };
 std::string measurement_summary(const Summary_metrics&, const Score_components&, const std::string& estimator);
 struct Config {
+  double                           centroid_strength = 0.1;
   std::string                      intent             = "[]", input_identity, source_identity;
   unsigned                         repair_trials      = 0;
   double                           invocation_start_s = 0;

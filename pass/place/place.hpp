@@ -366,7 +366,8 @@ struct Options {
   };
   bool wl_resynth = true;
   bool     clock_tree             = false;
-  double   clock_cluster_strength = 0;
+  // Pull (inverse microns, the unit of a centroid's strength) of the generated centroid around each clock leaf group; zero forms none.
+  double   clock_leaf_pull        = 0;
   double   clock_hold_area_um2    = 0;
   unsigned clock_leaf_drive_steps = 0, clock_skew_rounds = 0, clock_gate_merge_trials = 0, clock_gate_leaf_trials = 0,
            clock_gate_clone_trials = 0, clock_gate_raise_trials = 0;
@@ -565,6 +566,8 @@ struct Options {
   int                                  macro_snap_weight    = 100;
   int                                  schedule_iterations = 500, io_iterations = 500;
   double                               cohesion          = 0;
+  // Pull of an authored centroid record that has no strength of its own, in the same unit as cohesion.
+  double                               centroid_strength = 0.1;
   double                               resistance_ohm_um = -1, capacitance_ff_um = -1;
   double                               rc_pessimism = 1;  // wire R and C each scale by sqrt(factor)
   int                                  iterations = 1500, bins = 64, threads = 1;

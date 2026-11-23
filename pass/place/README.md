@@ -1078,7 +1078,7 @@ apply physical CORE row orientations while preserving fixed-cell and macro
 orientations; the saved GP frame retains its raw orientations. These observers
 do not change placement coordinates, priorities or timing.
 
-`synth.place.cohesion=C` enables soft, area-weighted centroid attraction for
+`synth.place.cohesion=C` (the pull of the color centroids, see Centroids below) enables soft, area-weighted centroid attraction for
 mapped cells and SRAMs sharing a synthesis color in the same instance scope.
 It defaults to zero. C is the final coefficient in inverse microns, ramped
 linearly from zero during the final GP call. The IO-assignment prototype stays
@@ -1088,6 +1088,28 @@ groups. Unowned nodes and singleton groups get no attraction. The diagnostic
 `cohesion_groups.json` records group membership. No group boxes or new hard
 constraints are created, and legalization stays unchanged. This initial host
 wiring supports ordinary placement (`synth.place.macro=none`).
+
+### Centroids
+
+A centroid is a point that pulls its members during placement. It is a record of `livehd.placement.hints` (`kind: "centroid"`), scoped by the same templates as the other kinds, so a record in a repeated module becomes one centroid per instance (`<record>:<instance path>:<id>`):
+
+```json
+{"id":"flops","kind":"centroid",
+ "members":["u/f0","u/f1",{"instance":"u/gate","share":0.5},{"centroid":"inner"}],
+ "position":{"mode":"at","x_um":120,"y_um":80},
+ "layout":{"kind":"row","gap_x_um":0.5},
+ "strength":0.1,
+ "clock":{"drive":"BUFx4_ASAP7_75t_R","arrival_ps":140}}
+```
+
+- `members` are instances of any kind (flops, cells, memories, macros), named relative to the scope, or other centroids (`{"centroid": id}`), which nest to any depth. A member lives in one centroid; `share` (0, 1] scales the part of its area that counts in the pull.
+- `position` is `free` (the default: the point is wherever the members are), `at` (pulled to coordinates) or `relative` (to another top-level centroid, at `dx_um`, `dy_um`). A nested centroid takes its position from its parent's layout.
+- `layout` is `floating` (the default: members pulled to the point), `row`, `column` or `array` (`columns`): the members are pulled to slots around the point, in member order, `gap_x_um` and `gap_y_um` apart, before final legalization, which may snap them to rows and sites. A nested centroid is a block in its parent's layout and keeps its own shape.
+- `strength` is the pull in inverse microns (the unit of `synth.place.cohesion`); a record without one takes `synth.place.centroid_strength` (default 0.1). Zero turns the centroid off.
+- `clock` carries the clock decisions for members that are clock sinks (leaf driver master, wanted arrival in ps); a field set on a centroid that contains others applies to all of them, the nearest setting winning. PCRS does not read them yet (todo 2p-pcrs, X1).
+- PCRS regenerates leaf groups around the instances owned by authored centroids. A clock gate shared by several leaves contributes its area once across those groups. Use `centroid_edit op=adopt` to save a generated leaf as an authored record. Color cohesion uses a separate set of generated groups.
+
+The final placement compiles the set to the native placer's cohesion groups: a layout is the negated slots as member offsets, a nested centroid adds the parent's group over the same members, a relative position adds one group over both blocks, a position `at` is the group's target, and the hint report (`livehd.placement.hint_results`) lists per centroid the members bound, those that did not resolve, the strength, whether it compiled and why not, and the largest distance of a member from its layout slot. The GUI and the agent socket edit the same records (`centroids`, `centroid_edit`), and dragging a centroid in the page writes its `at` position. Centroids are compiled in plain placement; in the macro stages (`synth.place.macro=h2d`, the floorplan) hint scopes are not bound and centroid records are not read.
 
 `synth.place.macro=h2d` opts into native hierarchical macro placement in full
 mode. The default `none` preserves the existing flow. The host reads hierarchy

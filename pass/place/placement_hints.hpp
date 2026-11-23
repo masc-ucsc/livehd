@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "centroid_record.hpp"
 #include "core/metadata.hpp"
 #include "dreamplace/native/placement.hpp"
 #include "hhds/graph.hpp"
@@ -40,6 +41,8 @@ class Placement_hints {
   std::string                             design_;
   std::vector<Hint>                       hints_;
   std::vector<Hint_object>                objects_;
+  Centroid_set                            centroids_;
+  Centroid_compiled                       centroid_report_;  // kind "centroid": members bind to nodes when a stage compiles them
   double                                  dbu_ = 1;
 
   std::vector<std::pair<double, double>>  matrix_targets(const Hint&, const DreamPlace::native::Design&, bool* fits_core = nullptr) const;
@@ -49,6 +52,10 @@ class Placement_hints {
 
 public:
   bool has_pull_hints() const;
+  // The authored centroid records, scope-qualified; discarded (disabled or rejected) ones are not in the set.
+  const Centroid_set& centroids() const { return centroids_; }
+  // The per-centroid outcome of the latest compile (members bound, unresolved, strength, layout residual), for the report.
+  void note_centroids(Centroid_compiled);
   Placement_hints(std::shared_ptr<const metadata::Bundle>, std::string design, const std::vector<Hint_scope>&,
                   std::vector<Hint_object>, double                     dbu);
   void                                       rebind(std::vector<Hint_object>);

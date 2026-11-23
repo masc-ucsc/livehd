@@ -16,6 +16,7 @@
 
 #include "core/hash_util.hpp"
 #include "core/job_manager.hpp"
+#include "gui_centroid.hpp"
 #include "gui_clock.hpp"
 #include "gui_geometry.hpp"
 #include "gui_scan.hpp"
@@ -2433,6 +2434,102 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
                                     revision,
                                     edits.json()));
   }
+  if (cmd == "centroids") {
+    // The authored records of the placement hints, and the groups the flow compiled (record centroids and PCRS leaf groups).
+    std::string                                                design, intent;
+    std::vector<std::pair<std::string, std::array<double, 4>>> compiled;
+    {
+      std::lock_guard lock(m_);
+      if (!scene_) {
+        return err_json("no scene yet");
+      }
+      design = scene_->design;
+      intent = cfg_.intent;
+      for (const auto& c : scene_->centroids) {
+        if (c.name.starts_with("rec:")) {
+          const auto found = scene_->groups.find(c.name);
+          compiled.push_back({
+              c.name.substr(4),
+              {c.x, c.y, c.radius, found == scene_->groups.end() ? 0. : double(found->second.size())}
+          });
+        }
+      }
+    }
+    rapidjson::Document out;
+    out.Parse(list_centroid_records(intent, design).c_str());
+    auto&            a = out.GetAllocator();
+    rapidjson::Value flow(rapidjson::kArrayType);
+    for (const auto& [id, v] : compiled) {
+      rapidjson::Value row(rapidjson::kObjectType);
+      row.AddMember("id", rapidjson::Value(id.c_str(), a), a)
+          .AddMember("generated", !id.empty() && (id.starts_with("pcrs:") || id.starts_with("color:")), a)
+          .AddMember("x_dbu", v[0], a)
+          .AddMember("y_dbu", v[1], a)
+          .AddMember("radius_dbu", v[2], a)
+          .AddMember("members", static_cast<uint64_t>(v[3]), a);
+      flow.PushBack(row, a);
+    }
+    out.AddMember("ok", true, a).AddMember("compiled", flow, a);
+    rapidjson::StringBuffer                    buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    out.Accept(writer);
+    return buffer.GetString();
+  }
+  if (cmd == "centroid_edit") {
+    // Edits go to the placement hints as one record and are applied by the same intent path as every other hint edit.
+    if (d.HasMember("apply") && !d["apply"].IsBool()) {
+      return err_json("apply must be a boolean");
+    }
+    std::string   design, intent, module;
+    uint64_t      frame = 0, revision = 0;
+    Centroid_edit result;
+    {
+      std::lock_guard lock(m_);
+      if (!scene_ || !frame_ || state_name_ != "gate" || !intent_provider_) {
+        return err_json(
+            "centroid edits require a placement gate with placement hints (a plain placement, not the chunk floorplan)");
+      }
+      if (auto why = expected_revision_locked(); !why.empty()) {
+        return err_json(why);
+      }
+      if (str("members") == "selected" && selection_count_ != selection_.size()) {
+        return err_json("the selection is too large to edit as a whole; name the members");
+      }
+      design   = scene_->design;
+      intent   = cfg_.intent;
+      frame    = frame_->id;
+      revision = intent_revision_;
+      module   = scene_->design;
+      try {
+        result = edit_centroids(intent, design, module, d, selection_, cfg_.centroid_strength, [&](const std::string& id) {
+          std::vector<std::string> names;
+          if (!id.starts_with("pcrs:")) {
+            return names;
+          }
+          if (const auto found = scene_->groups.find("rec:" + id); found != scene_->groups.end()) {
+            for (const int node : found->second) {
+              names.push_back(scene_->nodes[node].name);
+            }
+          }
+          return names;
+        });
+      } catch (const std::exception& e) {
+        return err_json(e.what());
+      }
+    }
+    const bool apply    = !d.HasMember("apply") || d["apply"].GetBool();
+    bool       accepted = false;
+    auto       reply    = submit_reply(std::format(R"({{"cmd":"{}","expect":{{"frame":{},"intent":{}}},"records_json":"{}"}})",
+                                                   apply ? "intent_apply" : "intent_preview",
+                                                   frame,
+                                                   revision,
+                                                   esc(result.intent)),
+                                       &accepted);
+    if (!accepted) {
+      return reply;
+    }
+    return std::format(R"({{"ok":true,"edit":{},"submit":{}}})", result.reply, reply);
+  }
   if (cmd == "chunk_interface") {
     std::string design, intent;
     uint64_t    frame = 0, revision = 0;
@@ -3047,6 +3144,7 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
 "start":["hello","state","summary"],
 "inspect":["find","describe","selection","critical","geometry","maps","clusters","signature","leverage","evidence"],
 "clock":["clock","clock_edit"],
+"centroids":["centroids","centroid_edit"],
 "paint":["highlight","highlight_names","select","clear_highlight","highlights"],
 "edit":["move","batch","pin","unpin","relax","legalize","evaluate","command_status","cmd"],
 "explore":["whatif","explore","explore_begin","explore_wait","explorations","compare","similarity","explore_discard","score_config"],
@@ -3059,6 +3157,8 @@ std::string Session::agent_call(const std::string& json, int timeout_ms) {
 "macro_scan":"{node, positions?:[[x,y],...] | grid?:{nx,ny}, orientations?:[N|FN|FS|S,...], top?, refine?, frame?:die|chunk, chunk?, expect?} -> positions (DBU, lower-left; with frame chunk relative to the home chunk, whose box is the grid and the limit) of one macro ranked by its pin nets' half-perimeter, legal ones only, the current pose included, the best refined downhill; cells frozen, no timing, other macros' pins not counted: screen here, then whatif the best",
 "maps":"{} -> frame, availability, peak, overflow, over-capacity share and hotspot boxes of each measured grid",
 "clock":"{what?: summary|nets|sinks|pair|map|view, ...} -> the native clock tree (synth.place.pcrs.clock=true), once the flow has built it. summary: per clock root the endpoints, buffers by master, depth range (unequal depth is built-in skew), wire at this frame, estimated insertion and skew, and the worst stages. nets {root?, sort?: slew|radius|skew|load|fanout|wire|delay, limit?}: one row per clock net. sinks {root?, order?: late|early, limit?}: endpoints by estimated arrival. pair {a, b}: two clock loads (name, #index or instance:pin) -> shared stage, private stages and estimated skew (b later than a is positive). map {metric?: skew|arrival|sinks|slew, bins?}: a die grid, v[x*by+y], skew being the arrival spread within a bin and its neighbours. Wire lengths are measured at the frame; delays, slews and arrivals are the handoff's estimates (pcrs_clock.json) at the positions the tree was planned at",
+"centroids":"{} -> the centroid records of the placement hints (the GUI's and those from files) and the groups the flow compiled: record centroids and the PCRS leaf groups (id pcrs:N), with position, radius and member count",
+"centroid_edit":"{op: create|delete|add|remove|move|set|adopt, apply?: true, ...} -> edit the centroid records (kind centroid in livehd.placement.hints) and apply them through intent_apply (apply false: preview). A centroid pulls its members: create {id?, members:[names]|selected, position?: [x_um,y_um]|{mode: free|at|relative, to, dx_um, dy_um}, layout?: floating|row|column|array|{kind, columns, gap_x_um, gap_y_um}, strength?, clock?: {drive, arrival_ps}}; add/remove {id, members}; move {to, members}; set {id, position|layout|strength|strength_scale|clock|members}; adopt {id: pcrs:N} writes a generated leaf group as an authored centroid; a member is an instance name or {centroid: id} (nesting). Needs a placement gate",
 "clock_edit":"{op: drive|arrival|option|remove|clear|show|apply, ...} -> stage clock decisions, then rebuild. drive {leaf: driver instance or net index | pins:[...], step}: absolute leaf drive step (synth.place.pcrs.leaf_schedule). arrival {leaf | pins, wanted_ps}: wanted arrival of these loads (arrival_targets; needs option balance=true). option {key, value?}: a scalar synth.place.pcrs knob (balance, source_fork, leaf_fanout, leaf_radius_um, max_slew_ps, leaf_drive_steps, skew_rounds, hold_area_um2, ...). apply {checkpoint?}: writes the decision files and restarts the flow with them (from the start unless a state.cps index is given); the tree is rebuilt and re-checked by the flow, never patched in place",
 "clusters":"{} -> available placement cluster names and member counts",
 "explore_begin":"{expect?:{frame},set?:{physical_option:CLI_value}} -> start a private foreground replay at this gate",

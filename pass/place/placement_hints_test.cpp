@@ -463,3 +463,36 @@ TEST(PlacementHints, PinFacingRespectsMasterSymmetryAndSeparatesTranslation) {
   held.seed(d);
   EXPECT_TRUE(d.node_orientation.empty() || d.node_orientation[0] == dp::Orientation::N);
 }
+TEST(PlacementHints, CentroidRecordsAreScopedPerInstanceAndNeverPullMacros) {
+  Placement_hints h(bundle(document(R"([{"id":"flops","kind":"centroid","members":["f0","f1",{"centroid":"inner"}],
+                                          "layout":{"kind":"row","gap_x_um":1},"strength":0.5},
+                                         {"id":"inner","kind":"centroid","members":["f2"]},
+                                         {"id":"bad","kind":"centroid","members":[]},
+                                         {"id":"duplicate","kind":"centroid","members":["f3"]},
+                                         {"id":"duplicate","kind":"centroid","members":["f4"]}])")),
+                    "top",
+                    {
+                        { "top",     {}},
+                        {"bank", {"g0"}},
+                        {"bank", {"g1"}}
+  },
+                    objects(),
+                    1);
+  const auto&     set = h.centroids();
+  EXPECT_EQ(set.find("test:g0:duplicate"), nullptr);
+  ASSERT_EQ(set.size(), 4u);  // two per bank instance; malformed and duplicate IDs contribute no placement force
+  const auto* first = set.find("test:g0:flops");
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first->members[0].name, "g0.f0");
+  EXPECT_TRUE(first->members[2].centroid);
+  EXPECT_EQ(first->members[2].name, "test:g0:inner");
+  EXPECT_EQ(set.find("test:g1:flops")->members[1].name, "g1.f1");
+  EXPECT_EQ(first->layout, Centroid_layout_kind::row);
+  EXPECT_DOUBLE_EQ(first->strength, .5);
+  EXPECT_FALSE(first->generated);
+  EXPECT_EQ(first->origin, "file");
+  EXPECT_TRUE(set.validate().empty());
+  EXPECT_FALSE(h.has_pull_hints());  // a centroid is compiled to cohesion groups, never to macro pulls
+  auto d = design();
+  EXPECT_TRUE(h.pulls(d).empty());
+}

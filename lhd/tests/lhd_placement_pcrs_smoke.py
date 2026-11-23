@@ -261,31 +261,29 @@ assert len(round_pins) == len(clock_pins) and set(round_pins) == clock_pins
 # The tight clock forces a GP timing round and may repartition the reset loads.
 tight_sdc = root / 'tight.sdc'
 tight_sdc.write_text(sdc.read_text().replace('-period 10 ', '-period 0.05 '))
-run('round_anchors', ['--set', 'synth.place.pcrs.clock=true', '--set', 'synth.place.pcrs.cluster_strength=0.25'],
+run('round_anchors', ['--set', 'synth.place.pcrs.clock=true', '--set', 'synth.place.pcrs.leaf_pull=0.25'],
     timing_driven=True, constraints=tight_sdc)
 anchored_dir = root / 'round_anchors/synth/place'
 round_anchors = [json.loads(line) for path in (anchored_dir / 'timing_place').glob('round_*/pcrs_clock_clusters.jsonl')
                  for line in path.read_text().splitlines()]
-assert any(sample['anchors'] > 0 for sample in round_anchors), round_anchors
-assert any(sample['retained_anchors'] > 0 for sample in round_anchors), round_anchors
-assert all(sample['retained_anchors'] <= min(sample['anchors'], sample['previous_anchors'])
-           for sample in round_anchors), round_anchors
+assert any(sample['cohesion_groups'] > 0 for sample in round_anchors), round_anchors
+assert all(sample['authored_centroids'] == 0 and sample['dropped'] == 0 for sample in round_anchors), round_anchors
 anchored_tree = json.loads((anchored_dir / 'pcrs_clock.json').read_text())
 anchored_pins = [p for n in anchored_tree['networks'] for b in n['branches'] if b['leaf'] for p in b['children']]
 hard_sizes = [len(b['children']) for n in anchored_tree['networks'] for b in n['branches'] if b['leaf']]
-hard_pairs = sum(n * (n - 1) // 2 for n in hard_sizes)
+hard_groups = sum(1 for n in hard_sizes if n >= 2)
 terminal_anchors = [json.loads(line) for line in (anchored_dir / 'final/pcrs_clock_clusters.jsonl').read_text().splitlines()]
-assert terminal_anchors[0]['iteration'] == 0 and hard_pairs > 0
-assert all(sample['installed_leaves'] and sample['anchors'] == hard_pairs for sample in terminal_anchors), terminal_anchors
+assert terminal_anchors[0]['iteration'] == 0 and hard_groups > 0
+assert all(sample['installed_leaves'] and sample['cohesion_groups'] == hard_groups for sample in terminal_anchors), terminal_anchors
 reset_names = re.findall(r'^\s*- (\S*__pcrs_rstf\S*) ', components('round_anchors'), re.M)
 expected = {p for p in clock_pins if '__pcrs_rstf' not in p} | {name + ':CLK' for name in reset_names}
 assert len(anchored_pins) == len(expected) and set(anchored_pins) == expected
 
 # Changing provisional GP groups must preserve the clock obligations, including reset stages.
-clustered = run('clustered', ['--set', 'synth.place.pcrs.clock=true', '--set', 'synth.place.pcrs.cluster_strength=0.25'])
+clustered = run('clustered', ['--set', 'synth.place.pcrs.clock=true', '--set', 'synth.place.pcrs.leaf_pull=0.25'])
 samples = [json.loads(line) for path in (root / 'clustered/synth/place').rglob('pcrs_clock_clusters.jsonl')
            for line in path.read_text().splitlines()]
-assert any(s['groups'] >= 2 and s['anchors'] > 0 and s['star_um'] > 0 and s['infeasible_domains'] == 0 for s in samples), samples
+assert any(s['groups'] >= 2 and s['cohesion_groups'] > 0 and s['star_um'] > 0 and s['infeasible_domains'] == 0 for s in samples), samples
 tree = json.loads((root / 'clustered/synth/place/pcrs_clock.json').read_text())
 assert {p for n in tree['networks'] for b in n['branches'] if b['leaf'] for p in b['children']} == clock_pins
 assert clustered['qor']['place']['pcrs']['max_depth'] == clock_reset['max_depth']
@@ -299,23 +297,22 @@ targets = {pin: dict(wanted_ps=i / 1000) for i, pin in enumerate(ordinary_pins)}
 targets[ordinary_pins[0]]["insertion_ps"] = 0
 arrival_targets.write_text(json.dumps(targets))
 run('nearby_targets', ['--set', 'synth.place.pcrs.clock=true', '--set', 'synth.place.pcrs.balance=true',
-                       '--set', 'synth.place.pcrs.cluster_strength=0.25', '--set',
+                       '--set', 'synth.place.pcrs.leaf_pull=0.25', '--set',
                        f'synth.place.pcrs.arrival_targets={arrival_targets}'])
 samples = [json.loads(line) for line in
            (root / 'nearby_targets/synth/place/pcrs_clock_clusters.jsonl').read_text().splitlines()]
-assert any(not record.get('installed_leaves', False) and record['anchors'] > len(ordinary_pins)
+assert any(not record.get('installed_leaves', False) and record['members'] >= len(ordinary_pins)
            and record['infeasible_domains'] == 0 for record in samples), samples
 
 # Each requested pin delay owns its leaf even before the clock tree is installed.
 isolated_schedule = root / 'isolated-clock-pins.json'
 isolated_schedule.write_text(json.dumps({p: {'steps': 0, 'delay_ps': 0.001} for p in ordinary_pins}))
-run('isolated_anchors', ['--set', 'synth.place.pcrs.clock=true', '--set', 'synth.place.pcrs.cluster_strength=0.25',
+run('isolated_anchors', ['--set', 'synth.place.pcrs.clock=true', '--set', 'synth.place.pcrs.leaf_pull=0.25',
                          '--set', f'synth.place.pcrs.leaf_schedule={isolated_schedule}'])
 records = [json.loads(line) for line in
            (root / 'isolated_anchors/synth/place/pcrs_clock_clusters.jsonl').read_text().splitlines()]
 provisional = [row for row in records if not row.get('installed_leaves', False)]
-max_reset_pairs = len(reset_stages) * (len(reset_stages) - 1) // 2
-assert provisional and all(row['anchors'] <= max_reset_pairs and row['infeasible_domains'] == 0
+assert provisional and all(row['members'] <= len(reset_stages) and row['infeasible_domains'] == 0
                            for row in provisional), provisional
 
 # Both the initial tree and the timing reference must honor the requested drive partition.
@@ -339,11 +336,11 @@ gated_source.write_text('\n'.join([
     *(f'sky130_fd_sc_hd__dfxtp_1 member{i}(.CLK(gated),.D(d[{i}]),.Q(q[{i}]));' for i in range(8)),
     'endmodule', '']))
 run('discrete_anchors', ['--set', 'compile.slang.liberty_cells=true', '--set', 'synth.input_mapped=true',
-                         '--set', 'synth.place.pcrs.clock=true', '--set', 'synth.place.pcrs.cluster_strength=0.25'],
+                         '--set', 'synth.place.pcrs.clock=true', '--set', 'synth.place.pcrs.leaf_pull=0.25'],
     design=gated_source)
 samples = [json.loads(line) for path in (root / 'discrete_anchors/synth/place').rglob('pcrs_clock_clusters.jsonl')
            for line in path.read_text().splitlines()]
-assert any(s['gate_anchors'] == 8 for s in samples), samples
+assert any(s['gate_members'] >= 1 and s['members'] == 8 for s in samples), samples
 gated_tree = json.loads((root / 'discrete_anchors/synth/place/pcrs_clock.json').read_text())
 parent = next(n for n in gated_tree['networks'] if n['source_instance'] == 'PIN' and n['source_pin'] == 'clk')
 assert not parent['minimize_source_latency'], parent  # independently buffered feeder sizing belongs to the balance trial
