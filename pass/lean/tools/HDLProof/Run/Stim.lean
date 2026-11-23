@@ -16,6 +16,7 @@ Cycle numbers are absolute: the tick of cycle `k` is the same whether a run star
 resumes at a checkpoint before `k`.
 -/
 import LeanSemanticPrimitives.Compiler.DirectTrace
+import Std.Data.HashMap
 
 namespace HDLProof
 namespace Run
@@ -34,19 +35,21 @@ def parseStim (txt : String) : Except String Stim := do
   | [] => .error "empty stimulus file"
   | hdr :: rest =>
     if hdr != "stim v1" then .error s!"line 1: expected \"stim v1\", got {repr hdr}"
-    let mut st : Stim := {}
+    -- in file order, pushed to arrays (appending to a list copied it: quadratic)
+    let mut ats : Array (Nat × Nat × Nat × Int) := #[]
+    let mut evs : Array (Nat × Nat × Int) := #[]
     for l in rest do
       match (l.splitOn " ").filter (· != "") with
       | ["at", c, "in", i, w, v] =>
           match c.toNat?, i.toNat?, w.toNat?, v.toInt? with
-          | some c, some i, some w, some v => st := { st with at_ := st.at_ ++ [(c, i, w, v)] }
+          | some c, some i, some w, some v => ats := ats.push (c, i, w, v)
           | _, _, _, _ => throw s!"unparseable {repr l}"
       | ["in", i, w, v] =>
           match i.toNat?, w.toNat?, v.toInt? with
-          | some i, some w, some v => st := { st with every := st.every ++ [(i, w, v)] }
+          | some i, some w, some v => evs := evs.push (i, w, v)
           | _, _, _ => throw s!"unparseable {repr l}"
       | _ => throw s!"unrecognised {repr l}"
-    pure st
+    pure { every := evs.toList, at_ := ats.toList }
 
 /-- The declared width of input ordinal `i` (from its `SourceDesc.input`), or 1. -/
 def inputWidth (D : DesignCert) (i : Nat) : Nat :=
@@ -68,6 +71,42 @@ def inputAt (D : DesignCert) (st : Stim) (k : Nat) : RuntimeInput :=
       match st.every.find? (fun t => t.1 == i) with
       | some (_, w, v) => mk_bv w v
       | none           => mk_bv (inputWidth D i) 0
+
+/-- The stimulus as tables, built once per run: each input's value on a cycle no `at` line
+names it (its first `in` line, else 0 at its declared width), and the `at` lines grouped by
+cycle, in file order. `StimTab.inputAt` gives `inputAt`'s inputs (the same first-match rules)
+without scanning the stimulus and the design's sources on every cycle
+(`tests/stim_tab_check.lean` checks the two against each other). cert_trace keeps a copy. -/
+structure StimTab where
+  base : RuntimeInput
+  at_  : Std.HashMap Nat (Array (Nat × Nat × Int))
+
+def StimTab.of (D : DesignCert) (st : Stim) : StimTab := Id.run do
+  let n := maxInput D
+  -- each ordinal's width: its first `SourceDesc.input` (else 1)
+  let mut width : Array (Option Nat) := Array.replicate n none
+  for s in D.sources do
+    match s with
+    | .input idx w => if idx < n && width[idx]!.isNone then width := width.set! idx (some w)
+    | _ => pure ()
+  -- each ordinal's value when no `at` line names it: its first `in` line
+  let mut every : Array (Option (Nat × Int)) := Array.replicate n none
+  for (i, w, v) in st.every do
+    if i < n && every[i]!.isNone then every := every.set! i (some (w, v))
+  let base := (Array.range n).map fun i =>
+    match every[i]! with
+    | some (w, v) => mk_bv w v
+    | none => mk_bv (width[i]!.getD 1) 0
+  let mut at_ : Std.HashMap Nat (Array (Nat × Nat × Int)) := {}
+  for (c, i, w, v) in st.at_ do
+    at_ := at_.insert c ((at_.getD c #[]).push (i, w, v))
+  return { base, at_ }
+
+/-- Cycle `k`'s inputs: an input's first `at` line for cycle `k` wins, else its base value. -/
+def StimTab.inputAt (t : StimTab) (k : Nat) : RuntimeInput :=
+  match t.at_.get? k with
+  | none => t.base
+  | some ls => ls.foldr (fun (i, w, v) acc => if i < acc.size then acc.set! i (mk_bv w v) else acc) t.base
 
 /-- An `edges v1` schedule: `at <cycle> <b0> <b1> ...`, one bit per clock ordinal. -/
 def parseEdges (txt : String) : Except String (List (Nat × Array Bool)) := do

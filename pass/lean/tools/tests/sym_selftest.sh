@@ -279,6 +279,12 @@ echo "ok: $(tail -1 "$OUT/residual_opt_check.log")"
   > "$OUT/residual_inc_check.log" 2>&1 && grep -q '^PASS residual_inc' "$OUT/residual_inc_check.log" \
   || { tail -5 "$OUT/residual_inc_check.log"; echo "FAIL: residual_inc_check"; exit 1; }
 echo "ok: $(tail -1 "$OUT/residual_inc_check.log")"
+# the drivers' stimulus readers: the input table against inputAt, the array-built reader
+# against the list-appending one (tests/stim_tab_check.lean)
+(cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/tests/stim_tab_check.lean") \
+  > "$OUT/stim_tab_check.log" 2>&1 && grep -q '^PASS stim_tab' "$OUT/stim_tab_check.log" \
+  || { tail -5 "$OUT/stim_tab_check.log"; echo "FAIL: stim_tab_check"; exit 1; }
+echo "ok: $(tail -1 "$OUT/stim_tab_check.log")"
 # certificates no Verilog front end emits (symbolic masks, whole-memory load)
 (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/tests/gen_gap_certs.lean" "$OUT/gap") \
   > "$OUT/gen_gap_certs.log" 2>&1 || { tail -5 "$OUT/gen_gap_certs.log"; echo "FAIL: gen_gap_certs"; exit 1; }
