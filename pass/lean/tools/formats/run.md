@@ -58,15 +58,17 @@ cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<p
 - `ckpt-at:` and `ckpt-out:` write `lhdcert-ckpt v1` checkpoints (`ckpt.md`). A bind run adds
   its host section.
 - `compact:<K>` replaces the simulator state by its restored checkpoint every `K` cycles, in
-  memory. The `ir`, `vc` and `ref` routes hold a memory as a function: each cycle's image calls
-  the previous cycle's, and keeps that cycle's evaluated slots alive. Without compaction, a
-  run's memory use grows every cycle and a memory read walks back to the run's start, even
-  when nothing is written. A restored state holds each memory as one table, so the growth and
-  the read cost are bounded by `K` cycles. The outputs do not change (below). `compact:0` turns
+  memory. The `ir`, `vc` and `ref` routes hold a memory as a function: each write adds a layer in
+  front of the previous image (a step that writes nothing keeps the image it was given, and an
+  image keeps no step's other slots alive: `Compiler/MemStepFast`). Without compaction, a
+  memory read walks back through every write since the run's start. A restored state holds each
+  memory as one table, so the read cost is bounded by the writes of `K` cycles. The outputs do not change (below). `compact:0` turns
   it off. Default: automatic. A run whose limit passes 256 cycles, of a design with memories,
   compacts every 256 cycles when the certificate meets the theorem's hypotheses (`checkDesign`,
   `addrError`, `imgRootError`, `wordError`; otherwise the summary says why not). The summary's
-  `compactions` line then ends in `automatic`. cert_trace does the same.
+  `compactions` line then ends in `automatic`. cert_trace does the same, except on its default
+  `route:vc` step, which keeps each memory as a table (`Compiler/ResidualFlat`) and needs no
+  compaction.
 
 ## Output
 

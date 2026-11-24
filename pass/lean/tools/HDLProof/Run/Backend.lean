@@ -2,15 +2,18 @@
 # Steppers: one clock step of a design, on a chosen route
 
 A stepper maps a clock-edge vector, an input vector and a state to the step's result: the
-outputs BEFORE the edge and the state AFTER it, exactly `interpretDesign`'s shape. Three routes:
+outputs BEFORE the edge and the state AFTER it, exactly `interpretDesign`'s shape. Four routes:
 
-* `ir`: the direct simulator. `checkDesign` once, then per step `checkRuntime` and
-  `directStepRaw`, which `directStepRaw_correct` proves equal to `interpretDesign`
-  (`Compiler/DirectSemantics.lean`; the same pair `runDirect` iterates).
+* `ir`: the direct simulator. `checkDesign` and `Staged.prepare` once, then per step
+  `checkRuntime` and the staged step (`Compiler/DirectStaged`), which `Staged.step_eq` proves equal
+  to `directStepRaw`, and `directStepRaw_correct` to `interpretDesign`
+  (`Compiler/DirectSemantics.lean`; `runDirect` iterates the unstaged pair).
 * `vc`: the verified compiler. `compileDesign` once, its optimizer once
-  (`ResidualOpt.optimizeWith`; `opt:off` keeps the unoptimized program), then per step
+  (`ResidualOpt.optimizeWith`; `opt:off` keeps the unoptimized program), then per step the whole
   `denoteResidual`, which `compileDesign_correct` / `compileOpt_correct` prove equal to
-  `interpretDesign`. These are the steps `cert_trace route:vc` runs.
+  `interpretDesign`. A stepper carries no state between steps, so this is the full step:
+  `cert_trace route:vc` runs it only with `inc:off`; its default step reuses the last step's
+  environment (`Compiler/ResidualEv`, `ResidualFlat`, `ResidualWork`).
 * `ref`: `interpretDesign` itself. Exact by definition and slow on memories (a write wraps the
   memory function, so reads walk the chain).
 * `fp`: the Futamura projection's residual (`dcert2_memroute`'s route: `MemFused`, plain writes

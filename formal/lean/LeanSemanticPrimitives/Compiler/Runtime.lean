@@ -62,9 +62,10 @@ theorem fires_allEdges {D : DesignCert} {c : Nat} (h : c < D.clocks.size) :
   simp [fires, allEdges, h]
 
 /-- Slot-space environment.  An `Array`, not a `Nat → CertVal`: lookup must be
-O(1) because `denoteResidual` actually runs.  (The *interpreter* may use the
-nested `Nat → V` environment — it is only ever reasoned about, via
-`evalGraphG_char`, which materialises no lookups.) -/
+O(1) because `denoteResidual` runs on every step.  (The *interpreter* may use the
+nested `Nat → V` environment: it is the reference, reasoned about via
+`evalGraphG_char`, which materialises no lookups, and run only as the slow
+`route:ref`.) -/
 abbrev SlotEnv := Array CertVal
 
 @[reducible] def badVal : CertVal := .bv (mk_bv 0 0)
