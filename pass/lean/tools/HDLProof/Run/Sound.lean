@@ -3,14 +3,23 @@
 
 The host decides every cycle's inputs from the design's outputs, so the input sequence of a
 closed-loop run is not known in advance. What is fixed is how each cycle uses the design:
-`cycleStep` applies exactly one step, on the tick it records (`co.tick`), and keeps its result.
+`cycleStep ctx E` applies exactly one step of engine `E`, on the tick it records (`co.tick`), and
+keeps its result.
+
+* `LoopSpec E Inv Spec`: every step of `E` from a state with `Inv` keeps `Inv` and meets `Spec` on
+  the runtime states they stand for (`E.view`); every peek keeps `Inv` and the runtime state.
+  `cycleStep_spec`: after a cycle the state has `Inv`; an applied cycle meets `Spec` on its
+  recorded tick, and a cycle that stops before its edge leaves the design's state as it was.
+  Both tracks below are instances: the exact routes (`LoopSpec.ofSound`, `Spec` =
+  `interpretDesign`'s step) and `fp` (`LoopSpec.ofAgree`, `Spec` = agreement below depth).
 
 * `StepSound D step`: the stepper agrees with `interpretDesign` on every step it accepts.
   `irStep_sound` proves it for the direct simulator (route `ir`), `irStepStaged_sound` for its
   staged form (the one `mkStepper` builds); `refStep_sound` for `ref`.
   For route `vc` it is `compileDesign_correct` / `compileOpt_correct` (on the lake side).
-* `cycleStep_applied`: an applied cycle's outputs and next state are `interpretDesign`'s on the
-  recorded tick; `cycleStep_held`: a cycle that stops before its edge leaves the state as it was.
+* `cycleStep_sound`: on an engine sound against `interpretDesign` (`Engine.SoundWith`: ir, ref and
+  every vc mode, `mkEngine_*_sound`), an applied cycle's outputs and next state are
+  `interpretDesign`'s on the recorded tick.
 * `runCycles_sound`: for every host (every bind file, image, latency and stimulus) the run's
   outputs and final state are those of `refTrace` (iterated `interpretDesign`) on the recorded
   ticks. So the inputs a run writes (`inputs.stim`) replay it open-loop on any route.
@@ -20,8 +29,9 @@ closed-loop run is not known in advance. What is fixed is how each cycle uses th
 * Route `fp` (`fpStep_agree`, `mkStepper_fp_agree`): the residual's step, on the state converted
   to the residual's, gives `interpretDesign`'s outputs and a next state that agrees with
   `interpretDesign`'s on every flop and every memory word below its depth (`StateAgree`), not as
-  memory functions everywhere. `runCycles_agree` / `runCycles_fp_outputs`: a run on it prints
-  `refTrace`'s outputs on the recorded ticks and ends in a state that agrees with `refTrace`'s.
+  memory functions everywhere (`EngineAgree`, `ofStep_engineAgree`). `runCycles_agree` /
+  `runCycles_fp_outputs`: a run on it prints `refTrace`'s outputs on the recorded ticks and ends
+  in a state that agrees with `refTrace`'s.
 
 Mathlib-free; the axioms are audited at the end.
 -/
@@ -86,115 +96,194 @@ theorem mkStepper_ref_sound {D : DesignCert} {st : Stepper} {opt : Bool}
 
 /-! ## One cycle -/
 
-theorem stepFinal_sound {ctx : Ctx} (hs : StepSound ctx.D ctx.step) {e : ClockEdges}
-    {s : RuntimeState} {guess inputs : RuntimeInput} {rg r : RuntimeResult}
-    (hg : rg = interpretDesign ctx.D e guess s) (h : stepFinal ctx e s guess rg inputs = .ok r) :
-    r = interpretDesign ctx.D e inputs s := by
-  unfold stepFinal at h
-  by_cases heq : (inputs == guess) = true
-  · simp only [heq, ↓reduceIte] at h
-    cases h
-    rw [beq_iff_eq.mp heq]; exact hg
-  · simp only [heq, Bool.false_eq_true, ↓reduceIte] at h
-    exact hs _ _ _ _ h
+/-- What a loop needs of an engine (module header). -/
+structure LoopSpec {σ : Type} (E : Engine σ) (Inv : σ → Prop)
+    (Spec : RuntimeState → ClockEdges → RuntimeInput → Array BV → RuntimeState → Prop) : Prop where
+  step : ∀ q, Inv q → ∀ e i o q', E.step e i q = .ok (o, q') →
+    Inv q' ∧ Spec (E.view q) e i o (E.view q')
+  peek : ∀ pk, E.peek? = some pk → ∀ q, Inv q → ∀ e i o q', pk e i q = .ok (o, q') →
+    Inv q' ∧ E.view q' = E.view q
 
-theorem cycleStep_cases {ctx : Ctx} (hs : StepSound ctx.D ctx.step) {st : LoopState}
-    {co : CycleOut} (h : cycleStep ctx st = .ok co) :
-    (co.applied = true ∧
-      interpretDesign ctx.D co.tick.edges co.tick.input st.s =
-        { outputs := co.outs, nextState := co.next.s }) ∨
-    (co.applied = false ∧ co.next.s = st.s) := by
+/-- **One cycle**: the state after it has `Inv`; an applied cycle meets `Spec` on the tick it
+records; a cycle that stops before its edge leaves the design's state as it was. -/
+theorem cycleStep_spec {σ : Type} {ctx : Ctx} {E : Engine σ} {Inv : σ → Prop}
+    {Spec : RuntimeState → ClockEdges → RuntimeInput → Array BV → RuntimeState → Prop}
+    (hs : LoopSpec E Inv Spec) {st : LoopState σ} {co : CycleOut σ} (hq : Inv st.s)
+    (h : cycleStep ctx E st = .ok co) :
+    Inv co.next.s ∧
+      ((co.applied = true ∧
+          Spec (E.view st.s) co.tick.edges co.tick.input co.outs (E.view co.next.s)) ∨
+        (co.applied = false ∧ E.view co.next.s = E.view st.s)) := by
+  obtain ⟨q, host, k⟩ := st
   unfold cycleStep at h
-  dsimp only at h
-  generalize edgesAt ctx.D ctx.edges st.cycle = e at h
-  generalize ctx.guess st.cycle = guess at h
-  cases hrg : ctx.step e guess st.s with
-  | error err => rw [hrg] at h; cases h
-  | ok rg =>
-    rw [hrg] at h
-    have hg := hs _ _ _ _ hrg
-    simp only at h
-    cases hp : plan ctx st guess rg.outputs with
-    | stop why hh =>
-      rw [hp] at h; cases h
-      exact Or.inr ⟨rfl, rfl⟩
-    | go inputs hh done events =>
-      rw [hp] at h
-      simp only at h
-      cases hr : stepFinal ctx e st.s guess rg inputs with
-      | error err => rw [hr] at h; cases h
-      | ok r =>
-        rw [hr] at h
-        have hri := stepFinal_sound hs hg hr
-        simp only at h
-        by_cases hm : (r.outputs == rg.outputs) = true
-        · simp only [hm, ↓reduceIte] at h
-          cases h
-          exact Or.inl ⟨rfl, by rw [← hri]⟩
-        · simp only [hm, Bool.false_eq_true, ↓reduceIte] at h
-          cases h
-          exact Or.inr ⟨rfl, rfl⟩
+  dsimp only at h hq ⊢
+  generalize edgesAt ctx.D ctx.edges k = e at h
+  generalize ctx.guess k = guess at h
+  cases hp : E.peek? with
+  | some pk =>
+    rw [hp] at h
+    dsimp only at h
+    cases h1 : pk e guess q with
+    | error err => rw [h1] at h; cases h
+    | ok r1 =>
+      obtain ⟨og, q1⟩ := r1
+      rw [h1] at h
+      dsimp only at h
+      obtain ⟨hq1, hv1⟩ := hs.peek pk hp q hq e guess og q1 h1
+      cases hpl : plan ctx host k guess og with
+      | stop why hh =>
+        rw [hpl] at h
+        cases h
+        exact ⟨hq1, Or.inr ⟨rfl, hv1⟩⟩
+      | go inputs hh done events =>
+        rw [hpl] at h
+        dsimp only at h
+        cases h2 : (if inputs == guess then (Except.ok (og, q1) : Except (String × σ) (Array BV × σ))
+            else pk e inputs q1) with
+        | error err => rw [h2] at h; cases h
+        | ok r2 =>
+          obtain ⟨o, q2⟩ := r2
+          rw [h2] at h
+          dsimp only at h
+          have hq2v : Inv q2 ∧ E.view q2 = E.view q := by
+            by_cases heq : (inputs == guess) = true
+            · simp only [heq, ↓reduceIte, Except.ok.injEq, Prod.mk.injEq] at h2
+              obtain ⟨-, rfl⟩ := h2
+              exact ⟨hq1, hv1⟩
+            · simp only [heq, Bool.false_eq_true, ↓reduceIte] at h2
+              obtain ⟨hq2, hv2⟩ := hs.peek pk hp q1 hq1 e inputs o q2 h2
+              exact ⟨hq2, hv2.trans hv1⟩
+          by_cases hm : (o == og) = true
+          · simp only [hm, ↓reduceIte] at h
+            cases h3 : E.step e inputs q2 with
+            | error err => rw [h3] at h; cases h
+            | ok r3 =>
+              obtain ⟨o', q3⟩ := r3
+              rw [h3] at h
+              cases h
+              obtain ⟨hq3, hsp⟩ := hs.step q2 hq2v.1 e inputs o' q3 h3
+              refine ⟨hq3, Or.inl ⟨rfl, ?_⟩⟩
+              rw [← hq2v.2]
+              exact hsp
+          · simp only [hm, Bool.false_eq_true, ↓reduceIte] at h
+            cases h
+            exact ⟨hq2v.1, Or.inr ⟨rfl, hq2v.2⟩⟩
+  | none =>
+    rw [hp] at h
+    dsimp only at h
+    cases h1 : E.step e guess q with
+    | error err => rw [h1] at h; cases h
+    | ok r1 =>
+      obtain ⟨og, qg⟩ := r1
+      rw [h1] at h
+      dsimp only at h
+      obtain ⟨hqg, hspg⟩ := hs.step q hq e guess og qg h1
+      cases hpl : plan ctx host k guess og with
+      | stop why hh =>
+        rw [hpl] at h
+        cases h
+        exact ⟨hq, Or.inr ⟨rfl, rfl⟩⟩
+      | go inputs hh done events =>
+        rw [hpl] at h
+        dsimp only at h
+        cases h2 : (if inputs == guess then (Except.ok (og, qg) : Except (String × σ) (Array BV × σ))
+            else E.step e inputs q) with
+        | error err => rw [h2] at h; cases h
+        | ok r2 =>
+          obtain ⟨o, q'⟩ := r2
+          rw [h2] at h
+          dsimp only at h
+          have hq' : Inv q' ∧ Spec (E.view q) e inputs o (E.view q') := by
+            by_cases heq : (inputs == guess) = true
+            · simp only [heq, ↓reduceIte, Except.ok.injEq, Prod.mk.injEq] at h2
+              obtain ⟨rfl, rfl⟩ := h2
+              rw [beq_iff_eq.mp heq]
+              exact ⟨hqg, hspg⟩
+            · simp only [heq, Bool.false_eq_true, ↓reduceIte] at h2
+              exact hs.step q hq e inputs o q' h2
+          by_cases hm : (o == og) = true
+          · simp only [hm, ↓reduceIte] at h
+            cases h
+            exact ⟨hq'.1, Or.inl ⟨rfl, hq'.2⟩⟩
+          · simp only [hm, Bool.false_eq_true, ↓reduceIte] at h
+            cases h
+            exact ⟨hq, Or.inr ⟨rfl, rfl⟩⟩
 
-/-- An applied cycle is `interpretDesign` on the tick it records. -/
-theorem cycleStep_applied {ctx : Ctx} (hs : StepSound ctx.D ctx.step) {st : LoopState}
-    {co : CycleOut} (h : cycleStep ctx st = .ok co) (ha : co.applied = true) :
-    interpretDesign ctx.D co.tick.edges co.tick.input st.s =
-      { outputs := co.outs, nextState := co.next.s } := by
-  rcases cycleStep_cases hs h with ⟨_, he⟩ | ⟨hf, _⟩
-  · exact he
-  · rw [ha] at hf; cases hf
+/-- `interpretDesign`'s step on runtime states: the exact routes' `Spec`. -/
+def SpecExact (D : DesignCert) (s : RuntimeState) (e : ClockEdges) (i : RuntimeInput) (o : Array BV)
+    (s' : RuntimeState) : Prop :=
+  interpretDesign D e i s = { outputs := o, nextState := s' }
 
-/-- A cycle that stops before its edge leaves the design's state as it was. -/
-theorem cycleStep_held {ctx : Ctx} (hs : StepSound ctx.D ctx.step) {st : LoopState}
-    {co : CycleOut} (h : cycleStep ctx st = .ok co) (ha : co.applied = false) :
-    co.next.s = st.s := by
-  rcases cycleStep_cases hs h with ⟨ht, _⟩ | ⟨_, he⟩
-  · rw [ha] at ht; cases ht
-  · exact he
+theorem LoopSpec.ofSound {σ : Type} {E : Engine σ} {D : DesignCert} {Inv : σ → Prop}
+    (h : E.SoundWith (interpretDesign D) Inv) : LoopSpec E Inv (SpecExact D) where
+  step q hq e i o q' hs := by
+    obtain ⟨hq', ho, hv⟩ := h.step q hq e i o q' hs
+    exact ⟨hq', by unfold SpecExact; rw [ho, hv]⟩
+  peek pk hp q hq e i o q' hs := by
+    obtain ⟨hq', -, hv⟩ := h.peek pk hp q hq e i o q' hs
+    exact ⟨hq', hv⟩
+
+/-- On an engine sound against `interpretDesign`, an applied cycle is `interpretDesign` on the tick
+it records, and a cycle that stops before its edge leaves the design's state as it was. -/
+theorem cycleStep_sound {σ : Type} {ctx : Ctx} {E : Engine σ} {Inv : σ → Prop}
+    (hs : E.SoundWith (interpretDesign ctx.D) Inv) {st : LoopState σ} {co : CycleOut σ}
+    (hq : Inv st.s) (h : cycleStep ctx E st = .ok co) :
+    Inv co.next.s ∧
+      ((co.applied = true ∧ interpretDesign ctx.D co.tick.edges co.tick.input (E.view st.s) =
+          { outputs := co.outs, nextState := E.view co.next.s }) ∨
+        (co.applied = false ∧ E.view co.next.s = E.view st.s)) :=
+  cycleStep_spec (LoopSpec.ofSound hs) hq h
 
 /-! ## A run -/
 
 /-- At most `n` cycles from `st`, until a status stops the run: the applied ticks, their
 outputs, the final loop state and the status. The driver iterates `cycleStep` the same way. -/
-def runCycles (ctx : Ctx) : Nat → LoopState →
-    Except String (List Tick × List (Array BV) × LoopState × Option String)
+def runCycles {σ : Type} (ctx : Ctx) (E : Engine σ) : Nat → LoopState σ →
+    Except String (List Tick × List (Array BV) × LoopState σ × Option String)
   | 0, st => .ok ([], [], st, none)
   | n + 1, st =>
-    match cycleStep ctx st with
-    | .error e => .error e
+    match cycleStep ctx E st with
+    | .error (e, _) => .error e
     | .ok co =>
       if co.applied then
         match co.status with
         | some why => .ok ([co.tick], [co.outs], co.next, some why)
         | none =>
-          match runCycles ctx n co.next with
+          match runCycles ctx E n co.next with
           | .error e => .error e
           | .ok (ts, os, st', why) => .ok (co.tick :: ts, co.outs :: os, st', why)
       else .ok ([], [], co.next, co.status)
 
-/-- **A closed-loop run is the reference trace of its recorded ticks**, for every host. -/
-theorem runCycles_sound {ctx : Ctx} (hs : StepSound ctx.D ctx.step) :
-    ∀ (n : Nat) (st : LoopState) (ts : List Tick) (os : List (Array BV)) (st' : LoopState)
-      (why : Option String), runCycles ctx n st = .ok (ts, os, st', why) →
-      (refTrace ctx.D st.s ts).finalState = st'.s ∧
-      (refTrace ctx.D st.s ts).steps.map (·.outputs) = os := by
+/-- **A closed-loop run is the reference trace of its recorded ticks**, for every host, on every
+engine sound against `interpretDesign`. -/
+theorem runCycles_sound {σ : Type} {ctx : Ctx} {E : Engine σ} {Inv : σ → Prop}
+    (hs : E.SoundWith (interpretDesign ctx.D) Inv) :
+    ∀ (n : Nat) (st : LoopState σ) (ts : List Tick) (os : List (Array BV)) (st' : LoopState σ)
+      (why : Option String), Inv st.s → runCycles ctx E n st = .ok (ts, os, st', why) →
+      (refTrace ctx.D (E.view st.s) ts).finalState = E.view st'.s ∧
+      (refTrace ctx.D (E.view st.s) ts).steps.map (·.outputs) = os := by
   intro n
   induction n with
   | zero =>
-    intro st ts os st' why h
+    intro st ts os st' why _ h
     simp only [runCycles] at h
     cases h
     simp [refTrace]
   | succ n ih =>
-    intro st ts os st' why h
+    intro st ts os st' why hq h
     simp only [runCycles] at h
-    cases hco : cycleStep ctx st with
+    cases hco : cycleStep ctx E st with
     | error e => rw [hco] at h; cases h
     | ok co =>
       rw [hco] at h
       simp only at h
+      obtain ⟨hqn, hcases⟩ := cycleStep_sound hs hq hco
       by_cases ha : co.applied = true
-      · have happ := cycleStep_applied hs hco ha
+      · have happ : interpretDesign ctx.D co.tick.edges co.tick.input (E.view st.s) =
+            { outputs := co.outs, nextState := E.view co.next.s } := by
+          rcases hcases with ⟨_, he⟩ | ⟨hf, _⟩
+          · exact he
+          · rw [ha] at hf; cases hf
         simp only [ha, ↓reduceIte] at h
         cases hst : co.status with
         | some w =>
@@ -204,16 +293,19 @@ theorem runCycles_sound {ctx : Ctx} (hs : StepSound ctx.D ctx.step) :
         | none =>
           rw [hst] at h
           simp only at h
-          cases hres : runCycles ctx n co.next with
+          cases hres : runCycles ctx E n co.next with
           | error e => rw [hres] at h; cases h
           | ok res =>
             obtain ⟨ts1, os1, st1, why1⟩ := res
             rw [hres] at h
             cases h
-            obtain ⟨h1, h2⟩ := ih co.next _ _ _ _ hres
+            obtain ⟨h1, h2⟩ := ih co.next _ _ _ _ hqn hres
             simp [refTrace, happ, h1, h2]
       · have hf : co.applied = false := by simpa using ha
-        have hheld := cycleStep_held hs hco hf
+        have hheld : E.view co.next.s = E.view st.s := by
+          rcases hcases with ⟨ht, _⟩ | ⟨_, he⟩
+          · rw [hf] at ht; cases ht
+          · exact he
         simp only [ha, Bool.false_eq_true, ↓reduceIte] at h
         cases h
         exact ⟨hheld.symm, rfl⟩
@@ -412,85 +504,82 @@ theorem mkStepper_fp_agree {D : DesignCert} {st : Stepper} {opt : Bool}
 
 /-! ### One cycle and a run, up to agreement -/
 
-theorem stepFinal_agree {ctx : Ctx} (hs : StepAgree ctx.D ctx.step) {e : ClockEdges}
-    {s : RuntimeState} {guess inputs : RuntimeInput} {rg r : RuntimeResult} (hfit : Fits ctx.D s)
-    (hg : AgreeR ctx.D e guess s rg) (h : stepFinal ctx e s guess rg inputs = .ok r) :
-    AgreeR ctx.D e inputs s r := by
-  unfold stepFinal at h
-  by_cases heq : (inputs == guess) = true
-  · simp only [heq, ↓reduceIte, Except.ok.injEq] at h
-    subst h
-    rw [beq_iff_eq.mp heq]; exact hg
-  · simp only [heq, Bool.false_eq_true, ↓reduceIte] at h
-    exact hs _ _ _ _ hfit h
+/-- An engine that agrees with `interpretDesign` below depth (the `fp` route's form): from a state
+with `Inv` whose runtime state fits, every step gives `interpretDesign`'s outputs and a state with
+`Inv` that agrees with `interpretDesign`'s next state and fits; every peek gives the outputs and a
+state with `Inv` standing for the same runtime state. -/
+structure EngineAgree {σ : Type} (D : DesignCert) (E : Engine σ) (Inv : σ → Prop) : Prop where
+  load   : ∀ s, Fits D s → Inv (E.load s) ∧ E.view (E.load s) = s
+  reload : ∀ q s, Inv q → Fits D s → Inv (E.reload q s) ∧ E.view (E.reload q s) = s
+  step   : ∀ q, Inv q → Fits D (E.view q) → ∀ e i o q', E.step e i q = .ok (o, q') →
+    Inv q' ∧ AgreeR D e i (E.view q) { outputs := o, nextState := E.view q' }
+  peek   : ∀ pk, E.peek? = some pk → ∀ q, Inv q → Fits D (E.view q) → ∀ e i o q',
+    pk e i q = .ok (o, q') → Inv q' ∧ o = (interpretDesign D e i (E.view q)).outputs ∧
+      E.view q' = E.view q
 
-theorem cycleStep_agree {ctx : Ctx} (hs : StepAgree ctx.D ctx.step) {st : LoopState}
-    {co : CycleOut} (hfit : Fits ctx.D st.s) (h : cycleStep ctx st = .ok co) :
-    (co.applied = true ∧ AgreeR ctx.D co.tick.edges co.tick.input st.s
-        { outputs := co.outs, nextState := co.next.s }) ∨
-    (co.applied = false ∧ co.next.s = st.s) := by
-  unfold cycleStep at h
-  dsimp only at h
-  generalize edgesAt ctx.D ctx.edges st.cycle = e at h
-  generalize ctx.guess st.cycle = guess at h
-  cases hrg : ctx.step e guess st.s with
-  | error err => rw [hrg] at h; cases h
-  | ok rg =>
-    rw [hrg] at h
-    have hg := hs _ _ _ _ hfit hrg
-    simp only at h
-    cases hp : plan ctx st guess rg.outputs with
-    | stop why hh =>
-      rw [hp] at h; cases h
-      exact Or.inr ⟨rfl, rfl⟩
-    | go inputs hh done events =>
-      rw [hp] at h
-      simp only at h
-      cases hr : stepFinal ctx e st.s guess rg inputs with
-      | error err => rw [hr] at h; cases h
-      | ok r =>
-        rw [hr] at h
-        have hri := stepFinal_agree hs hfit hg hr
-        simp only at h
-        by_cases hm : (r.outputs == rg.outputs) = true
-        · simp only [hm, ↓reduceIte] at h
-          cases h
-          exact Or.inl ⟨rfl, hri⟩
-        · simp only [hm, Bool.false_eq_true, ↓reduceIte] at h
-          cases h
-          exact Or.inr ⟨rfl, rfl⟩
+/-- A step on runtime states that agrees (`StepAgree`) is an engine that agrees. -/
+theorem ofStep_engineAgree {D : DesignCert} {name : String}
+    {f : ClockEdges → RuntimeInput → RuntimeState → Except String RuntimeResult}
+    (h : StepAgree D f) : EngineAgree D (Engine.ofStep name f) (fun _ => True) where
+  load _ _ := ⟨trivial, rfl⟩
+  reload _ _ _ _ := ⟨trivial, rfl⟩
+  step q _ hfit e i o q' hs := by
+    simp only [Engine.ofStep] at hs
+    split at hs
+    · cases hs
+    · rename_i r hr
+      cases hs
+      exact ⟨trivial, h e i q r hfit hr⟩
+  peek pk hp := by cases hp
 
-/-- **A closed-loop run on a stepper that agrees is the reference trace of its ticks**: from a
+theorem LoopSpec.ofAgree {σ : Type} {E : Engine σ} {D : DesignCert} {Inv : σ → Prop}
+    (h : EngineAgree D E Inv) :
+    LoopSpec E (fun q => Inv q ∧ Fits D (E.view q))
+      (fun s e i o s' => AgreeR D e i s { outputs := o, nextState := s' }) where
+  step q hq e i o q' hs := by
+    obtain ⟨hq', hag⟩ := h.step q hq.1 hq.2 e i o q' hs
+    exact ⟨⟨hq', hag.2.2⟩, hag⟩
+  peek pk hp q hq e i o q' hs := by
+    obtain ⟨hq', -, hv⟩ := h.peek pk hp q hq.1 hq.2 e i o q' hs
+    refine ⟨⟨hq', ?_⟩, hv⟩
+    rw [hv]; exact hq.2
+
+/-- **A closed-loop run on an engine that agrees is the reference trace of its ticks**: from a
 state `t` that the run's start state agrees with, `refTrace` on the recorded ticks prints the
 run's outputs and ends in a state the run's final state agrees with. -/
-theorem runCycles_agree {ctx : Ctx} (hs : StepAgree ctx.D ctx.step) (hsem : Direct.DesignSemWF ctx.D)
+theorem runCycles_agree {σ : Type} {ctx : Ctx} {E : Engine σ} {Inv : σ → Prop}
+    (hs : EngineAgree ctx.D E Inv) (hsem : Direct.DesignSemWF ctx.D)
     (haddr : MemAddr.addrError ctx.D = none) (hroot : Ckpt.imgRootError ctx.D = none) :
-    ∀ (n : Nat) (st : LoopState) (t : RuntimeState) (ts : List Tick) (os : List (Array BV))
-      (st' : LoopState) (why : Option String),
-      Fits ctx.D st.s → StateAgree ctx.D st.s t → runCycles ctx n st = .ok (ts, os, st', why) →
+    ∀ (n : Nat) (st : LoopState σ) (t : RuntimeState) (ts : List Tick) (os : List (Array BV))
+      (st' : LoopState σ) (why : Option String),
+      Inv st.s → Fits ctx.D (E.view st.s) → StateAgree ctx.D (E.view st.s) t →
+      runCycles ctx E n st = .ok (ts, os, st', why) →
       (refTrace ctx.D t ts).steps.map (·.outputs) = os ∧
-      StateAgree ctx.D st'.s (refTrace ctx.D t ts).finalState := by
+      StateAgree ctx.D (E.view st'.s) (refTrace ctx.D t ts).finalState := by
   intro n
   induction n with
   | zero =>
-    intro st t ts os st' why _ hag h
+    intro st t ts os st' why _ _ hag h
     simp only [runCycles, Except.ok.injEq, Prod.mk.injEq] at h
     obtain ⟨rfl, rfl, rfl, -⟩ := h
     exact ⟨rfl, hag⟩
   | succ n ih =>
-    intro st t ts os st' why hfit hag h
+    intro st t ts os st' why hq hfit hag h
     simp only [runCycles] at h
-    cases hco : cycleStep ctx st with
+    cases hco : cycleStep ctx E st with
     | error e => rw [hco] at h; cases h
     | ok co =>
       rw [hco] at h
       simp only at h
-      rcases cycleStep_agree hs hfit hco with ⟨ha, ho, hn, hf⟩ | ⟨ha, hheld⟩
-      · -- the applied step, carried from `st.s` to `t`
+      obtain ⟨⟨hqn, hfitn⟩, hcases⟩ := cycleStep_spec (LoopSpec.ofAgree hs) ⟨hq, hfit⟩ hco
+      rcases hcases with ⟨ha, ho, hn, -⟩ | ⟨ha, hheld⟩
+      · -- the applied step, carried from `E.view st.s` to `t`
+        dsimp only at ho hn
         obtain ⟨ho', hn'⟩ := step_agree (i := co.tick.input) hsem haddr hroot hag co.tick.edges
         have hout : co.outs = (interpretDesign ctx.D co.tick.edges co.tick.input t).outputs := by
           rw [← ho', ← ho]
-        have hnext : StateAgree ctx.D co.next.s (interpretDesign ctx.D co.tick.edges co.tick.input t).nextState :=
+        have hnext : StateAgree ctx.D (E.view co.next.s)
+            (interpretDesign ctx.D co.tick.edges co.tick.input t).nextState :=
           hn.trans hn'
         simp only [ha, ↓reduceIte] at h
         cases hst : co.status with
@@ -503,36 +592,33 @@ theorem runCycles_agree {ctx : Ctx} (hs : StepAgree ctx.D ctx.step) (hsem : Dire
         | none =>
           rw [hst] at h
           simp only at h
-          cases hres : runCycles ctx n co.next with
+          cases hres : runCycles ctx E n co.next with
           | error e => rw [hres] at h; cases h
           | ok res =>
             obtain ⟨ts1, os1, st1, why1⟩ := res
             rw [hres] at h
             simp only [Except.ok.injEq, Prod.mk.injEq] at h
             obtain ⟨rfl, rfl, rfl, -⟩ := h
-            obtain ⟨h1, h2⟩ := ih co.next _ _ _ _ _ hf hnext hres
+            obtain ⟨h1, h2⟩ := ih co.next _ _ _ _ _ hqn hfitn hnext hres
             simp only [Direct.refTrace, List.map_cons]
             exact ⟨by rw [h1, hout], h2⟩
       · simp only [ha, Bool.false_eq_true, ↓reduceIte, Except.ok.injEq, Prod.mk.injEq] at h
         obtain ⟨rfl, rfl, rfl, -⟩ := h
         exact ⟨rfl, by rw [hheld]; exact hag⟩
 
-/-- …in particular from the run's own start state: the run prints `refTrace`'s outputs. -/
-theorem runCycles_fp_outputs {ctx : Ctx} {opt : Bool} {stp : Stepper}
-    (hmk : mkStepper ctx.D .fp opt = .ok stp) (hstep : ctx.step = stp.step)
-    (haddr : MemAddr.addrError ctx.D = none) {n : Nat} {st : LoopState} {ts : List Tick}
-    {os : List (Array BV)} {st' : LoopState} {why : Option String} (hfit : Fits ctx.D st.s)
-    (h : runCycles ctx n st = .ok (ts, os, st', why)) :
+/-- …in particular on a step that agrees (`fp`'s, `mkStepper_fp_agree`), from the run's own start
+state: the run prints `refTrace`'s outputs. -/
+theorem runCycles_fp_outputs {ctx : Ctx}
+    {step : ClockEdges → RuntimeInput → RuntimeState → Except String RuntimeResult}
+    (hs : StepAgree ctx.D step) (hc : fpChecks ctx.D = none) {n : Nat}
+    {st : LoopState RuntimeState} {ts : List Tick} {os : List (Array BV)}
+    {st' : LoopState RuntimeState} {why : Option String} (hfit : Fits ctx.D st.s)
+    (h : runCycles ctx (Engine.ofStep "fp" step) n st = .ok (ts, os, st', why)) :
     (refTrace ctx.D st.s ts).steps.map (·.outputs) = os ∧
     StateAgree ctx.D st'.s (refTrace ctx.D st.s ts).finalState := by
-  have hs : StepAgree ctx.D ctx.step := by rw [hstep]; exact mkStepper_fp_agree hmk
-  have hc : fpChecks ctx.D = none := by
-    simp only [mkStepper] at hmk
-    cases hc : fpChecks ctx.D with
-    | none => rfl
-    | some e => simp [hc] at hmk
-  obtain ⟨hsem, _, _, hroot, _⟩ := fpChecks_none hc
-  exact runCycles_agree hs hsem haddr hroot n st st.s ts os st' why hfit (StateAgree.refl' _ _) h
+  obtain ⟨hsem, haddr, _, hroot, _⟩ := fpChecks_none hc
+  exact runCycles_agree (ofStep_engineAgree hs) hsem haddr hroot n st st.s ts os st' why trivial
+    hfit (StateAgree.refl' _ _) h
 
 end
 
@@ -542,7 +628,7 @@ end
 #audit_axioms HDLProof.Run.mkStepper_fp_agree
 #audit_axioms HDLProof.Run.runCycles_agree
 #audit_axioms HDLProof.Run.runCycles_fp_outputs
-#audit_axioms HDLProof.Run.cycleStep_applied
+#audit_axioms HDLProof.Run.cycleStep_spec
 #audit_axioms HDLProof.Run.mkStepper_ir_sound
 
 end Run

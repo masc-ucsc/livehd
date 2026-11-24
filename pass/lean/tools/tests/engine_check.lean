@@ -11,9 +11,11 @@ without shared tails) runs `<cycles>` cycles of pseudo-random inputs and clock e
 generator, so every engine sees the same ticks) three ways:
 - plain: one step per cycle;
 - twice: each cycle first steps from the state with other inputs, drops that result, then steps
-  from the SAME state with the real inputs (a closed loop's guess and final step);
-- reloaded: halfway, the state is replaced by the engine's load of the restored checkpoint of
-  what it stands for (checkpoints and compaction).
+  from the SAME state with the real inputs (a closed loop's guess and final step without a peek);
+- peeked: each cycle peeks with other inputs, peeks with the real inputs (both outputs checked
+  against ref's), then steps (a closed loop with a peek; plain for an engine without one);
+- reloaded: halfway, the state is replaced by the engine's reload of the restored checkpoint of
+  what it stands for (compaction; vc keeps its environment).
 Each run's outputs must be `ref`'s, cycle by cycle, and its final checkpoint `ref`'s, byte for
 byte (fp's state agrees with `ref`'s below every memory's depth, which is all a checkpoint
 reads). A route the certificate is refused on is reported, not failed. `Knobs.parse` must map
@@ -55,31 +57,45 @@ structure Res where
   ckpt : ByteArray
 
 inductive Mode where
-  | plain | twice | reloaded
+  | plain | twice | peeked | reloaded
 deriving BEq, Repr
 
 def Mode.name : Mode → String
-  | .plain => "plain" | .twice => "twice" | .reloaded => "reloaded"
+  | .plain => "plain" | .twice => "twice" | .peeked => "peeked" | .reloaded => "reloaded"
 
 def outLine (o : Array BV) : String := " ".intercalate (o.toList.map fun b => toString (bv_uint b))
 
-/-- Run engine `E` from `s0` for `n` cycles of `ticks` in mode `m`. -/
+/-- Run engine `E` from `s0` for `n` cycles of `ticks` in mode `m`; `refOuts` (ref's lines, when
+given) checks the peeks. -/
 def runE {σ : Type} (D : DesignCert) (E : Engine σ) (s0 : RuntimeState) (n : Nat)
-    (ticks : Array (ClockEdges × RuntimeInput)) (m : Mode) : Except String Res := do
+    (ticks : Array (ClockEdges × RuntimeInput)) (m : Mode) (refOuts : Array String := #[]) :
+    Except String Res := do
   let mut q := E.load s0
   let mut outs : Array String := #[]
   for k in [0:n] do
     if m == .reloaded && k == n / 2 then
-      q := E.load (Ckpt.restore (Ckpt.save D 0 k #[] (E.view q)))
+      q := E.reload q (Ckpt.restore (Ckpt.save D 0 k #[] (E.view q)))
     let (e, i) := ticks[k]!
+    -- the guess: every input inverted
+    let g := i.map fun b => mk_bv b.width (Int.ofNat (2 ^ b.width - 1) - bv_uint b)
     if m == .twice then
-      -- the guess: every input inverted; its result is dropped
-      let g := i.map fun b => mk_bv b.width (Int.ofNat (2 ^ b.width - 1) - bv_uint b)
+      -- its result is dropped
       match E.step e g q with
-      | .error err => throw s!"cycle {k} (guess): {err}"
+      | .error (err, _) => throw s!"cycle {k} (guess): {err}"
       | .ok _ => pure ()
+    if m == .peeked then
+      if let some pk := E.peek? then
+        match pk e g q with
+        | .error (err, _) => throw s!"cycle {k} (peek): {err}"
+        | .ok (_, q1) =>
+          match pk e i q1 with
+          | .error (err, _) => throw s!"cycle {k} (peek): {err}"
+          | .ok (o, q2) =>
+            if let some r := refOuts[k]? then
+              if outLine o != r then throw s!"cycle {k}: peek {outLine o} vs ref {r}"
+            q := q2
     match E.step e i q with
-    | .error err => throw s!"cycle {k}: {err}"
+    | .error (err, _) => throw s!"cycle {k}: {err}"
     | .ok (o, q') =>
       outs := outs.push (outLine o)
       q := q'
@@ -144,9 +160,9 @@ def main (args : List String) : IO UInt32 := do
         match mkEngine D k with
         | .error e => IO.println s!"note {cert}: {name}: not built: {e.message}"
         | .ok b =>
-          for m in [Mode.plain, .twice, .reloaded] do
+          for m in [Mode.plain, .twice, .peeked, .reloaded] do
             runs := runs + 1
-            match runE D b.engine s0 n ticks m with
+            match runE D b.engine s0 n ticks m ref.outs with
             | .error e =>
               IO.println s!"FAIL {cert}: {name} {m.name}: {e}"; fails := fails + 1
             | .ok r =>

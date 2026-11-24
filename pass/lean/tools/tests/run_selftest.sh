@@ -29,8 +29,8 @@ set -euo pipefail
 #   vcd       the VCD names every port and has value changes
 #   engines   every route and knob combination `mkEngine` builds (HDLProof/Run/Engine) on busm,
 #             busm_mealy, seqm and seqm_init: 300 cycles of random ticks, stepped once, twice from
-#             one state, and reloaded from a checkpoint, against ref (tests/engine_check.lean,
-#             interpreted against .olean-dev)
+#             one state, after two peeks, and reloaded from a checkpoint, against ref
+#             (tests/engine_check.lean, interpreted against .olean-dev)
 #
 # CK_NAT=<dir with native cert_run and cert_trace> uses them; otherwise the drivers run
 # interpreted against formal/lean/.olean-dev (build it with formal/lean/.build-proj.sh).

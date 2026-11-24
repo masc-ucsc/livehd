@@ -8,11 +8,12 @@ design's own memories, VCD and lockstep added.
 
 ```
 cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<path>]
-         [route:ir|vc|ref] [opt:off] [init:reset|init:zero] [ckpt-in:<file>]
+         [route:ir|vc|ref|fp] [opt:off] [init:reset|init:zero] [ckpt-in:<file>]
          [load:<image>[@<addr>][:mem<k>]] [vaddr] [word:<bytes>]
          [max:<cycles>] [stop:<output>=<value>]
          [trace:<dir>] [vcd:<file>] [lockstep:<route>]
          [ckpt-at:<cycle>:<file>] [ckpt-out:<file>] [compact:<cycles>]
+         [inc:off|inc:scan] [mem:fun] [share:off] [ir:raw]
 ```
 
 ## Options
@@ -23,6 +24,16 @@ cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<p
   with its constant operands folded in, and every slot kept as its reduced value;
   `Staged.step_eq` (`Compiler/DirectStagedSound`) proves the step equal to `directStepRaw`. `ref` is exact by definition and slow on designs
   with memories. `opt:off` runs `vc` without its optimizer.
+- The route runs as an engine (`HDLProof/Run/Engine`: `mkEngine` builds it from `Knobs`), a step
+  on a state of the route's own kind. `vc`'s default engine keeps each memory as a table
+  (`Compiler/ResidualFlat`) and the last cycle's slot environment, and each cycle after the first
+  updates only what a changed slot reaches (`Compiler/ResidualEv`, `ResidualWork`). A closed-loop
+  cycle peeks with the guess (outputs before the edge, no edge), peeks again with the final inputs
+  when a bus request completed, and takes one step, so the environment is updated in place.
+  `inc:off` runs `vc`'s full step every cycle (this driver's step before engines), `inc:scan` the
+  incremental step that visits every binding, `mem:fun` the event-driven step with memories as
+  functions; `ir:raw` runs the unstaged direct step; `share:off` runs `fp` without shared tails.
+  Every combination gives the same trace (`tests/engine_check.lean`).
 - `route:fp` runs the Futamura projection's residual, the route `dcert2_memroute` runs (the
   fused memory interpreter, plain writes admitted, the step with its list tails shared,
   `Projection/ShareTails`; `opt:off` runs the residual as specialized). The residual is
@@ -30,8 +41,8 @@ cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<p
   converts the state to the residual's (`Ckpt.save`, then `CkptStateM.toStateM`: each memory a
   table below its depth), checks the runtime policy and runs the residual. Its outputs are
   `interpretDesign`'s and its state agrees with `interpretDesign`'s on every flop and on every
-  memory word below its depth (`Run/Sound.lean`: `fpStep_agree`, `mkStepper_fp_agree`,
-  `runCycles_agree`), so its traces and checkpoints are the other routes' (the selftest compares
+  memory word below its depth (`Run/Sound.lean`: `fpStep_agree`, `runCycles_agree`;
+  `Run/Engine.lean`: `mkEngine_fp_agree`, `mkEngine_runCycles_fp`), so its traces and checkpoints are the other routes' (the selftest compares
   them). It refuses a certificate the direct check, the address, depth, image-root or word
   checks refuse, or one the memory route does not admit.
 - `bind:` adds a host: reset, constants, buses, memory, console, exit, registers, stop
@@ -66,9 +77,10 @@ cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<p
   it off. Default: automatic. A run whose limit passes 256 cycles, of a design with memories,
   compacts every 256 cycles when the certificate meets the theorem's hypotheses (`checkDesign`,
   `addrError`, `imgRootError`, `wordError`; otherwise the summary says why not). The summary's
-  `compactions` line then ends in `automatic`. cert_trace does the same, except on its default
-  `route:vc` step, which keeps each memory as a table (`Compiler/ResidualFlat`) and needs no
-  compaction.
+  `compactions` line then ends in `automatic`. `vc`'s default engine keeps each memory as a table
+  already; its compaction rebuilds the tables from the restored checkpoint and keeps its slot
+  environment (`Engine.reload`). cert_trace does the same, except that on its default `route:vc`
+  step it skips automatic compaction.
 
 ## Output
 
@@ -98,11 +110,14 @@ Exit code:
 
 The host chooses each cycle's inputs from the design's outputs. What it cannot change is how
 the design steps. `HDLProof/Run/Sound.lean` proves:
-- `cycleStep_applied`: every applied cycle is one `interpretDesign` step on the tick it records.
+- `cycleStep_sound`: on an engine sound against `interpretDesign`, every applied cycle is one
+  `interpretDesign` step on the tick it records (`cycleStep_spec` for any engine and step spec).
 - `runCycles_sound`: for every host (any bind file, image, latency and stimulus), a run's outputs
   and final state are those of `refTrace`, iterated `interpretDesign`, on the recorded ticks.
-- `mkStepper_ir_sound` (and `refStep_sound`): the `ir` (and `ref`) steppers agree with
-  `interpretDesign`. For `vc` this is `compileDesign_correct` and `compileOpt_correct`.
+- `mkEngine_ir_sound`, `mkEngine_ref_sound`, `mkEngine_vc_sound` (`Run/Engine.lean`): the engines
+  `mkEngine` builds are sound (`Engine.SoundWith`: every step and peek); for `vc` against its
+  program's `denoteResidual`, which `compileDesign_correct` and `compileOpt_correct` make
+  `interpretDesign` (`CompileOpt`'s `*_interp`).
 - `compacted_outputs`: a run cut into segments, with its state replaced by the restored
   checkpoint of itself after each one (`compact:`), prints the outputs of the run that is not
   cut. It chains `resume_exact` (`Projection/CkptResume.lean`) over the segments.

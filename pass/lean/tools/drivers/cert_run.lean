@@ -8,6 +8,7 @@ cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<p
          [max:<cycles>] [stop:<output>=<value>]
          [trace:<dir>] [vcd:<file>] [lockstep:<route>]
          [ckpt-at:<cycle>:<file>] [ckpt-out:<file>] [compact:<cycles>]
+         [inc:off|inc:scan] [mem:fun] [share:off] [ir:raw]
 ```
 
 A run steps the design cycle by cycle on a proved simulator (`route:ir`, the default; `vc`;
@@ -47,12 +48,18 @@ documents every option; in short:
   summary says why not, and nothing is compacted). The summary's `compactions` line then ends
   in `automatic`.
 * A stimulus file's inputs come from a table built once (`StimTab`), with `inputAt`'s rules.
+* The route runs as an engine (`HDLProof/Run/Engine`'s `mkEngine`, from `Knobs`): ir staged, vc
+  optimized and event-driven with its memories as tables, fp with shared tails. `inc:off` runs
+  vc's full step every cycle (this driver's earlier vc step), `inc:scan` and `mem:fun` its other
+  modes, `share:off` fp without shared tails, `ir:raw` the unstaged direct step. Each cycle uses
+  the engine's state once (`cycleStep`: vc peeks with the guess, then takes one step), and the
+  loop is a recursive function, so vc's environment and tables are updated in place.
 
 The summary ends with `RESULT: <status>`. Exit code: 0 for `exit` with code 0, `stop-output`,
 `limit`, `breakpoint` and `watchpoint`; 1 for `exit` with another code and the failure
 statuses; 2 for usage; 3 when the design, an image or a checkpoint is refused.
 -/
-import HDLProof.Run.Loop
+import HDLProof.Run.Engine
 import HDLProof.Run.Vcd
 import LeanSemanticPrimitives.Compiler.Ckpt
 import LeanSemanticPrimitives.Compiler.CertIORoute
@@ -66,7 +73,7 @@ def usage : String :=
   "       [route:ir|vc|ref|fp] [opt:off] [init:reset|init:zero] [ckpt-in:<file>]\n" ++
   "       [load:<image>[@<addr>][:mem<k>]] [vaddr] [word:<bytes>] [max:<cycles>] [stop:<output>=<value>]\n" ++
   "       [trace:<dir>] [vcd:<file>] [lockstep:<route>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]\n" ++
-  "       [compact:<cycles>]"
+  "       [compact:<cycles>] [inc:off|inc:scan] [mem:fun] [share:off] [ir:raw]"
 
 structure Opts where
   bind     : Option String := none
@@ -89,6 +96,8 @@ structure Opts where
   compact  : Nat := 0
   /-- no `compact:` option: compact every `autoCompactK` cycles when the run and design allow -/
   compactAuto : Bool := true
+  /-- the route's other knobs (`inc:`, `mem:`, `share:`, `ir:raw`); route and `opt:off` are above -/
+  knobs    : Knobs := {}
 
 /-- The period of automatic compaction, in cycles. Measured on the census designs: a
 compaction costs 14-70 ms, 3-15 cycles' worth, so every 256 cycles it adds 1.4-5% and keeps
@@ -146,6 +155,11 @@ def parseOpts (args : List String) : Except String Opts := do
       match (drop "compact:").toNat? with
       | some n => o := { o with compact := n, compactAuto := false }
       | none => throw s!"bad {a}"
+    else if ["inc:", "mem:", "share:", "ir:"].any (fun (p : String) => a.startsWith p) then
+      match o.knobs.apply? a with
+      | some (.ok k) => o := { o with knobs := k }
+      | some (.error e) => throw e
+      | none => throw s!"unknown option {a}"
     else throw s!"unknown option {a}"
   return o
 
@@ -181,6 +195,10 @@ def loadWords (D : DesignCert) (s : RuntimeState) (k : Nat) (ws : Array (Nat × 
   let t := Ckpt.memTable m
   return { s with mems := s.mems.set! k (Ckpt.tableImage m.dw m.dflt t) }
 
+/-- The knobs of the run's route (`route:`, `opt:off` and the knob options). -/
+def Opts.runKnobs (o : Opts) : Knobs :=
+  { o.knobs with route := o.route, vcOpt := o.opt, fpShare := o.opt && o.knobs.fpShare }
+
 def escapeBytes (b : ByteArray) : String :=
   b.foldl (fun s c =>
     if c == 10 then s ++ "\\n" else if c == 92 then s ++ "\\\\"
@@ -188,6 +206,207 @@ def escapeBytes (b : ByteArray) : String :=
     else s ++ s!"\\x{String.ofList (Nat.toDigits 16 c.toNat)}") ""
 
 def hexS (n : Nat) : String := String.ofList (Nat.toDigits 16 n)
+
+/-- The loop's counters: the status that stopped it, applied cycles, compactions. -/
+structure Tally where
+  status      : String := "limit"
+  applied     : Nat := 0
+  compactions : Nat := 0
+
+/-- The trace files: steps, inputs, bus transfers, and the edges when not every clock fires. -/
+abbrev TraceH := IO.FS.Handle × IO.FS.Handle × IO.FS.Handle × Option IO.FS.Handle
+
+/-- Cycles from `st` until a status stops the run: checkpoints due, the limit, compaction, one
+`cycleStep`, the traces, lockstep (engine `L` on state `s2`). A recursive function rather than a
+loop over a mutable variable, so each cycle holds the only reference to the engine's state
+(`Compiler/Engine`'s loop rule); a self tail call, compiled as a jump. -/
+partial def runLoop {σ σ2 : Type} (o : Opts) (ctx : Ctx) (io : IoMeta) (hash c0 : Nat)
+    (E : Engine σ) (L : Option (Engine σ2)) (traceH : Option TraceH) (vcd : Option Vcd)
+    (saveTo : String → LoopState σ → IO Unit) (st : LoopState σ) (s2 : Option σ2) (t : Tally) :
+    IO (LoopState σ × Tally) := do
+  let k := st.cycle
+  for (j, p) in o.ckptAt do
+    if j == k then saveTo p st
+  if k ≥ c0 + o.max then return (st, { t with status := "limit" })
+  let compactNow := o.compact > 0 && k > c0 && (k - c0) % o.compact == 0
+  let st := if compactNow then
+      { st with s := E.reload st.s (Ckpt.restore (Ckpt.save ctx.D hash k #[] (E.view st.s))) }
+    else st
+  let s2 := if compactNow then
+      match L, s2 with
+      | some l, some q2 => some (l.reload q2 (Ckpt.restore (Ckpt.save ctx.D hash k #[] (l.view q2))))
+      | _, s2 => s2
+    else s2
+  let t := if compactNow then { t with compactions := t.compactions + 1 } else t
+  match cycleStep ctx E st with
+  | .error (e, st) =>
+    IO.eprintln s!"cycle {k}: {e}"
+    return (st, { t with status := "refused" })
+  | .ok co =>
+    let t := if co.applied then { t with applied := t.applied + 1 } else t
+    if co.applied then
+      if let some (sh, ih, bh, eh) := traceH then
+        sh.putStrLn s!"STEP {k} {" ".intercalate (co.outs.toList.map fun b => toString (bv_uint b))}"
+        for i in [0:co.tick.input.size] do
+          let v := (bv_uint co.tick.input[i]!).toNat
+          if v != 0 then ih.putStrLn s!"at {k} in {i} {co.tick.input[i]!.width} {v}"
+        for ev in co.events do
+          bh.putStrLn s!"{ev.arrival} {ev.done} {ev.kind} {hexS ev.addr} {hexS ev.data} {hexS ev.strb}"
+        if let some h := eh then
+          h.putStrLn s!"at {k} {" ".intercalate (co.tick.edges.toList.map fun b => if b then "1" else "0")}"
+      if let some v := vcd then
+        v.sample k (co.tick.input.map (fun b => (bv_uint b).toNat) ++ co.outs.map (fun b => (bv_uint b).toNat))
+    -- lockstep: the second engine on the applied tick
+    let lock : Except Unit (Option σ2) ← match L, s2, co.applied with
+      | some l, some q2, true =>
+        match l.step co.tick.edges co.tick.input q2 with
+        | .error (e, _) => do
+          IO.eprintln s!"lockstep {l.name}, cycle {k}: {e}"
+          pure (.error ())
+        | .ok (o2, q2') =>
+          if o2 != co.outs then do
+            let bad := (List.range co.outs.size).find? (fun j => o2[j]? != co.outs[j]?)
+            IO.eprintln s!"lockstep: cycle {k}: {l.name} output {(bad.map io.outputName).getD "?"} differs"
+            pure (.error ())
+          else pure (.ok (some q2'))
+      | _, s2, _ => pure (.ok s2)
+    match lock with
+    | .error () => return (co.next, { t with status := "lockstep" })
+    | .ok s2 =>
+      if let some why := co.status then return (co.next, { t with status := why })
+      runLoop o ctx io hash c0 E L traceH vcd saveTo co.next s2 t
+
+/-- The run proper on engine `E` (and lockstep engine `L`): the sinks, the loop, the summary. -/
+def runWith {σ σ2 : Type} (o : Opts) (D : DesignCert) (io : IoMeta) (bind : Bind)
+    (edges : EdgeSpec) (hash : Nat) (ctx : Ctx) (s0 : RuntimeState) (h0 : HostState) (c0 : Nat)
+    (E : Engine σ) (L : Option (Engine σ2)) : IO UInt32 := do
+  -- sinks
+  let traceH ← match o.trace with
+    | none => pure none
+    | some dir => do
+      IO.FS.createDirAll dir
+      let mk (f : String) : IO IO.FS.Handle := IO.FS.Handle.mk (System.FilePath.mk dir / f) .write
+      let st ← mk "steps.trace"; let inp ← mk "inputs.stim"; let bus ← mk "bus.trace"
+      inp.putStrLn "stim v1"
+      let ed ← match edges with
+        | .all => pure none
+        | _ => do let h ← mk "edges.edges"; h.putStrLn "edges v1"; pure (some h)
+      pure (some (st, inp, bus, ed))
+  let vcdPorts := (Array.range ctx.inW.size).map (fun k => (io.inputName k, ctx.inW[k]!)) ++
+    (Array.range D.outputs.size).map (fun k => (io.outputName k, D.outputs[k]!.width))
+  let vcd : Option Vcd ← match o.vcd with
+    | none => pure none
+    | some p => do pure (some (← Vcd.create p vcdPorts))
+  let saveTo (p : String) (st : LoopState σ) : IO Unit := do
+    let exts := if bind.regions.isEmpty && bind.buses.isEmpty then #[]
+      else #[{ name := extName, bytes := (st.host.encode).toList : Ckpt.Ext }]
+    IO.FS.writeBinFile p (Ckpt.render (Ckpt.save D hash st.cycle exts (E.view st.s)))
+  say s!"cert_run: route {E.name}, {D.flops.size} flops, {D.memories.size} memories, \
+{bind.buses.size} buses, {bind.regions.size} regions; start cycle {c0}"
+  let t0 ← IO.monoNanosNow
+  let (st, t) ← runLoop o ctx io hash c0 E L traceH vcd saveTo
+    { s := E.load s0, host := h0, cycle := c0 } (L.map fun l => l.load s0) {}
+  let t1 ← IO.monoNanosNow
+  if let some p := o.ckptOut then saveTo p st
+  if let some (sh, ih, bh, eh) := traceH then
+    sh.flush; ih.flush; bh.flush
+    if let some h := eh then h.flush
+    IO.FS.writeBinFile (System.FilePath.mk o.trace.get! / "console.txt") st.host.console
+  if let some v := vcd then v.h.flush
+  let ns := t1 - t0
+  let status := t.status
+  let applied := t.applied
+  let compactions := t.compactions
+  say s!"status {status}"
+  say s!"cycles {st.cycle}"
+  say s!"applied {applied}"
+  if let some c := st.host.exitCode then say s!"exit_code {c}"
+  unless st.host.console.isEmpty do say s!"console {escapeBytes st.host.console}"
+  for (a, kind) in bind.devices do
+    if let .word nm := kind then
+      say s!"word {nm} {match st.host.words.find? (·.1 == a) with | some (_, v) => hexS v | none => "-"}"
+  unless bind.buses.isEmpty do
+    say s!"bus reads {st.host.stats.reads} writes {st.host.stats.writes} fetches {st.host.stats.fetches} wait_cycles {st.host.stats.waits}"
+  if o.compact > 0 then
+    say s!"compactions {compactions} (every {o.compact} cycles{if o.compactAuto then ", automatic" else ""})"
+  say s!"wall_ms {ns / 1000000} cycles_per_s {if ns == 0 then 0 else applied * 1000000000 / ns}"
+  say s!"RESULT: {status}"
+  let ok := ["stop-output", "limit", "breakpoint", "watchpoint"].contains status ||
+    (status == "exit" && st.host.exitCode == some 0)
+  return (if ok then 0 else 1)
+
+/-- The run on engine `E`: the start state (power-on, zero, or a checkpoint), the images, the
+checkpoint cycles, the compaction policy and the lockstep engine; then `runWith`. -/
+def runFrom {σ : Type} (o : Opts) (D : DesignCert) (io : IoMeta) (bind : Bind) (stim : Option Stim)
+    (edges : EdgeSpec) (E : Engine σ) : IO UInt32 := do
+  -- the start: power-on (or zero), or a checkpoint (with its host section)
+  let hash := Ckpt.designHash D
+  let mut s0 := if o.zero then zeroState D else resetState D
+  let mut h0 := HostState.fresh bind
+  let mut c0 := 0
+  if let some p := o.ckptIn then
+    match Ckpt.parse (← IO.FS.readBinFile p) with
+    | .error e => IO.eprintln s!"{p}: {e}"; say "RESULT: refused"; return 3
+    | .ok c =>
+      if let some e := Ckpt.validate D hash c then
+        IO.eprintln s!"{p}: {e}"; say "RESULT: refused"; return 3
+      s0 := Ckpt.restore c
+      c0 := c.cycle
+      if let some ext := c.exts.find? (·.name == extName) then
+        match HostState.decode ⟨ext.bytes.toArray⟩ with
+        | .ok h =>
+          unless h.fits bind do
+            IO.eprintln s!"{p}: the host section does not fit the bind file (regions or buses differ)"
+            return 3
+          h0 := h
+        | .error e => IO.eprintln s!"{p}: {e}"; return 3
+  -- program images
+  for l in o.loads do
+    let spec ← match parseLoad l with
+      | .ok s => pure s
+      | .error e => do IO.eprintln e; return 2
+    match spec.mem with
+    | some k =>
+      let some md := D.memories[k]? | do IO.eprintln s!"load: the design has no memory {k}"; return 3
+      let ws ← if (System.FilePath.mk spec.path).extension == some "hex" then
+          match parseHexWords (← IO.FS.readFile spec.path) with
+          | .ok ws => pure (ws.map fun (a, v) => (a + spec.addr.getD 0, v))
+          | .error e => do IO.eprintln s!"{spec.path}: {e}"; return 3
+        else
+          let img ← loadImage spec.path spec.addr (md.dw / 8) o.vaddr
+          match toWords img (spec.addr.getD 0) md.dw md.depth with
+          | .ok ws => pure ws
+          | .error e => do IO.eprintln s!"{spec.path}: {e}"; return 3
+      match loadWords D s0 k ws with
+      | .ok s => s0 := s
+      | .error e => IO.eprintln s!"{spec.path}: {e}"; return 3
+      say s!"loaded {spec.path}: {ws.size} words into memory {k}"
+    | none =>
+      if bind.regions.isEmpty then
+        IO.eprintln s!"load: {spec.path}: no host memory (give a bind file with ram/rom regions, or :mem<k>)"
+        return 2
+      let img ← loadImage spec.path spec.addr o.word o.vaddr
+      match h0.load bind img with
+      | .ok h => h0 := h
+      | .error e => IO.eprintln s!"{spec.path}: {e}"; return 3
+      say s!"loaded {spec.path}: {img.segments.size} segments, entry 0x{hexS img.entry}"
+  for (k, p) in o.ckptAt do
+    unless c0 ≤ k && k ≤ c0 + o.max do
+      IO.eprintln s!"ckpt-at:{k}:{p}: cycle {k} is outside this run ({c0} .. {c0 + o.max})"; return 2
+  let ctx := Ctx.mk' D bind stim edges
+  -- automatic compaction: on a run that may reach it, for a design with memories whose
+  -- certificate meets `compacted_outputs`' hypotheses
+  let mut o := o
+  if o.compactAuto && o.max > autoCompactK && D.memories.size > 0 then
+    match compactBlocker D with
+    | none => o := { o with compact := autoCompactK }
+    | some why => say s!"automatic compaction off: {why}"
+  match o.lockstep with
+  | none => runWith o D io bind edges hash ctx s0 h0 c0 E (none : Option (Engine Unit))
+  | some r =>
+    match mkEngine D { o.runKnobs with route := r } with
+    | .error e => IO.eprintln s!"lockstep: {e.message}"; return 3
+    | .ok b2 => runWith o D io bind edges hash ctx s0 h0 c0 E (some b2.engine)
 
 def main (args : List String) : IO UInt32 := do
   match args with
@@ -222,168 +441,9 @@ def main (args : List String) : IO UInt32 := do
     let edges ← match ← readEdgeSpec o.edges with
       | .ok e => pure e
       | .error e => do IO.eprintln e; return 2
-    let stepper ← match mkStepper D o.route o.opt with
-      | .ok s => pure s
-      | .error e => do IO.eprintln e; say "RESULT: refused"; return 3
-    -- the start: power-on (or zero), or a checkpoint (with its host section)
-    let hash := Ckpt.designHash D
-    let mut s0 := if o.zero then zeroState D else resetState D
-    let mut h0 := HostState.fresh bind
-    let mut c0 := 0
-    if let some p := o.ckptIn then
-      match Ckpt.parse (← IO.FS.readBinFile p) with
-      | .error e => IO.eprintln s!"{p}: {e}"; say "RESULT: refused"; return 3
-      | .ok c =>
-        if let some e := Ckpt.validate D hash c then
-          IO.eprintln s!"{p}: {e}"; say "RESULT: refused"; return 3
-        s0 := Ckpt.restore c
-        c0 := c.cycle
-        if let some ext := c.exts.find? (·.name == extName) then
-          match HostState.decode ⟨ext.bytes.toArray⟩ with
-          | .ok h =>
-            unless h.fits bind do
-              IO.eprintln s!"{p}: the host section does not fit the bind file (regions or buses differ)"
-              return 3
-            h0 := h
-          | .error e => IO.eprintln s!"{p}: {e}"; return 3
-    -- program images
-    for l in o.loads do
-      let spec ← match parseLoad l with
-        | .ok s => pure s
-        | .error e => do IO.eprintln e; return 2
-      match spec.mem with
-      | some k =>
-        let some md := D.memories[k]? | do IO.eprintln s!"load: the design has no memory {k}"; return 3
-        let ws ← if (System.FilePath.mk spec.path).extension == some "hex" then
-            match parseHexWords (← IO.FS.readFile spec.path) with
-            | .ok ws => pure (ws.map fun (a, v) => (a + spec.addr.getD 0, v))
-            | .error e => do IO.eprintln s!"{spec.path}: {e}"; return 3
-          else
-            let img ← loadImage spec.path spec.addr (md.dw / 8) o.vaddr
-            match toWords img (spec.addr.getD 0) md.dw md.depth with
-            | .ok ws => pure ws
-            | .error e => do IO.eprintln s!"{spec.path}: {e}"; return 3
-        match loadWords D s0 k ws with
-        | .ok s => s0 := s
-        | .error e => IO.eprintln s!"{spec.path}: {e}"; return 3
-        say s!"loaded {spec.path}: {ws.size} words into memory {k}"
-      | none =>
-        if bind.regions.isEmpty then
-          IO.eprintln s!"load: {spec.path}: no host memory (give a bind file with ram/rom regions, or :mem<k>)"
-          return 2
-        let img ← loadImage spec.path spec.addr o.word o.vaddr
-        match h0.load bind img with
-        | .ok h => h0 := h
-        | .error e => IO.eprintln s!"{spec.path}: {e}"; return 3
-        say s!"loaded {spec.path}: {img.segments.size} segments, entry 0x{hexS img.entry}"
-    for (k, p) in o.ckptAt do
-      unless c0 ≤ k && k ≤ c0 + o.max do
-        IO.eprintln s!"ckpt-at:{k}:{p}: cycle {k} is outside this run ({c0} .. {c0 + o.max})"; return 2
-    let ctx := Ctx.mk' D bind stim edges stepper
-    -- automatic compaction: on a run that may reach it, for a design with memories whose
-    -- certificate meets `compacted_outputs`' hypotheses
-    let mut o := o
-    if o.compactAuto && o.max > autoCompactK && D.memories.size > 0 then
-      match compactBlocker D with
-      | none => o := { o with compact := autoCompactK }
-      | some why => say s!"automatic compaction off: {why}"
-    let ls ← match o.lockstep with
-      | none => pure none
-      | some r => match mkStepper D r o.opt with
-        | .ok s => pure (some s)
-        | .error e => do IO.eprintln s!"lockstep: {e}"; return 3
-    -- sinks
-    let traceH ← match o.trace with
-      | none => pure none
-      | some dir => do
-        IO.FS.createDirAll dir
-        let mk (f : String) : IO IO.FS.Handle := IO.FS.Handle.mk (System.FilePath.mk dir / f) .write
-        let st ← mk "steps.trace"; let inp ← mk "inputs.stim"; let bus ← mk "bus.trace"
-        inp.putStrLn "stim v1"
-        let ed ← match edges with
-          | .all => pure none
-          | _ => do let h ← mk "edges.edges"; h.putStrLn "edges v1"; pure (some h)
-        pure (some (st, inp, bus, ed))
-    let vcdPorts := (Array.range ctx.inW.size).map (fun k => (io.inputName k, ctx.inW[k]!)) ++
-      (Array.range D.outputs.size).map (fun k => (io.outputName k, D.outputs[k]!.width))
-    let vcd : Option Vcd ← match o.vcd with
-      | none => pure none
-      | some p => do pure (some (← Vcd.create p vcdPorts))
-    let saveTo (p : String) (st : LoopState) : IO Unit := do
-      let exts := if bind.regions.isEmpty && bind.buses.isEmpty then #[]
-        else #[{ name := extName, bytes := (st.host.encode).toList : Ckpt.Ext }]
-      IO.FS.writeBinFile p (Ckpt.render (Ckpt.save D hash st.cycle exts st.s))
-    say s!"cert_run: route {stepper.name}, {D.flops.size} flops, {D.memories.size} memories, \
-{bind.buses.size} buses, {bind.regions.size} regions; start cycle {c0}"
-    let t0 ← IO.monoNanosNow
-    let mut st : LoopState := { s := s0, host := h0, cycle := c0 }
-    let mut s2 := s0
-    let mut status := "limit"
-    let mut applied := 0
-    let mut compactions := 0
-    repeat
-      let k := st.cycle
-      for (j, p) in o.ckptAt do
-        if j == k then saveTo p st
-      if k ≥ c0 + o.max then status := "limit"; break
-      if o.compact > 0 && k > c0 && (k - c0) % o.compact == 0 then
-        st := { st with s := Ckpt.restore (Ckpt.save D hash k #[] st.s) }
-        if ls.isSome then s2 := Ckpt.restore (Ckpt.save D hash k #[] s2)
-        compactions := compactions + 1
-      match cycleStep ctx st with
-      | .error e =>
-        IO.eprintln s!"cycle {k}: {e}"
-        status := "refused"; break
-      | .ok co =>
-        if co.applied then
-          applied := applied + 1
-          if let some (sh, ih, bh, eh) := traceH then
-            sh.putStrLn s!"STEP {k} {" ".intercalate (co.outs.toList.map fun b => toString (bv_uint b))}"
-            for i in [0:co.tick.input.size] do
-              let v := (bv_uint co.tick.input[i]!).toNat
-              if v != 0 then ih.putStrLn s!"at {k} in {i} {co.tick.input[i]!.width} {v}"
-            for ev in co.events do
-              bh.putStrLn s!"{ev.arrival} {ev.done} {ev.kind} {hexS ev.addr} {hexS ev.data} {hexS ev.strb}"
-            if let some h := eh then
-              h.putStrLn s!"at {k} {" ".intercalate (co.tick.edges.toList.map fun b => if b then "1" else "0")}"
-          if let some v := vcd then
-            v.sample k (co.tick.input.map (fun b => (bv_uint b).toNat) ++ co.outs.map (fun b => (bv_uint b).toNat))
-          if let some l := ls then
-            match l.step co.tick.edges co.tick.input s2 with
-            | .error e => IO.eprintln s!"lockstep {l.name}, cycle {k}: {e}"; st := co.next; status := "lockstep"; break
-            | .ok r2 =>
-              if r2.outputs != co.outs then
-                let bad := (List.range co.outs.size).find? (fun j => r2.outputs[j]? != co.outs[j]?)
-                IO.eprintln s!"lockstep: cycle {k}: {l.name} output {(bad.map io.outputName).getD "?"} differs"
-                st := co.next; status := "lockstep"; break
-              s2 := r2.nextState
-        st := co.next
-        if let some why := co.status then status := why; break
-    let t1 ← IO.monoNanosNow
-    if let some p := o.ckptOut then saveTo p st
-    if let some (sh, ih, bh, eh) := traceH then
-      sh.flush; ih.flush; bh.flush
-      if let some h := eh then h.flush
-      IO.FS.writeBinFile (System.FilePath.mk o.trace.get! / "console.txt") st.host.console
-    if let some v := vcd then v.h.flush
-    let ns := t1 - t0
-    say s!"status {status}"
-    say s!"cycles {st.cycle}"
-    say s!"applied {applied}"
-    if let some c := st.host.exitCode then say s!"exit_code {c}"
-    unless st.host.console.isEmpty do say s!"console {escapeBytes st.host.console}"
-    for (a, kind) in bind.devices do
-      if let .word nm := kind then
-        say s!"word {nm} {match st.host.words.find? (·.1 == a) with | some (_, v) => hexS v | none => "-"}"
-    unless bind.buses.isEmpty do
-      say s!"bus reads {st.host.stats.reads} writes {st.host.stats.writes} fetches {st.host.stats.fetches} wait_cycles {st.host.stats.waits}"
-    if o.compact > 0 then
-      say s!"compactions {compactions} (every {o.compact} cycles{if o.compactAuto then ", automatic" else ""})"
-    say s!"wall_ms {ns / 1000000} cycles_per_s {if ns == 0 then 0 else applied * 1000000000 / ns}"
-    say s!"RESULT: {status}"
-    let ok := ["stop-output", "limit", "breakpoint", "watchpoint"].contains status ||
-      (status == "exit" && st.host.exitCode == some 0)
-    return (if ok then 0 else 1)
+    match mkEngine D o.runKnobs with
+    | .error e => IO.eprintln e.message; say "RESULT: refused"; return 3
+    | .ok b => runFrom o D io bind stim edges b.engine
   catch e =>
     IO.eprintln s!"cert_run: {e}"
     return 3

@@ -44,23 +44,23 @@ import LeanSemanticPrimitives.Compiler.VcEngine
 namespace HDLProof
 namespace Run
 
-open Compiler
+open Compiler Compiler.Direct
 
 /-- vc's step after the first. -/
 inductive VcInc where
-  /-- event-driven: only the bindings that read a changed slot (`ResidualEv`) -/
+  /-- event-driven: only the bindings that read a changed slot (`ResidualEv`); the default -/
   | event
-  /-- incremental, visiting every binding (`ResidualInc.incStep`) -/
+  /-- OLDER, SLOWER: incremental, visiting every binding (`ResidualInc.incStep`) -/
   | scan
-  /-- the whole `denoteResidual` -/
+  /-- OLDER, SLOWEST: the whole `denoteResidual` -/
   | off
 deriving BEq, Inhabited, Repr
 
 /-- How vc's event-driven step keeps memories. -/
 inductive VcMem where
-  /-- tables (`ResidualFlat`) -/
+  /-- tables (`ResidualFlat`); the default -/
   | table
-  /-- functions (closure chains, `ResidualEv`) -/
+  /-- OLDER, SLOWER: functions (closure chains, `ResidualEv`) -/
   | func
 deriving BEq, Inhabited, Repr
 
@@ -247,10 +247,11 @@ theorem mkEngine_vc_sound {D : DesignCert} {k : Knobs} {b : Built} (hr : k.route
       · exact vcEngineOf_sound D k _
     exact key k.vcOpt
 
-/-- fp's engine is a step on runtime states that agrees with `interpretDesign` (`StepAgree`). -/
+/-- fp's engine is a step on runtime states that agrees with `interpretDesign` (`StepAgree`), for
+a certificate `fpChecks` accepts. -/
 theorem mkEngine_fp_agree {D : DesignCert} {k : Knobs} {b : Built} (hr : k.route = .fp)
     (h : mkEngine D k = .ok b) :
-    ∃ step, StepAgree D step ∧ b = ⟨RuntimeState, Engine.ofStep "fp" step, #[]⟩ := by
+    fpChecks D = none ∧ ∃ step, StepAgree D step ∧ b = ⟨RuntimeState, Engine.ofStep "fp" step, #[]⟩ := by
   unfold mkEngine at h
   rw [hr] at h
   dsimp only at h
@@ -266,8 +267,22 @@ theorem mkEngine_fp_agree {D : DesignCert} {k : Knobs} {b : Built} (hr : k.route
       | none => simp [hc, hres, hs] at h
       | some sim =>
         simp only [hc, hres, hs, Except.ok.injEq] at h
-        exact ⟨_, fpStep_agree hsem haddr hdepth hroot hword hproj hs
+        exact ⟨rfl, _, fpStep_agree hsem haddr hdepth hroot hword hproj hs
           (by cases k.fpShare <;> simp), h.symm⟩
+
+/-- **A closed-loop run on the engine `mkEngine` builds is the reference trace of its ticks**: for
+ir, ref and vc (`runCycles_sound`; vc against its program's `denoteResidual`, which
+`compileOpt_correct` makes `interpretDesign`'s on the lake side) the run's outputs and final state
+are `refTrace`'s; for fp (`runCycles_fp_outputs`) the outputs, and a final state that agrees. -/
+theorem mkEngine_runCycles_fp {ctx : Ctx} {k : Knobs} {b : Built} (hr : k.route = .fp)
+    (h : mkEngine ctx.D k = .ok b) {n : Nat} {st : LoopState b.σ} {ts : List Tick}
+    {os : List (Array BV)} {st' : LoopState b.σ} {why : Option String}
+    (hfit : Fits ctx.D (b.engine.view st.s)) (hrun : runCycles ctx b.engine n st = .ok (ts, os, st', why)) :
+    (refTrace ctx.D (b.engine.view st.s) ts).steps.map (·.outputs) = os ∧
+    Projection.CkptResume.StateAgree ctx.D (b.engine.view st'.s)
+      (refTrace ctx.D (b.engine.view st.s) ts).finalState := by
+  obtain ⟨hc, step, hs, rfl⟩ := mkEngine_fp_agree hr h
+  exact runCycles_fp_outputs hs hc hfit hrun
 
 end Run
 end HDLProof
@@ -275,3 +290,4 @@ end HDLProof
 #audit_axioms HDLProof.Run.mkEngine_ir_sound
 #audit_axioms HDLProof.Run.mkEngine_vc_sound
 #audit_axioms HDLProof.Run.mkEngine_fp_agree
+#audit_axioms HDLProof.Run.mkEngine_runCycles_fp
