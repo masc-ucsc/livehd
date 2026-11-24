@@ -94,7 +94,14 @@ alongside the shared worst-case mapping environment.</p>
 <p>Exchanging 20 SRAM assignments inside one Eyeriss cluster reduced whole-chip pin HPWL from
 5.996970 to 5.991720 m. A fresh full global route used 7.254824 m versus 7.261395 m, both at zero
 overflow. Setup changed from −10.6493 to −10.6443 ns and hold from −0.4795 to −0.4883 ns.
-These are global-route RC measurements on the four-cluster central-strip layout. Detailed routing,
+The SRAM worker connected all 69,938 nets and retained exact wire geometry for all 69,086 frozen
+nets. Its independent geometry check found 241 markers, down from 683 in the original worker.</p>
+<p>The full-chip routed path to SRAM bank 6 also crosses the neighboring ClusterGroup 1_0.
+Moving six standard cells within that group improved global-route setup slack to −10.1403 ns and
+the clock estimate to 79.11 MHz, compared with 76.05 MHz for the original central strip. Hold
+was −0.4884 ns. Global overflow stayed zero, with 7.257384 m of wire and 5.994042 m of pin HPWL.
+A larger five-cell move dropped the clock estimate to 72.28 MHz. All four trials kept the same
+four equal worker boundaries, central glue, and PCRS clock tree. Full-chip detailed routing,
 extracted timing, and equivalence-checked private color variants remain open.</p>
 
 <h2>Remaining work</h2>
