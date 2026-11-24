@@ -114,6 +114,12 @@ int main(int argc, char** argv) {
     std::map<std::string, int, std::less<>> ids;
     uint64_t                                cells = 0, macros = 0;
     const auto&                             objects = field(graph, "objects");
+    if (graph.HasMember("repeated_scopes")) {
+      if (!graph["repeated_scopes"].IsBool()) {
+        throw std::invalid_argument("expected boolean repeated_scopes");
+      }
+      model.repeated_scopes = graph["repeated_scopes"].GetBool();
+    }
     if (!objects.IsArray() || objects.Empty()) {
       throw std::invalid_argument("expected nonempty objects array");
     }

@@ -38,6 +38,7 @@ struct Flat_origin {
   hhds::Node_class                          src_node;
   std::shared_ptr<const Flat_instance_path> instance;
 
+  [[nodiscard]] std::string_view occurrence_prefix() const;  // flattened scope including its trailing separator
   [[nodiscard]] int32_t color() const;
   void                  set_color(int32_t color) const;
 };

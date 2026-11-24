@@ -797,10 +797,10 @@ cc_test(
 
 cc_library(
     name = "fp_chunks",
-    srcs = ["fp_chunks.cpp", "chunk_geometry.cpp", "chunk_demand.cpp", "chunk_topology.cpp", "chunk_templates.cpp", "chunk_refine.cpp", "chunk_jobs.cpp", "chunk_measure.cpp", "chunk_memory.cpp"],
-    hdrs = ["fp_chunks.hpp", "io_spacing.hpp", "chunk_geometry.hpp", "chunk_demand.hpp", "chunk_topology.hpp", "chunk_templates.hpp", "chunk_refine.hpp", "chunk_jobs.hpp", "chunk_measure.hpp", "chunk_memory.hpp"],
+    srcs = ["fp_chunks.cpp", "chunk_family.cpp", "chunk_regions.cpp", "chunk_geometry.cpp", "chunk_demand.cpp", "chunk_topology.cpp", "chunk_templates.cpp", "chunk_refine.cpp", "chunk_jobs.cpp", "chunk_measure.cpp", "chunk_memory.cpp"],
+    hdrs = ["fp_chunks.hpp", "chunk_family.hpp", "io_spacing.hpp", "chunk_geometry.hpp", "chunk_demand.hpp", "chunk_topology.hpp", "chunk_templates.hpp", "chunk_refine.hpp", "chunk_jobs.hpp", "chunk_measure.hpp", "chunk_memory.hpp"],
     copts = COPTS,
-    deps = [":centroid_record", "//core", "@rapidjson", "@dreamplace"],
+    deps = [":centroid_record", ":fp_repetition", "//core", "@rapidjson", "@dreamplace"],
 )
 
 cc_binary(

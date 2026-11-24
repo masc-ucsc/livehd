@@ -2,6 +2,7 @@
 #include "io_timing.hpp"
 
 #include <filesystem>
+#include <set>
 
 #include "attrs.hpp"
 #include "gtest/gtest.h"
@@ -50,10 +51,10 @@ TEST(IoTiming, CrossingColorsAndSingleAutomaticRound) {
   auto top    = top_io->create_graph();
   auto driver = top->get_input_pin("a");
   graph_util::set_bits(driver, 1);
-  for (int i = 0; i < 2; ++i) {
+  for (int i = 0; i < 3; ++i) {
     auto n = graph_util::create_typed_node(*top, Ntype_op::Sub);
-    n.set_subnode(colors[i]);
-    n.set_name(i ? "right" : "left");
+    n.set_subnode(colors[i == 2 ? 1 : i]);
+    n.set_name(i == 2 ? "right_copy" : i ? "right" : "left");
     driver.connect_sink(n.create_sink_pin("a"));
     driver = n.create_driver_pin("y");
     graph_util::set_bits(driver, 1);
@@ -77,7 +78,8 @@ TEST(IoTiming, CrossingColorsAndSingleAutomaticRound) {
     for (auto n : placed.graph->body().nodes()) {
       if (auto io = n.get_subnode_io()) {
         for (const auto& p : io->get_input_pin_decls()) {
-          timing.pins[std::string(n.get_name()) + ":" + p.name].arrival = 950;
+          timing.pins[std::string(n.get_name()) + ":" + p.name].arrival
+              = std::string_view(n.get_name()).starts_with("right_copy.") ? 900 : 950;
         }
         for (const auto& p : io->get_output_pin_decls()) {
           timing.pins[std::string(n.get_name()) + ":" + p.name].required = 1000;
@@ -198,6 +200,17 @@ TEST(IoTiming, CrossingColorsAndSingleAutomaticRound) {
   EXPECT_EQ(timing_calls, calls_before_macro + 2);
   EXPECT_EQ(probe_store->rows.at("top__c1").placed.inputs.at("a[0]"), 950);
   EXPECT_EQ(probe_store->global_wire.length_um.at(1), 1000);
+  rapidjson::Document occurrence_report;
+  occurrence_report.Parse(probe.report().c_str());
+  std::map<std::string, double> arrivals;
+  for (const auto& row : occurrence_report["occurrence_timing"].GetArray()) {
+    if (std::string_view(row["module"].GetString()) == "top__c2") {
+      arrivals[row["instance"].GetString()] = row["arrival_ps"]["a[0]"].GetDouble();
+    }
+  }
+  EXPECT_EQ(arrivals.at("right"), 950);
+  EXPECT_EQ(arrivals.at("right_copy"), 900);
+  EXPECT_EQ(probe_store->rows.at("top__c2").placed.inputs.at("a[0]"), 950);
   placed.parasitics = placed.macro_gp_timing->parasitics;
   placed.macro_gp_timing.reset();
   EXPECT_TRUE(flow.after_stage(Placement_stage::floorplan, placed));

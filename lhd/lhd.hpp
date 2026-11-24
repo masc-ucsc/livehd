@@ -963,6 +963,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::integer,
      "target number of hierarchy-preserving placement homes; enforce the separate worker memory budget"},
     {"place.chunk.connectivity", "true", Synth_set_option::Kind::boolean, "grow memory-sized worker homes along nets connecting pairs of colors or macros"},
+    {"place.chunk.repeated_scopes", "false", Synth_set_option::Kind::boolean, "keep sibling occurrences with similar template-color inventories in independent homes, subject to worker memory. An explicit chunk target takes precedence"},
     {"place.chunk.pack_scopes", "false", Synth_set_option::Kind::boolean, "pack hierarchy-ordered colors and macros into memory-sized worker homes across scope boundaries"},
     {"place.chunk.only", "", Synth_set_option::Kind::file, "physical home ID to project and place in export or feedback mode; default: all homes"},
     {"place.chunk.run", "flow", Synth_set_option::Kind::file, "flow: full placement; feedback: place isolated homes in sequence; export: write standalone home jobs"},

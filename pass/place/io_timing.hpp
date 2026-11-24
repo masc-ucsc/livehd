@@ -39,5 +39,7 @@ private:
     bool                  automatic = false;
   };
   std::vector<Sample> samples_;
+  std::string                                                          measured_stage_;
+  std::map<std::pair<std::string, std::string>, synth::Io_environment> occurrence_environments_;
 };
 }  // namespace livehd::placement

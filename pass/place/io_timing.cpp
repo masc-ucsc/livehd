@@ -87,13 +87,18 @@ std::map<std::string, synth::Io_environment> Io_timing_flow::harvest(const Resul
   }
   // Instance paths are used only for matching the measured physical pins. The
   // persisted key is the stable region module + port bit, never a flat net name.
-  std::map<std::pair<std::string, std::string>, std::vector<std::string>> occurrences;
+  occurrence_environments_.clear();
+  struct Physical_pin_owner {
+    std::string      name;
+    std::string_view prefix;  // owned by the flat origin map throughout harvest
+  };
+  std::map<std::pair<std::string, std::string>, std::vector<Physical_pin_owner>> occurrences;
   std::map<std::string, std::string>                                      owners, masters;
   for (const auto& [node, origin] : origins) {
     const auto module = std::string(origin.src_node.get_graph()->get_name());
     const auto name   = std::string(node.get_name());
     if (modules.contains(module)) {
-      occurrences[{module, std::string(origin.src_node.get_name())}].push_back(name);
+      occurrences[{module, std::string(origin.src_node.get_name())}].push_back({name, origin.occurrence_prefix()});
       owners[name] = module;
     }
     if (auto io = node.get_subnode_io()) {
@@ -149,7 +154,7 @@ std::map<std::string, synth::Io_environment> Io_timing_flow::harvest(const Resul
       if (names == occurrences.end()) {
         continue;
       }
-      for (const auto& name : names->second) {
+      for (const auto& [name, prefix] : names->second) {
         const auto key = name + ":" + binding.pin;
         const auto pin = timing.find_label(key);
         if (protected_pins.contains(key) || pin == nullptr || pin->clock) {
@@ -159,14 +164,17 @@ std::map<std::string, synth::Io_environment> Io_timing_flow::harvest(const Resul
         if (!value || !std::isfinite(*value)) {
           continue;
         }
-        const auto ps    = *value * timing.time_unit_ps;
-        auto&      times = binding.input ? env.inputs : env.required;
-        const auto old   = times.find(binding.port);
-        if (old == times.end()) {
-          times[binding.port] = ps;
-        } else {
-          old->second = binding.input ? std::max(old->second, ps) : std::min(old->second, ps);
-        }
+        const auto ps     = *value * timing.time_unit_ps;
+        auto       record = [&](synth::Io_environment& destination) {
+          auto& times      = binding.input ? destination.inputs : destination.required;
+          auto [it, added] = times.try_emplace(binding.port, ps);
+          if (!added) {
+            it->second = binding.input ? std::max(it->second, ps) : std::min(it->second, ps);
+          }
+        };
+        record(env);
+        const auto path = prefix.ends_with('.') ? prefix.substr(0, prefix.size() - 1) : prefix;
+        record(occurrence_environments_[{module, std::string(path)}]);
       }
     }
     // Fresh measurements replace the previous stage's connectivity histogram.
@@ -356,6 +364,7 @@ bool Io_timing_flow::after_stage(Placement_stage stage, const Result& placed, st
       final_timing_ = std::move(timing);
     }
   }
+  measured_stage_    = stage_name(stage);
   const bool restart = check(stage_name(stage), &values, automatic);
   if (restart) {
     final_timing_.reset();
@@ -400,6 +409,30 @@ std::string Io_timing_flow::report() const {
   w.Uint(warnings);
   w.Key("seconds");
   w.Double(seconds);
+  w.Key("occurrence_timing_stage");
+  w.String(measured_stage_.c_str());
+  w.Key("occurrence_timing");
+  w.StartArray();
+  for (const auto& [key, env] : occurrence_environments_) {
+    w.StartObject();
+    w.Key("module");
+    w.String(key.first.c_str());
+    w.Key("instance");
+    w.String(key.second.c_str());
+    auto pins = [&](const char* label, const auto& times) {
+      w.Key(label);
+      w.StartObject();
+      for (const auto& [port, value] : times) {
+        w.Key(port.c_str());
+        w.Double(value);
+      }
+      w.EndObject();
+    };
+    pins("arrival_ps", env.inputs);
+    pins("required_ps", env.required);
+    w.EndObject();
+  }
+  w.EndArray();
   w.Key("colors");
   w.StartArray();
   for (const auto& sample : samples_) {

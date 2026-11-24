@@ -155,6 +155,18 @@ def check_chunk_stages():
                                          headers={'Authorization': 'Bearer '+token, 'Content-Type':'application/json'})
             with urllib.request.urlopen(req, timeout=15) as reply:
                 return json.load(reply)
+        macro_scene = action(cmd='scene', home=ram_home, stage='macro')['nodes']
+        memories = [n for n, box in macro_scene.items() if box[4]]
+        first = memories[0]
+        second = next(n for n in memories[1:] if macro_scene[n][2:4] == macro_scene[first][2:4])
+        swap = action(cmd='trial', home=ram_home, stage='macro', names=[first, second],
+                      candidates={'exchange': {'swap': True, 'fix': 'xy'}}, iterations=0, wait=True)
+        assert swap['candidates']['exchange']['status'] == 'done', swap
+        action(cmd='view', trial=swap['id'], branch='exchange')
+        exchanged = action(cmd='scene', home=ram_home, stage='macro')['nodes']
+        assert exchanged[first][:2] == macro_scene[second][:2]
+        assert exchanged[second][:2] == macro_scene[first][:2]
+        action(cmd='view', branch='main')
         initial_scene = action(cmd='scene', home=ram_home)
         memory = next(n for n, b in initial_scene['nodes'].items() if b[4])
         assert action(cmd='select', home=ram_home, names=[memory])['count'] == 1

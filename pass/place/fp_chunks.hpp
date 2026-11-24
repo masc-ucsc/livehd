@@ -82,7 +82,16 @@ struct Chunk_route_grid {
   std::array<std::array<double, 2>, bins * bins> load{};
   double                                         peak_h = 0, peak_v = 0;
 };
+struct Chunk_family_summary {
+  struct Member {
+    std::string scope;
+    size_t      cells, macros, template_colors;
+  };
+  std::vector<Member> members;
+  size_t              glue_cells = 0, shared_color_uses = 0;
+};
 struct Chunk_plan {
+  Chunk_family_summary                                  repeated_family;
   std::vector<std::pair<double,std::vector<Chunk_box>>> shape_candidates;
   Chunk_route_grid            route;
   std::vector<Chunk_overlap>  overlaps;
@@ -130,6 +139,7 @@ public:
   std::map<size_t, std::pair<std::string, int>> bus_bits;
   double                                        track_pitch = 0;
   std::array<double, 2>                         tracks_per_dbu{};
+  bool                                          repeated_scopes = false;
   bool pack_scopes  = false;  // group whole colors and macros across instance boundaries up to the worker budget
   bool connectivity = true;
   std::vector<Chunk_object>                                                       objects;

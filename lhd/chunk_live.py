@@ -239,6 +239,7 @@ class LivePlacement:
 
     def layout(self, work, home, geometry, selection, edit, holds, image):
         if not isinstance(edit, dict) or set(edit) - {
+            'swap',
             'align',
             'side',
             'gap',
@@ -272,6 +273,13 @@ class LivePlacement:
         if gap < 0:
             raise ValueError('gap must be nonnegative')
         xy = {n: geometry[n][:2] for n in order}
+        if 'swap' in edit:
+            if edit['swap'] is not True or set(edit) - {'swap', 'fix', 'release'} or len(order) != 2:
+                raise ValueError('swap needs exactly two selected macros and optional axis holds')
+            first, second = order
+            if not all(geometry[n][4] and None not in geometry[n][2:4] for n in order) or geometry[first][2:4] != geometry[second][2:4]:
+                raise ValueError('swap needs two macros with matching physical dimensions')
+            xy[first], xy[second] = xy[second], xy[first]
         if align and order:
             cursor = min(xy[n][axis] for n in order)
             level = round(sum(xy[n][1 - axis] for n in order) / len(order))
@@ -822,6 +830,7 @@ class LivePlacement:
         return {
             'ok': True,
             'accepted': accepted,
+            'repeated_scope_candidate': work.plan.get('repeated_scope_candidate'),
             'validation': read_validation(work.root / 'validation' / accepted['revision'] / 'latest.json'),
             'selected_validation': read_validation(candidate),
             'selected': chosen,
@@ -933,7 +942,7 @@ class LivePlacement:
                     'ok': True,
                     'usage': {
                         'select': 'home=CHUNK kind=macro match=NAME_FRAGMENT, or names=[...]',
-                        'edit': 'edit={x,y,dx,dy,align:row|column,side:left|right|top|bottom,gap,fix:x|y|xy,release:x|y|xy}; DBU',
+                        'edit': 'edit={swap:true} exchanges two selected equal-footprint macros; edit={x,y,dx,dy,align:row|column,side:left|right|top|bottom,gap,fix:x|y|xy,release:x|y|xy}; DBU',
                         'trial': 'candidates={left:{dx:DBU},sparse:{density:0.72},pin:{io:{net:N,xy:[X,Y]}}} stage=macro|final iterations=100 metric=hpwl|wns scope=assembled|local keep_if=checkpoint|control',
                         'compare': 'trial=ID wait=true',
                         'projects': 'list registered workspaces; project=ID selects one for this request',

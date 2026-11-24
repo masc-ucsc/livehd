@@ -2870,6 +2870,26 @@ lhd synth chunk validate --openroad /path/to/openroad --route M2 M7 --capacity 0
 
 Each search uses the same starting handoff and frozen exterior for its control and edited branches. Acceptance compares the selected objective (assembled physical pin HPWL by default, estimated worst slack with `--objective wns`) against both the equally advanced control and the current placement with matching stage coverage. Macro and density trials can combine results from different homes while keeping the same interface. A matched control can be the lowest-HPWL placement observed. Use `restore-best --objective hpwl` to explicitly recall the complete best comparable placement in the current immutable plan, including its contacts and poses. The prior accepted state remains available to `undo`. The IO coordinator reserves anchored contacts, allocates shared slots and versions every participant in a changed interface. A newer export with track patterns can report preferred-layer assignments. Set `synth.place.chunk.route_layers=M2:M7` or the relevant technology range to match the downstream routing stack. Pin access and detailed DRC require downstream validation.
 
+The managed chunk overview reports repeated sibling scopes, template-color occurrences shared by all copies,
+and the number of cells outside the family. These counts are also in the plan’s `repeated_scope_candidate` record.
+Set `synth.place.chunk.repeated_scopes=true` with an automatic chunk count to try keeping repeated sibling
+occurrences together. The detector compares their multisets of module-local colors and their cell counts.
+The remaining logic gets a glue home. The worker budget can still split an oversized occurrence.
+An explicit `synth.place.chunk.target` takes precedence.
+
+At the macro stage, shift-select two SRAMs with matching footprint dimensions and choose **Trial macro swap**.
+The trial exchanges their positions in the current worker and keeps both axes fixed during legalization.
+The control and the proposed placement are available in the branch selector. The socket equivalent is
+`trial stage=macro iterations=0 candidates={"swap":{"swap":true,"fix":"xy"}}` with both instance names selected.
+Compare assembled timing and pin HPWL before keeping a branch.
+
+A geometry edit can provide a `regions` object mapping physical home IDs to arrays of
+`[xl, yl, xh, yh]` tiles in design DBU. Submit neighboring homes in the same operation to exchange land.
+Tiles within a home connect along edges. All boundaries follow the site/row grid, existing fixed devices and
+seeded macro halos must fit, and each home must retain enough area for its contents. Unassigned sites are
+available for top-level use. The exported `region_dbu`, `perimeter_dbu`, `worker_box_dbu` and
+`exclusions_dbu` describe the usable tiles, exterior edges, packet frame and blocked rectangles.
+
 At the live FP gate, select adjacent homes and use **Preview stepped edge**. The socket takes the same operation in DBU. A positive depth extends the first band toward increasing X on a vertical edge, or increasing Y on a horizontal edge. A second band gives the same area back. Optional `band_dbu` and `offset_dbu` select the strip width and starting offset along the shared edge. Geometry snaps to the site's X pitch and the row's Y pitch. Reapplying the pair replaces its depth. A zero depth restores the straight edge. Different pairs can be edited together when they have disjoint owners. A physical macro footprint plus its halo or a fixed terminal can rule out an exchange. The worker receives the bounding frame and excluded strips. Local placement, legalization and final stitching check the actual footprint.
 
 ```sh

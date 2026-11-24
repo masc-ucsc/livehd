@@ -12,6 +12,7 @@ struct Chunk_edit {
   std::string              all_but;
   std::string              reshape;
   double                   aspect = 0;
+  std::map<std::string, std::vector<Chunk_box>> regions;
   std::string              step, peer;
   double                   depth = 0, band = 0, offset = 0;
 };
@@ -22,6 +23,9 @@ Chunk_edits read_chunk_edits(const metadata::Bundle*, const std::string& design)
 void        edit_chunk_boxes(Chunk_plan&, const Chunk_edits&, const std::vector<Chunk_object>&, Chunk_box, std::array<double, 2>);
 // Exchange equal-area strips on an exclusive edge shared by two physical homes.
 void apply_chunk_step(Chunk_plan&, const Chunk_edit&, const std::vector<Chunk_object>&, std::array<double, 2>);
+// Apply site-aligned usable regions together so adjacent homes may exchange land.
+void        apply_chunk_regions(Chunk_plan&, const std::map<std::string, std::vector<Chunk_box>>&, const std::vector<Chunk_object>&,
+                                Chunk_box core, std::array<double, 2> pitch);
 // One Jacobi update: all overlap edges read the same previous color centers.
 void relax_shared_colors(const Chunk_plan&, const std::vector<Chunk_object>&, const std::vector<std::array<double, 2>>& previous,
                          std::vector<std::array<double, 2>>& next);

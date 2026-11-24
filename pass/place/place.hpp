@@ -232,6 +232,7 @@ struct Options {
   bool                              explicit_chunk_gate = false;  // Even on a trivial one-chunk floorplan.
   std::shared_ptr<const Chunk_predictor> chunk_predictor;
   bool chunk_require_fit=false;
+  bool chunk_repeated_scopes = false;
   bool chunk_pack_scopes = false;
   std::string                                               chunk_route_layers;
   bool                                                      io_spread = false;

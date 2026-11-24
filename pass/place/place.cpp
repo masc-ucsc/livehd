@@ -5236,6 +5236,7 @@ bool plan_color_chunks(View& v, const Options& options, const std::vector<Hint_s
                        const ph::Technology& tech, bool restored, const Result& source) {
   const double dbu = tech.dbu;
   Chunk_model  model;
+  model.repeated_scopes = options.chunk_repeated_scopes;
   model.pack_scopes  = options.chunk_pack_scopes;
   model.target_homes = options.chunk_target;
   model.spread       = options.io_spread;

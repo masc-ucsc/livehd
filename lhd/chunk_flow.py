@@ -104,7 +104,7 @@ class Workspace:
         self.guidance = [r for r in records if r['class'] == PREFIX + 'chunk_guidance' and r.get('design') == self.design]
         plan = self.plan = one(records, 'chunk_plan', self.design)
         self.chunks = {c['id']: {'box_dbu': c.get('worker_box_dbu', c['box_dbu']), 'ports': c['ports'],
-                                 **{k:c[k] for k in ('perimeter_dbu','region_dbu') if k in c}} for c in plan['chunks']}
+                                 **{k:c[k] for k in ('perimeter_dbu','region_dbu','exclusions_dbu') if k in c}} for c in plan['chunks']}
         self.anchored = {p['net_index'] for p in plan.get('communication', {}).get('fixed_contacts', [])}
         self.incident = interfaces(self)
         self.timed_interfaces = {r[0] for r in self.index.get("assembly", {}).get("timing", [])}
@@ -173,7 +173,7 @@ class Workspace:
                     if field in saved:
                         result[stage][field] = os.path.normpath(self.root / saved[field])
             rows.append(dict(id=k, box_dbu=self.chunks[k]['box_dbu'], exported=bool(job),
-                             **{field:self.chunks[k][field] for field in ('region_dbu','perimeter_dbu') if field in self.chunks[k]},
+                             **{field:self.chunks[k][field] for field in ('region_dbu','perimeter_dbu','exclusions_dbu') if field in self.chunks[k]},
                              estimated_bytes=job.get('estimated_bytes'), budget_bytes=self.index['budget_bytes'],
                              macro=result.get('macro', {'status': 'pending'}), final=result.get('final', {'status': 'pending'})))
         return rows

@@ -234,6 +234,89 @@ TEST(FpChunks, MultiTerminalNetCountsFullSpanOnce) {
   EXPECT_EQ(plan.center_hpwl, 180);
   EXPECT_EQ(plan.port_hpwl, 180);
 }
+TEST(FpChunks, CrossRegionRetainsExteriorEdgesAndAllowsUnusedSites) {
+  Chunk_plan original;
+  Fp_chunk   center, northeast;
+  center.id  = "glue";
+  center.box = {4, 0, 6, 10};
+  center.ports.push_back({
+      "crossing",
+      {6, 5},
+      0
+  });
+  northeast.id    = "ne";
+  northeast.box   = {6, 5, 10, 10};
+  original.chunks = {center, northeast};
+  const std::map<std::string, std::vector<Chunk_box>> masks{
+      {"glue", {{4, 0, 6, 4}, {0, 4, 10, 6}, {4, 6, 6, 10}}},
+      {  "ne",                             {{7, 7, 10, 10}}}
+  };
+  auto frame = original;
+  apply_chunk_regions(frame, masks, {}, {0, 0, 10, 10}, {1, 1});
+  const auto& c = frame.chunks.front();
+  EXPECT_EQ(c.perimeter.size(), 12);
+  EXPECT_EQ(c.exclusions.size(), 4);
+  EXPECT_EQ(c.worker_box(), (Chunk_box{0, 0, 10, 10}));
+  auto edge = c.project_port({6, 5});
+  EXPECT_EQ(c.ports.front().xy, edge);
+  EXPECT_NE(edge, (std::array<double, 2>{6, 5}));
+  auto bad = [&](std::vector<Chunk_box> tiles) {
+    auto trial = original;
+    auto edit  = masks;
+    edit["ne"] = std::move(tiles);
+    apply_chunk_regions(trial, edit, {}, {0, 0, 10, 10}, {1, 1});
+  };
+  EXPECT_THROW(bad({
+                   {6, 5, 10, 10}
+  }),
+               std::invalid_argument);
+  EXPECT_THROW(bad({
+                   {7, 7,  8,  8},
+                   {8, 8, 10, 10}
+  }),
+               std::invalid_argument);
+  EXPECT_THROW(bad({
+                   {7.5, 7, 10, 10}
+  }),
+               std::invalid_argument);
+}
+
+TEST(FpChunks, KeepRepeatedParentOccurrencesTogetherBeforeMapping) {
+  Chunk_model model;
+  model.pack_scopes     = true;
+  model.repeated_scopes = true;
+  for (std::string core : {"a", "b", "c", "d"}) {
+    for (std::string unit : {"alu", "pipe"}) {
+      auto scope = core + "." + unit;
+      model.cell(scope + ".color", scope, unit, false, 2, 2);
+    }
+    model.cell(core + ".memory", core, "cpu", true, 8, 4);
+  }
+  model.cell("glue", "", "", false, 2, 2);
+  auto run  = [&] { return model.plan({0, 0, 500, 500}, 1, 1, 0, .6, nullptr, "top"); };
+  auto plan = run();
+  ASSERT_EQ(plan.chunks.size(), 5);
+  std::set<int> homes;
+  for (int i = 0; i < 12; i += 3) {
+    EXPECT_EQ(plan.home[i], plan.home[i + 1]);
+    EXPECT_EQ(plan.home[i], plan.home[i + 2]);
+    EXPECT_TRUE(homes.insert(plan.home[i]).second);
+  }
+  EXPECT_TRUE(homes.insert(plan.home.back()).second);
+  model.target_homes = 1;
+  EXPECT_EQ(run().chunks.size(), 1);
+  model.target_homes    = 0;
+  model.repeated_scopes = false;
+  auto control          = run();
+  EXPECT_EQ(control.chunks.size(), 1);
+  auto advice = model.record(control, "top");
+  ASSERT_TRUE(advice.HasMember("repeated_scope_candidate"));
+  const auto& candidate = advice["repeated_scope_candidate"];
+  EXPECT_EQ(candidate["siblings"].Size(), 4);
+  EXPECT_EQ(candidate["shared_color_uses_per_copy"].GetUint64(), 2);
+  EXPECT_EQ(candidate["glue_cells"].GetUint64(), 1);
+}
+
 TEST(FpChunks, RepeatedCoresAndScopedGuidanceReplay) {
   Chunk_model m;
   for (std::string core : {"a", "b"}) {
@@ -782,6 +865,26 @@ TEST(FpChunks, RepeatedStepReplacesTheSameSeamAndZeroRestoresTheControl) {
   EXPECT_EQ(cleared.home, base.home);
   EXPECT_EQ(cleared.chunks[1].box, base.chunks[1].box);
 }
+TEST(FpChunks, UnderfilledMaskSurvivesPlanReplay) {
+  Chunk_model model;
+  model.cell("color", "", "", false, 1, 1);
+  auto             solve   = [&](const metadata::Bundle* hints) { return model.plan({0, 0, 100, 100}, 1, 1, 0, .5, hints, "top"); };
+  auto             control = solve(nullptr);
+  const auto&      id      = control.chunks.front().id;
+  metadata::Bundle input(
+      std::format(R"([{{"class":"livehd.placement.chunk_guidance","id":"gui","geometry":[{{"regions":{{"{}":[[2,2,98,98]]}}}}]}}])",
+                  id));
+  auto shaped = solve(&input);
+  ASSERT_EQ(shaped.chunks.front().region.size(), 1u);
+  auto record = model.record(shaped, "top");
+  ASSERT_TRUE(record["chunks"][0].HasMember("exclusions_dbu"));
+  EXPECT_EQ(record["chunks"][0]["exclusions_dbu"].Size(), 4u);
+  input.replace(record);
+  auto replayed = solve(&input);
+  EXPECT_EQ(replayed.chunks.front().exclusions, shaped.chunks.front().exclusions);
+  EXPECT_EQ(replayed.chunks.front().ports.size(), shaped.chunks.front().ports.size());
+}
+
 TEST(FpChunks, OutdatedSelectorsAreDiagnosed) {
   Chunk_model m;
   m.cell("color", "", "", false, 1, 1);

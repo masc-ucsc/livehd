@@ -17,7 +17,7 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:.4rem;bo
 <section class="stages"><h2>Placement stages</h2><div id="tablebox"><table><thead><tr><th>Chunk</th><th>Macro</th><th>Final</th><th>Est. MiB</th></tr></thead><tbody></tbody></table></div>
 <div class="tools"><button id="macro">Run macro</button><button id="final">Run final</button><button id="placeDesign">Place design by chunk</button><label><input type="checkbox" id="neighbors"> Include neighbors</label></div>
 <div id="message" role="status"></div></section>
-<section class="local"><h2>Selected chunk</h2><div class="tools"><select id="inspect" aria-label="Inspect chunk"></select><select id="view" aria-label="Placement stage"><option>macro</option><option>final</option></select><select id="branch" aria-label="Trial branch"><option value="">Main</option></select><button id="keep" disabled>Keep branch</button><button id="undo">Undo</button><label><input type="checkbox" id="density"> Cell density</label>
+<section class="local"><h2>Selected chunk</h2><div class="tools"><select id="inspect" aria-label="Inspect chunk"></select><select id="view" aria-label="Placement stage"><option>macro</option><option>final</option></select><select id="branch" aria-label="Trial branch"><option value="">Main</option></select><button id="swap" disabled>Trial macro swap</button><button id="keep" disabled>Keep branch</button><button id="undo">Undo</button><label><input type="checkbox" id="density"> Cell density</label>
 <label><input type="checkbox" id="overlay"> GP displacement</label><label><input type="checkbox" id="follow" checked> Follow active chunk and trial</label><button id="fit">Fit</button></div><canvas id="placement" aria-label="Selected chunk placement"></canvas><p id="caption"></p><pre id="feedback"></pre>
 <details><summary>Boundary contacts</summary><div class="tools"><select id="ports" aria-label="Contact net"></select>
 <label>X (DBU) <input type="number" id="x"></label><label>Y (DBU) <input type="number" id="y"></label>
@@ -119,6 +119,11 @@ function drawEdge(ctx, home, px, py) {
   }
   ctx.stroke();
 }
+function drawMacro(ctx,rect,hue) {
+  ctx.fillStyle='hsla('+hue+',55%,36%,0.52)';ctx.fillRect(...rect);
+  ctx.strokeStyle='hsl('+hue+',56%,30%)';ctx.lineWidth=1;ctx.strokeRect(...rect);
+}
+function chunkHue(id){return (rows.findIndex(row=>row.id===id)*137.508+164)%360;}
 function draw() {
   const width = canvas.clientWidth, height = canvas.clientHeight, ratio = devicePixelRatio || 1;
   canvas.width = width * ratio;
@@ -147,18 +152,20 @@ function draw() {
       boxes.push(rect);ctx.rect(rect.x,rect.y,rect.w,rect.h);
     }
     ctx.clip();ctx.fillRect(x,y,w,h);
-    const tile=tiles[row.id];
+    const hue=chunkHue(row.id),tile=tiles[row.id];
     if(tile){
       for(const [nx,ny,nw,nh,macro] of tile.boxes){
-        ctx.fillStyle=macro?'#40576a':'#7b9e8b';
-        ctx.fillRect(x+(nx-xl)*unit,y+(yh-ny-nh)*unit,Math.max(1,nw*unit),Math.max(1,nh*unit));
+        const rect=[x+(nx-xl)*unit,y+(yh-ny-nh)*unit,Math.max(1,nw*unit),Math.max(1,nh*unit)];
+        if(macro)drawMacro(ctx,rect,hue);
+        else {ctx.fillStyle='#7b9e8b';ctx.fillRect(...rect);}
       }
     }
     if (row.id === liveScene?.home) {
       ctx.fillStyle='#e1e9e3';ctx.fillRect(x,y,w,h);
       for (const [nx, ny, nw, nh, macro] of Object.values(liveScene.nodes)) {
-        ctx.fillStyle = macro ? '#233f55' : '#75a58b';
-        ctx.fillRect(x+(nx-xl)*unit, y+(yh-ny-nh)*unit, Math.max(1,nw*unit), Math.max(1,nh*unit));
+        const rect=[x+(nx-xl)*unit,y+(yh-ny-nh)*unit,Math.max(1,nw*unit),Math.max(1,nh*unit)];
+        if(macro)drawMacro(ctx,rect,hue);
+        else {ctx.fillStyle='#75a58b';ctx.fillRect(...rect);}
       }
     }
     ctx.restore();ctx.strokeStyle = '#47685f';
@@ -218,12 +225,12 @@ function drawPlacement() {
     });
   }
   const nodes = scene ? Object.entries(scene.nodes) : (preview?.boxes_dbu || []).map(b => [null, b]);
-  const marked = new Set(scene?.selected || []);
+  const hue=chunkHue(detail.id),marked = new Set(scene?.selected || []);
   hitBoxes = [];
   for (const [name, [x, y, w, h, macro]] of nodes) {
-    ctx.fillStyle = macro ? '#233f55' : $('density').checked ? '#54917e44' : '#54917e';
     const rect = [px(x), py(y+h), Math.max(1,w*unit), Math.max(1,h*unit)];
-    ctx.fillRect(...rect);
+    if(macro)drawMacro(ctx,rect,hue);
+    else {ctx.fillStyle=$('density').checked ? '#54917e44' : '#54917e';ctx.fillRect(...rect);}
     const previous=scene?.gp_nodes?.[name];
     if($('overlay').checked && previous && (previous[0]!==x || previous[1]!==y)){
       ctx.strokeStyle='#ce6d25';ctx.lineWidth=1;
@@ -252,6 +259,7 @@ async function inspect() {
   if (inspection !== request) return;
   detail = d;
   preview = image;
+  $('swap').disabled = true;
   const metrics = result => [
     result.status,
     result.reason,
@@ -263,6 +271,9 @@ async function inspect() {
     const snapshot = await api('scene', {home:id,stage,overlay:$('overlay').checked});
     if (inspection !== request) return;
     liveScene = snapshot;
+    const pair=(snapshot.selected||[]).map(n=>snapshot.nodes[n]);
+    $('swap').disabled = stage!=='macro'||!!snapshot.view||pair.length!==2||!pair.every(b=>b?.[4])||
+      pair[0][2]!==pair[1][2]||pair[0][3]!==pair[1][3];
     if (snapshot.home === id) detail.ports = snapshot.ports;
   } else liveScene = null;
   $('feedback').textContent = liveScene?.view ? '' : 'Macro: ' + metrics(d.macro) + '\nFinal: ' + metrics(d.final);
@@ -377,6 +388,15 @@ $('placement').onclick = async ev => {
   if (names.has(hit.name)) names.delete(hit.name); else names.add(hit.name);
   try { await api('select',{home:detail.id,stage:$('view').value,names:[...names]}); await inspect(); } catch(e) { error(e); }
 };
+$('swap').onclick=async()=>{
+  $('swap').disabled=true;
+  try {
+    const trial=await api('trial',{home:detail.id,stage:'macro',names:liveScene.selected,
+      candidates:{swap:{swap:true,fix:'xy'}},iterations:0,wait:true});
+    if(trial.candidates.swap.status!=='done')throw new Error(trial.candidates.swap.error||'Macro swap failed');
+    await api('view',{trial:trial.id,branch:'swap'});await refresh();
+  } catch(e){error(e);await inspect();}
+};
 function branchChoice(){return JSON.parse($('branch').value || 'null');}
 $('branch').onchange=async()=>{
   try {
@@ -396,6 +416,13 @@ function showScores(overview) {
   if($('mapMode').value==='measured:0')draw();
   const body=$('scores');body.replaceChildren();
   const verification=$('validation');verification.replaceChildren();
+  const family=overview.repeated_scope_candidate;
+  if(family){
+    const note=document.createElement('div');
+    note.textContent=family.siblings.length+' repeated scopes share '+family.shared_color_uses_per_copy+
+      ' template-color occurrences per copy. '+family.glue_cells.toLocaleString()+' cells lie outside the family.';
+    verification.append(note);
+  }
   for(const [label,v] of [['Accepted',overview.validation],['Selected trial',overview.selected_validation]]){
     if(!v)continue;
     const line=document.createElement('div');

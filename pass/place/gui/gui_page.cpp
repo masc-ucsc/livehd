@@ -153,7 +153,7 @@ input[type=number]{width:44px;font:inherit;color:var(--fg);background:transparen
 <output id="ilegend" class="mut" aria-live="polite"></output>
 <pre id="ibind" style="white-space:pre-wrap;max-height:12em;overflow:auto"></pre></details>
 <details id="chunks" hidden><summary>Floorplan chunks</summary>
-<label><input type="checkbox" id="chunkLines" checked> Show boundaries</label>
+<label><input type="checkbox" id="chunkLines" checked> Show boundaries and macro footprints</label>
 <label>Target <select id="chunkSelect" style="max-width:100%"></select></label>
 <fieldset id="peerLegend" style="min-width:0"><legend>Chunk relationships</legend>
 <label><input type="checkbox" id="peerOverlay" checked> Highlight peers on the floorplan</label>
@@ -681,6 +681,17 @@ function drawChunks(){
    const x=sx(b[0]),y=sy(b[3]),w=(b[2]-b[0])*view.s,h=(b[3]-b[1])*view.s;
    const r=overlay&&relations.rows.get(c.id),active=c.id===focus;
    if(r?.nets){ctx.fillStyle='rgba(83,99,117,.29)';ctx.fillRect(x,y,w,h)}
+   if(boundaries){
+     const hue=(i*137.508+164)%360;
+     ctx.save();ctx.setLineDash([]);ctx.lineWidth=1;
+     ctx.fillStyle='hsla('+hue+',52%,45%,0.52)';ctx.strokeStyle='hsl('+hue+',55%,33%)';
+     for(const m of c.members||[]){
+       if(!m.macro||!m.footprint_dbu)continue;
+       const [l,b,r,t]=m.footprint_dbu,rect=[sx(l),sy(t),(r-l)*view.s,(t-b)*view.s];
+       ctx.fillRect(...rect);ctx.strokeRect(...rect);
+     }
+     ctx.restore();
+   }
    if(c.perimeter_dbu&&(boundaries||active)){
      ctx.setLineDash([]);ctx.strokeStyle=active?'#d27713':css('--acc');ctx.lineWidth=active?3:1.5;
      for(const [k,line,lo,hi] of c.perimeter_dbu){ctx.beginPath();ctx.moveTo(sx(k?line:lo),sy(k?lo:line));ctx.lineTo(sx(k?line:hi),sy(k?hi:line));ctx.stroke()}

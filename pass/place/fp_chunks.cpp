@@ -1,5 +1,4 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#include "fnv1a.hpp"
 #include "fp_chunks.hpp"
 
 #include <algorithm>
@@ -13,8 +12,10 @@
 #include <tuple>
 
 #include "chunk_demand.hpp"
+#include "chunk_family.hpp"
 #include "chunk_templates.hpp"
 #include "chunk_topology.hpp"
+#include "fnv1a.hpp"
 #include "io_spacing.hpp"
 
 namespace livehd::placement {
@@ -572,13 +573,17 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
   // The latest depth replaces the previous one for the same physical seam. Keeping
   // the original intent history lets undo restore the prior profile.
   std::map<std::pair<std::string, std::string>, const Chunk_edit*> steps;
+  std::map<std::string, std::vector<Chunk_box>>                    regions;
   for (const auto& edit : all_edits) {
+    for (const auto& [home, tiles] : edit.regions) {
+      regions[home] = tiles;
+    }
     if (!edit.step.empty()) {
       steps[std::minmax(edit.step, edit.peer)] = &edit;
     }
   }
   auto edits = all_edits;
-  std::erase_if(edits, [](const auto& op) { return !op.step.empty(); });
+  std::erase_if(edits, [](const auto& op) { return !op.step.empty() || !op.regions.empty(); });
   const auto    home_edits = read_home_edits(input, design);
   const auto    copies     = read_interface_copies(input, design);
   Memory_counts counts{};
@@ -592,18 +597,24 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
     whole = add_bytes(whole, estimate(o));
   }
   const uint64_t capacity = budget > predictor.baseline ? budget - predictor.baseline : 0;
-  const bool     single   = target_homes <= 1 && (!budget || whole <= budget || !capacity);
+  Chunk_family_summary family_summary;
+  const auto           family_scopes
+      = (pack_scopes || repeated_scopes) ? repeated_chunk_scopes(objects, family_summary) : std::vector<std::string>{};
+  const bool     select_family = repeated_scopes && !target_homes && (!budget || capacity) && !family_scopes.empty();
+  const bool     single        = !select_family && target_homes <= 1 && (!budget || whole <= budget || !capacity);
   auto           solve    = [&](bool          macro_islands,
                                 const Packed* packed     = nullptr,
                                 bool          scaffold   = false,
                                 bool          exact_only = false) -> std::optional<Chunk_plan> {
     auto       hints = read_guidance(input, design);
     Chunk_plan p;
+    p.repeated_family         = family_summary;
     p.predictor     = predictor;
     p.counts        = counts;
     p.macro_islands = macro_islands;
     p.budget        = budget;
     const auto n    = objects.size();
+    const bool use_family     = select_family && !macro_islands;
     const bool pack_hierarchy = (pack_scopes || target_homes > 0) && !single && !macro_islands;
     p.seeds.resize(n);
     p.density.resize(n);
@@ -617,7 +628,7 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
       const auto  scope = packed && !packed->scope[i].empty()              ? packed->scope[i]
                                        : macro_islands && o.macro && o.instance.empty() ? "@physical:" + o.id
                                                                                         : o.instance;
-      scopes[(single || pack_hierarchy) ? "" : scope].push_back(i);
+      scopes[use_family ? family_scopes[i] : (single || pack_hierarchy) ? "" : scope].push_back(i);
       const double inherited = o.module.empty() ? density : hints.get("template_color", qualified(o.module, o.local), density);
       p.density[i]        = o.macro ? 1 : hints.get("color", o.id, inherited);
       p.density_source[i] = o.macro                                  ? "footprint"
@@ -646,7 +657,7 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
     for (auto it = scopes.begin(); it != scopes.end();) {
       const auto& ids = it->second;
       const auto& o   = objects[ids.front()];
-      if (!it->first.empty() && (!packed || packed->scope[ids.front()].empty()) && ids.size() == 1 && !o.macro
+      if (!use_family && !it->first.empty() && (!packed || packed->scope[ids.front()].empty()) && ids.size() == 1 && !o.macro
           && (o.cells == 1 || (o.cells <= 16 && family_cells[o.module] <= total_cells / 100))) {
         glue.push_back(ids.front());
         it = scopes.erase(it);
@@ -787,11 +798,12 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
         const auto& o = objects[i];
         shape.emplace_back(o.macro,
                            o.local,
-                           (packed && !packed->scope[i].empty()) || scope.empty() || o.module.empty()
-                               ? estimate(o)
-                               : max_cost.at({o.module, o.macro, o.local}));
+                           use_family || (packed && !packed->scope[i].empty()) || scope.empty() || o.module.empty()
+                                    ? estimate(o)
+                                    : max_cost.at({o.module, o.macro, o.local}));
       }
-      const auto module = (packed && !packed->scope[ids[0]].empty()) || scope.empty() ? std::string{} : objects[ids[0]].module;
+      const auto module
+          = use_family || (packed && !packed->scope[ids[0]].empty()) || scope.empty() ? std::string{} : objects[ids[0]].module;
       auto [it, added] = partitions.try_emplace({module, std::move(shape)});
       if (added && target_homes && pack_hierarchy) {
         // Keep contiguous hierarchy together. Near the desired load, prefer ending at a shallower instance boundary.
@@ -846,7 +858,7 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
         uint64_t load = 0;
         for (size_t j = 0; j < ids.size(); ++j) {
           uint64_t cost = std::get<2>(it->first.second[j]);
-          if (!single && load && (load >= capacity || cost > capacity - load)) {
+          if (!single && budget && load && (load >= capacity || cost > capacity - load)) {
             it->second.push_back(j);
             load = 0;
           }
@@ -1434,6 +1446,7 @@ std::optional<Chunk_plan> Chunk_model::plan_with(Chunk_box core, double site, do
     for (const auto& [pair, edit] : steps) {
       apply_chunk_step(p, *edit, objects, {site, row});
     }
+    apply_chunk_regions(p, regions, objects, core, {site, row});
     if (all_edits.size() != edits.size()) {
       std::vector<size_t> tap_index(p.chunks.size());
       for (auto& w : wires) {
@@ -1555,6 +1568,21 @@ rapidjson::Document Chunk_model::record(const Chunk_plan& p, const std::string& 
         .AddMember("whole_design_bytes", p.predictor.peak(p.counts), a)
         .AddMember("baseline_exhausts_budget", p.budget && p.predictor.baseline >= p.budget, a);
     d.AddMember("memory_prediction", mem, a);
+  }
+  if (!p.repeated_family.members.empty()) {
+    rapidjson::Value family(rapidjson::kObjectType), siblings(rapidjson::kArrayType);
+    for (const auto& member : p.repeated_family.members) {
+      rapidjson::Value item(rapidjson::kObjectType);
+      item.AddMember("scope", str(member.scope), a)
+          .AddMember("cells", member.cells, a)
+          .AddMember("macros", member.macros, a)
+          .AddMember("template_colors", member.template_colors, a);
+      siblings.PushBack(item, a);
+    }
+    family.AddMember("siblings", siblings, a)
+        .AddMember("glue_cells", p.repeated_family.glue_cells, a)
+        .AddMember("shared_color_uses_per_copy", p.repeated_family.shared_color_uses, a);
+    d.AddMember("repeated_scope_candidate", family, a);
   }
   if (!p.shape_candidates.empty()) {
     rapidjson::Value alternatives(rapidjson::kArrayType);
@@ -1746,6 +1774,9 @@ rapidjson::Document Chunk_model::record(const Chunk_plan& p, const std::string& 
           .AddMember("density", p.density[i], a)
           .AddMember("density_source", str(p.density_source[i]), a)
           .AddMember("reserved_dbu2", o.area / p.density[i], a);
+      if (o.macro) {
+        m.AddMember("footprint_dbu", box(o.macro_footprint(p.seeds[i])), a);
+      }
       if (o.macro && track_pitch > 0) {
         rapidjson::Value obs(rapidjson::kArrayType);
         for (auto rate : o.route_blockage) {
@@ -1810,7 +1841,9 @@ rapidjson::Document Chunk_model::record(const Chunk_plan& p, const std::string& 
         for (const auto& b : boxes) out.PushBack(box(b), a);
         return out;
       };
-      v.AddMember("region_dbu", rects(c.region), a).AddMember("perimeter_dbu", rects(c.perimeter), a)
+      v.AddMember("region_dbu", rects(c.region), a)
+          .AddMember("perimeter_dbu", rects(c.perimeter), a)
+          .AddMember("exclusions_dbu", rects(c.exclusions), a)
           .AddMember("worker_box_dbu", box(c.worker_box()), a);
     }
     v.AddMember("instances", instances, a).AddMember("ports", ports, a);

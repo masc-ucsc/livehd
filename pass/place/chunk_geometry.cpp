@@ -409,7 +409,24 @@ Chunk_edits read_chunk_edits(const metadata::Bundle* input, const std::string& d
       for (const auto& v : list.GetArray()) {
         check(v.IsObject(), "invalid operation");
         Chunk_edit e;
-        if (v.HasMember("step")) {
+        if (v.HasMember("regions")) {
+          const auto& regions = v["regions"];
+          check(v.MemberCount() == 1 && regions.IsObject() && regions.MemberCount(), "regions needs home IDs and tile arrays");
+          for (const auto& entry : regions.GetObject()) {
+            check(entry.name.GetStringLength() && entry.value.IsArray() && !entry.value.Empty(), "empty home or tile list");
+            auto [it, added] = e.regions.try_emplace(entry.name.GetString());
+            check(added, "duplicate home in regions");
+            for (const auto& tile : entry.value.GetArray()) {
+              check(tile.IsArray() && tile.Size() == 4, "a region tile needs four DBU coordinates");
+              Chunk_box box;
+              for (int k = 0; k < 4; ++k) {
+                check(tile[k].IsNumber() && std::isfinite(tile[k].GetDouble()), "nonfinite region coordinate");
+                box[k] = tile[k].GetDouble();
+              }
+              it->second.push_back(box);
+            }
+          }
+        } else if (v.HasMember("step")) {
           check(v.MemberCount() == 3u + v.HasMember("band_dbu") + v.HasMember("offset_dbu") && v["step"].IsString()
                     && v.HasMember("peer") && v["peer"].IsString() && v.HasMember("depth_dbu") && v["depth_dbu"].IsNumber()
                     && std::isfinite(v["depth_dbu"].GetDouble()),

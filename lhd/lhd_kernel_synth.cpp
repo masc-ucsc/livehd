@@ -1222,6 +1222,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (out.chunk_require_fit && (!out.fp_chunks || out.chunk_memory_bytes == 0)) {
     throw Lhd_error{"usage", "chunk.require_fit requires a chunk floorplan and a positive memory budget", ""};
   }
+  out.chunk_repeated_scopes = truthy(synth_set(opts, "place.chunk.repeated_scopes", "false"));
   out.chunk_pack_scopes = truthy(synth_set(opts, "place.chunk.pack_scopes", "false"));
   out.chunk_route_layers = synth_set(opts, "place.chunk.route_layers", "");
   int rank               = std::stoi(synth_set(opts, "place.chunk.shape_rank", "0"));

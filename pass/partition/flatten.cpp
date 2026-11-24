@@ -25,6 +25,7 @@ namespace gu = livehd::graph_util;
 namespace livehd::partition {
 
 struct Flat_instance_path {
+  std::string                       prefix;
   hhds::Gid                         root_gid;
   std::vector<hhds::Hier_attr_step> steps;
 
@@ -42,6 +43,10 @@ struct Flat_instance_path {
             std::move(node_steps)};
   }
 };
+
+std::string_view Flat_origin::occurrence_prefix() const {
+  return instance ? std::string_view(instance->prefix) : std::string_view{};
+}
 
 int32_t Flat_origin::color() const {
   if (instance && src_node.get_graph()->has_attr(attrs::hier_color)) {
@@ -214,6 +219,9 @@ Ictx* Flattener::make_ctx(hhds::Graph* src, Ictx* parent, const hhds::Node_class
   c.prefix       = std::move(prefix);
   auto path      = std::make_shared<livehd::partition::Flat_instance_path>();
   path->root_gid = top_->get_gid();
+  if (origin_) {
+    path->prefix = c.prefix;
+  }
   if (parent != nullptr) {
     path->steps = parent->instance->steps;
     auto site   = inst.get_definition_index();
