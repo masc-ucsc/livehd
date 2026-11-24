@@ -13,7 +13,8 @@ outputs BEFORE the edge and the state AFTER it, exactly `interpretDesign`'s shap
   `denoteResidual`, which `compileDesign_correct` / `compileOpt_correct` prove equal to
   `interpretDesign`. A stepper carries no state between steps, so this is the full step:
   `cert_trace route:vc` runs it only with `inc:off`; its default step reuses the last step's
-  environment (`Compiler/ResidualEv`, `ResidualFlat`, `ResidualWork`).
+  environment (`Compiler/ResidualEv`, `ResidualFlat`, `ResidualWork`). `Run/Engine`'s
+  `mkEngine` builds every route and mode as an engine that keeps such state.
 * `ref`: `interpretDesign` itself. Exact by definition and slow on memories (a write wraps the
   memory function, so reads walk the chain).
 * `fp`: the Futamura projection's residual (`dcert2_memroute`'s route: `MemFused`, plain writes

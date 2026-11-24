@@ -31,6 +31,9 @@ ROOTS=(
   # vc: the verified compiler, its proved optimizer and its incremental, event-driven, memory
   # table and chunk-skipping steps (the chain below ResidualWork)
   LeanSemanticPrimitives.Compiler.ResidualWork
+  # the routes as engines (a route's step on a state of its own kind) and their soundness
+  LeanSemanticPrimitives.Compiler.Engine
+  LeanSemanticPrimitives.Compiler.VcEngine
   # the direct simulator's small examples
   LeanSemanticPrimitives.Compiler.DirectSim
   # fp: the memory route's variants, residual IO and the drivers' shared runner support
@@ -59,6 +62,7 @@ ROOTS=(
   HDLProof.Reach.Refute
   HDLProof.Run.Sound
   HDLProof.Run.Vcd
+  HDLProof.Run.Engine
   # the tools' audit: fails the build on a non-standard axiom
   HDLProof.Check.Audit
 )

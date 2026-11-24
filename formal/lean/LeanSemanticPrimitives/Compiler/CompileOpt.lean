@@ -10,7 +10,9 @@ and input, with the same hypothesis as `compileDesign_correct` alone.
 program, each step after the first reusing the last step's unchanged values, is
 `interpretDesign`'s run. `runEvOpt_correct` says the same of the event-driven step
 (`ResidualEv`), which visits only the bindings a changed slot's readers reach, and
-`runEvFlatOpt_correct` of that step with memories as tables (`ResidualFlat`).
+`runEvFlatOpt_correct` of that step with memories as tables (`ResidualFlat`). The
+`*_interp` theorems say each of vc's engines (`Compiler/VcEngine`) is `interpretDesign`'s, step for
+step (`Engine.Sound`), so a loop over any engine (`Engine.run_sound`) runs `interpretDesign`.
 
 Mathlib side, because `compileDesign_correct` is.
 -/
@@ -19,6 +21,7 @@ import LeanSemanticPrimitives.Compiler.ResidualOptSound
 import LeanSemanticPrimitives.Compiler.ResidualInc
 import LeanSemanticPrimitives.Compiler.ResidualEv
 import LeanSemanticPrimitives.Compiler.ResidualFlat
+import LeanSemanticPrimitives.Compiler.VcEngine
 
 namespace Compiler
 
@@ -77,9 +80,43 @@ theorem runEvFlatOpt_correct (D : DesignCert) (R : ResidualProgram)
   rw [ResidualFlat.runEvF_correct hw, ← ResidualInc.runInc_eq_runFull hw]
   exact runIncOpt_correct D R hc hw _ ticks
 
+/-! ## vc's engines are `interpretDesign`'s -/
+
+/-- vc's default engine on the optimized program. -/
+theorem vcEngine_sound_interp (D : DesignCert) (R : ResidualProgram) (hc : compileDesign D = .ok R)
+    (hw : ResidualInc.wellOrdered (ResidualOpt.optimize R) = true) (depth : Nat → Nat) :
+    (vcEngine (ResidualOpt.optimize R) (ResidualInc.fanout (ResidualOpt.optimize R)) depth).Sound
+      (interpretDesign D) :=
+  (vcEngine_sound hw depth).of_ref_eq (compileOpt_correct D R hc)
+
+/-- vc's default engine on the unoptimized program (`opt:off`). -/
+theorem vcEngine_sound_interp_noopt (D : DesignCert) (R : ResidualProgram) (hc : compileDesign D = .ok R)
+    (hw : ResidualInc.wellOrdered R = true) (depth : Nat → Nat) :
+    (vcEngine R (ResidualInc.fanout R) depth).Sound (interpretDesign D) :=
+  (vcEngine_sound hw depth).of_ref_eq (compileDesign_correct D R hc)
+
+/-- The event-driven engine with memories as functions, on the optimized program. -/
+theorem vcEvFunEngine_sound_interp (D : DesignCert) (R : ResidualProgram) (hc : compileDesign D = .ok R)
+    (hw : ResidualInc.wellOrdered (ResidualOpt.optimize R) = true) :
+    (vcEvFunEngine (ResidualOpt.optimize R) (ResidualInc.fanout (ResidualOpt.optimize R))).Sound
+      (interpretDesign D) :=
+  (vcEvFunEngine_sound hw).of_ref_eq (compileOpt_correct D R hc)
+
+/-- The scan engine, on the optimized program. -/
+theorem vcScanEngine_sound_interp (D : DesignCert) (R : ResidualProgram) (hc : compileDesign D = .ok R)
+    (hw : ResidualInc.wellOrdered (ResidualOpt.optimize R) = true) :
+    (vcScanEngine (ResidualOpt.optimize R)).Sound (interpretDesign D) :=
+  (vcScanEngine_sound hw).of_ref_eq (compileOpt_correct D R hc)
+
+/-- The full-step engine, on the optimized program (no well-ordering needed). -/
+theorem vcFullEngine_sound_interp (D : DesignCert) (R : ResidualProgram) (hc : compileDesign D = .ok R) :
+    (vcFullEngine (ResidualOpt.optimize R)).Sound (interpretDesign D) :=
+  (vcFullEngine_sound _).of_ref_eq (compileOpt_correct D R hc)
+
 end Compiler
 
 #print axioms Compiler.compileOpt_correct
 #print axioms Compiler.runIncOpt_correct
 #print axioms Compiler.runEvOpt_correct
 #print axioms Compiler.runEvFlatOpt_correct
+#print axioms Compiler.vcEngine_sound_interp

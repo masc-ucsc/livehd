@@ -38,6 +38,9 @@ TOOLS="$(cd ../../pass/lean/tools && pwd)"
 ROOTS=(
   # vc (the chain below ResidualWork) and the fp memory route's variants and runner support
   LeanSemanticPrimitives.Compiler.ResidualWork
+  # the routes as engines (a route's step on a state of its own kind) and their soundness
+  LeanSemanticPrimitives.Compiler.Engine
+  LeanSemanticPrimitives.Compiler.VcEngine
   LeanSemanticPrimitives.Projection.MemVariantSim
   LeanSemanticPrimitives.Projection.ResidualIO
   LeanSemanticPrimitives.Projection.MixProgram
@@ -56,6 +59,7 @@ ROOTS=(
   HDLProof.Reach.Refute
   HDLProof.Run.Sound
   HDLProof.Run.Vcd
+  HDLProof.Run.Engine
 )
 [ $# -ge 1 ] || { echo "usage: OPT=.. ROOT=.. build-opt.sh probe.lean [probe.lean ...]" >&2; exit 2; }
 GEN=$(python3 Futamura_Projection_Scripts/lean_modules.py "${ROOTS[@]}" "$@") \
