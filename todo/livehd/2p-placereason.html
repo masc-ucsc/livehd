@@ -101,8 +101,23 @@ Moving six standard cells within that group improved global-route setup slack to
 the clock estimate to 79.11 MHz, compared with 76.05 MHz for the original central strip. Hold
 was −0.4884 ns. Global overflow stayed zero, with 7.257384 m of wire and 5.994042 m of pin HPWL.
 A larger five-cell move dropped the clock estimate to 72.28 MHz. All four trials kept the same
-four equal worker boundaries, central glue, and PCRS clock tree. Full-chip detailed routing,
-extracted timing, and equivalence-checked private color variants remain open.</p>
+four equal worker boundaries, central glue, and PCRS clock tree.</p>
+<p>Detailed routing assembled the five workers into a single Eyeriss design. With the same
+ASAP7 libraries, 2.5 ns clock and detailed-router iteration limit of eight, both assemblies
+connected all signal nets. OpenRCX extraction and propagated-clock STA measured the following.</p>
+<table><thead><tr><th>Whole-chip measurement</th><th>Original central strip</th><th>20 SRAMs and six gates moved</th></tr></thead><tbody>
+<tr><td>Clock (MHz)</td><td>82.46</td><td>83.02</td></tr>
+<tr><td>Setup slack (ns)</td><td>−9.6268</td><td>−9.5458</td></tr>
+<tr><td>Hold slack (ns)</td><td>−0.2842</td><td>−0.1868</td></tr>
+<tr><td>Detailed wire (m)</td><td>6.659601</td><td>6.655608</td></tr>
+<tr><td>Router markers</td><td>780</td><td>796</td></tr>
+<tr><td>Independent markers</td><td>4,329</td><td>4,396</td></tr>
+</tbody></table>
+<p>The refined assembly retained the exact layer, via and coordinate sequence of all 287,334 fixed
+worker nets and routed the remaining 3,020 at the top. The two placements use different detailed
+wires in the edited workers. DRC markers and negative slack remain. The central glue worker
+passed both geometry checks and its saved detailed-router checkpoint replayed successfully.
+Equivalence-checked private color variants remain open.</p>
 
 <h2>Remaining work</h2>
 <ol>
