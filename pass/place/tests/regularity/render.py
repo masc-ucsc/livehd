@@ -201,4 +201,8 @@ def scores(case, points, edges, cells, positions=None):
 
 
 def digest(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    result = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            result.update(chunk)
+    return result.hexdigest()

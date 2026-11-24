@@ -107,6 +107,7 @@ _STATE_MATCH_GROUPS = ["temporary", "packed", "encoding", "memory", "rtl", "bank
         name = "lgcheck_state_" + group,
         srcs = ["tests/yosys_state_match_test.sh"],
         args = [group],
+        shard_count = 3 if group in ["poweron", "rtl"] else None,
         data = [":scripts"],
     )
     for group in _STATE_MATCH_GROUPS

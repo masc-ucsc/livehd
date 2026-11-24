@@ -404,6 +404,7 @@ cc_test(
     deps = [
         ":synth",
         "//graph",
+        "@abseil-cpp//absl/container:node_hash_map",
         "@googletest//:gtest_main",
         "@hhds//hhds:graph",
     ],

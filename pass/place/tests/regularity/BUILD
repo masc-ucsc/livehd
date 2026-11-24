@@ -30,7 +30,7 @@ sh_binary(
             "20",
             "--logic-depth",
             "1" if case in ["mesh_6x6", "ring_32"] else "2",
-        ] + (
+        ] + (["--tile-bits", "8"] if case in ["mesh_6x6", "ring_32"] else []) + (
             [] if case == "mesh_2x2" else ["--set", "synth.place.legroute=false"]
         ),
         data = [":fixtures", "generate.py", "render.py", "//lhd:lhd"],

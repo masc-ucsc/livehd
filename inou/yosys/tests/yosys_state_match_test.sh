@@ -16,6 +16,15 @@ LGCHECK="$PWD/inou/yosys/lgcheck"
 YOSYS_ABS="$PWD/$YOSYS"
 LGCHECK_BUDGET="${LGCHECK_BUDGET:-300}"
 
+# Bazel assigns independent comparisons to shards. A direct invocation runs
+# every comparison in the selected group.
+if [ -n "${TEST_SHARD_STATUS_FILE:-}" ]; then
+  touch "$TEST_SHARD_STATUS_FILE" || exit 1
+fi
+in_shard() {
+  [ $(( $1 % ${TEST_TOTAL_SHARDS:-1} )) -eq "${TEST_SHARD_INDEX:-0}" ]
+}
+
 if [ "$part" = all ] || [ "$part" = temporary ]; then
 # A generated temporary can have the same name but a different expression in
 # independently lowered graphs. Keep register/port correspondence, hide the
@@ -226,10 +235,10 @@ python3 - "$W" <<'PYRTL_NAMES'
 from pathlib import Path
 import sys
 w = Path(sys.argv[1])
-ports = "input clk, we, input [1:0] wa, ra, input [7:0] d, output [7:0] y"
+ports = "input clk, we, input [1:0] wa, ra, input [1:0] d, output [1:0] y"
 (w / "rtl_names_ref.v").write_text(f"""
 module rtl_names({ports});
-  reg [7:0] mem [0:3];
+  reg [1:0] mem [0:3];
   always @(posedge clk) if (we) mem[wa] <= d;
   assign y = mem[ra];
 endmodule
@@ -239,21 +248,22 @@ module rtl_names({ports});
   array_memory __lhdmem_h6d656d_e (clk, we, wa, ra, d, y);
 endmodule
 module array_memory({ports});
-  reg [7:0] data [0:3];
+  reg [1:0] data [0:3];
   always @(posedge clk) if (we) data[wa] <= d;
   assign y = data[ra];
 endmodule
 """)
-for variant, value in (("inline", "d"), ("bad", "d ^ 8'h01")):
+for variant, value in (("inline", "d"), ("bad", "d ^ 2'b01")):
     (w / f"rtl_names_{variant}.v").write_text(f"""
 module rtl_names({ports});
-  reg [31:0] __lhdmem_h6d656d_e_data;
-  always @(posedge clk) if (we) __lhdmem_h6d656d_e_data[wa*8 +: 8] <= {value};
-  assign y = __lhdmem_h6d656d_e_data[ra*8 +: 8];
+  reg [7:0] __lhdmem_h6d656d_e_data;
+  always @(posedge clk) if (we) __lhdmem_h6d656d_e_data[wa*2 +: 2] <= {value};
+  assign y = __lhdmem_h6d656d_e_data[ra*2 +: 2];
 endmodule
 """)
 # The renamed pairs feed induction-only engines (no base case), so a power-on
 # mismatch must stay unpaired: same writes, word 0 initialized 1 vs 9.
+ports = "input clk, we, input [1:0] wa, ra, input [7:0] d, output [7:0] y"
 (w / "init_names_ref.v").write_text(f"""
 module init_names({ports});
   reg [7:0] mem [0:3];
@@ -331,6 +341,15 @@ case "$part" in
   *) set -- rtl_names:wrap rtl_names:inline rtl_names:bad bank_names:wrap bank_names:bad loop_names:impl loop_names:bad \
        init_names:inline init_names:bad ;;
 esac
+if [ "$part" = rtl ]; then
+  selected=()
+  index=0
+  for comparison in "$@"; do
+    if in_shard "$index"; then selected+=("$comparison"); fi
+    index=$((index + 1))
+  done
+  set -- "${selected[@]}"
+fi
 while [ "$#" -gt 0 ]; do
   batch="$1 ${2:-}"
   shift
@@ -367,56 +386,65 @@ if [ "$part" = all ] || [ "$part" = poweron ]; then
 # (equiv_struct) and prove it with induction-only engines, which ASSUME every
 # pair equal at power-on and unroll through unpaired state as if a clock edge
 # had set it. A pair that starts apart must fall through to the bounded miter:
-# a same-named register initialized 1 vs 9 (stage 1, and 1c for its
-# clk2fflogic model) and a cgen wrapper memory whose word 0 starts 1 vs 9,
+# a same-named register initialized 1 vs 3 (stage 1, and 1c for its
+# clk2fflogic model) and a cgen wrapper memory whose word 0 starts 1 vs 3,
 # which equiv_struct merges with the golden array (stage 1m), must refute. So
 # must a RENAMED register (`r` vs `s`, on no pair; only `q = r + 1` is) that
-# starts 1 vs 9: the stage's base case from power-on sees it. The same
+# starts 1 vs 3: the stage's base case from power-on sees it. The same
 # power-on values still prove.
 python3 - "$W" <<'PYPOWER_ON'
 from pathlib import Path
 import sys
 w = Path(sys.argv[1])
-for variant, value in (("ref", 1), ("impl", 1), ("bad", 9)):
+for variant, value in (("ref", 1), ("impl", 1), ("bad", 3)):
     (w / f"flop_init_{variant}.v").write_text(f"""
-module flop_init(input clk, input [3:0] d, output [3:0] q);
-  reg [3:0] r = 4'd{value};
+module flop_init(input clk, input [1:0] d, output [1:0] q);
+  reg [1:0] r = 2'd{value};
   always @(posedge clk) r <= d;
   assign q = r;
 endmodule
 """)
-for variant, reg, value in (("ref", "r", 1), ("impl", "s", 1), ("bad", "s", 9)):
+for variant, reg, value in (("ref", "r", 1), ("impl", "s", 1), ("bad", "s", 3)):
     (w / f"rename_init_{variant}.v").write_text(f"""
-module rename_init(input clk, input [3:0] d, output [3:0] q);
-  reg [3:0] {reg} = 4'd{value};
+module rename_init(input clk, input [1:0] d, output [1:0] q);
+  reg [1:0] {reg} = 2'd{value};
   always @(posedge clk) {reg} <= d;
-  assign q = {reg} + 4'd1;
+  assign q = {reg} + 2'd1;
 endmodule
 """)
-ports = "input clk, we, input [1:0] wa, ra, input [7:0] d, output [7:0] y"
+ports = "input clk, we, input [1:0] wa, ra, input [1:0] d, output [1:0] y"
 (w / "wrap_init_ref.v").write_text(f"""
 module wrap_init({ports});
-  reg [7:0] mem [0:3];
-  initial begin mem[0] = 8'd1; mem[1] = 8'd2; mem[2] = 8'd3; mem[3] = 8'd4; end
+  reg [1:0] mem [0:3];
+  initial begin mem[0] = 2'd1; mem[1] = 2'd2; mem[2] = 2'd3; mem[3] = 2'd0; end
   always @(posedge clk) if (we) mem[wa] <= d;
   assign y = mem[ra];
 endmodule
 """)
-for variant, word0 in (("wrap", 1), ("bad", 9)):
+for variant, word0 in (("wrap", 1), ("bad", 3)):
     (w / f"wrap_init_{variant}.v").write_text(f"""
 module wrap_init({ports});
   array_memory __lhdmem_h6d656d_e (clk, we, wa, ra, d, y);
 endmodule
 module array_memory({ports});
-  reg [7:0] data [0:3];
-  initial begin data[0] = 8'd{word0}; data[1] = 8'd2; data[2] = 8'd3; data[3] = 8'd4; end
+  reg [1:0] data [0:3];
+  initial begin data[0] = 2'd{word0}; data[1] = 2'd2; data[2] = 2'd3; data[3] = 2'd0; end
   always @(posedge clk) if (we) data[wa] <= d;
   assign y = data[ra];
 endmodule
 """)
 PYPOWER_ON
 # Two cases at a time, like the blocks above (each is one lgcheck/yosys run).
-set -- flop_init:impl flop_init:bad wrap_init:wrap wrap_init:bad rename_init:impl rename_init:bad
+set --
+index=0
+for top in flop_init wrap_init rename_init; do
+  if in_shard "$index"; then
+    positive=impl
+    [ "$top" != wrap_init ] || positive=wrap
+    set -- "$@" "$top:$positive" "$top:bad"
+  fi
+  index=$((index + 1))
+done
 while [ "$#" -gt 0 ]; do
   batch="$1 ${2:-}"
   shift

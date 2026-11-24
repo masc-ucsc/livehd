@@ -1,12 +1,11 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "reassoc.hpp"
 
-#include <algorithm>
-#include <array>
-#include <functional>
+#include <cstdint>
 #include <string>
 #include <vector>
 
+#include "absl/container/node_hash_map.h"
 #include "gtest/gtest.h"
 #include "node_util.hpp"
 
@@ -87,73 +86,78 @@ struct Design {
     return n;
   }
 
-  // Bit `i` of a driver as the region blaster's abc_bit reads it: truncated at
-  // the driver width, extended past it by the driver's sign.
-  bool bit(const hhds::Pin_class& pin, int i, const std::vector<int64_t>& values) const {
-    const int  w    = gu::bits_of(pin);
-    const bool sign = !gu::is_unsign(pin);
-    int        eff  = i;
-    if (w != 0 && i >= w) {
-      eff = sign ? w - 1 : -1;
+  // One column per driver, one row per input assignment. Evaluate each gate
+  // once across all rows, including shared fan-in and both Mux arms.
+  std::vector<uint64_t> truth(int out_bits) const {
+    using Column = std::vector<uint64_t>;
+    absl::node_hash_map<hhds::Pin_class, Column> columns;
+    size_t                                       rows = 1;
+    for (const auto& input : ins) {
+      rows <<= input.bits;
     }
-    if (eff < 0) {
-      return false;
-    }
-    if (pin.is_const()) {
-      return gu::const_of(pin).bit_test(eff);
-    }
-    if (gu::is_graph_input_pin(pin)) {
-      for (size_t k = 0; k < ins.size(); ++k) {
-        if (graph->get_input_pin(ins[k].name) == pin) {
-          return ((values[k] >> std::min(eff, 62)) & 1) != 0;
-        }
-      }
-      ADD_FAILURE() << "unknown input";
-      return false;
-    }
-    const auto node = pin.get_master_node();
-    const auto op   = gu::type_op_of(node);
-    if (op == Ntype_op::Mux) {
-      // A two-arm Mux is a condition: any selector bit set takes arm 2.
-      hhds::Pin_class sel, arm[2];
-      for (const auto& sink : node.inp_sorted_pins()) {
-        const auto pid = sink.get_port_id();
-        (pid == 0 ? sel : arm[pid - 1]) = sink.get_driver_pin();
-      }
-      bool cond = false;
-      for (int b = 0; b < std::max(1, static_cast<int>(gu::bits_of(sel))); ++b) {
-        cond = cond || bit(sel, b, values);
-      }
-      return bit(arm[cond ? 1 : 0], eff, values);
-    }
-    bool acc = op == Ntype_op::And;
-    for (const auto& sink : node.inp_sorted_pins()) {
-      const bool v = bit(sink.get_driver_pin(), eff, values);
-      acc          = op == Ntype_op::And ? (acc && v) : op == Ntype_op::Or ? (acc || v) : (acc != v);
-    }
-    return acc;
-  }
-  // Every output bit for every input assignment (each input in its declared range).
-  std::vector<bool> truth(int out_bits) const {
-    std::vector<bool>    table;
-    std::vector<int64_t> values(ins.size());
-    std::function<void(size_t)> walk = [&](size_t k) {
-      if (k == ins.size()) {
-        const auto drv = graph->get_output_pin("y").get_driver_pin();
-        for (int b = 0; b < out_bits; ++b) {
-          table.push_back(bit(drv, b, values));
-        }
-        return;
-      }
-      const int64_t lo = ins[k].sign ? -(int64_t{1} << (ins[k].bits - 1)) : 0;
-      const int64_t hi = ins[k].sign ? (int64_t{1} << (ins[k].bits - 1)) - 1 : (int64_t{1} << ins[k].bits) - 1;
-      for (int64_t v = lo; v <= hi; ++v) {
-        values[k] = v;
-        walk(k + 1);
-      }
+    const auto extend = [](uint64_t value, int bits, bool sign) {
+      const uint64_t mask  = (uint64_t{1} << bits) - 1;
+      value               &= mask;
+      return sign && (value & (uint64_t{1} << (bits - 1))) ? value | ~mask : value;
     };
-    walk(0);
-    return table;
+    size_t stride = rows;
+    for (const auto& input : ins) {
+      stride       >>= input.bits;
+      auto& column   = columns[in(input.name)];
+      column.reserve(rows);
+      for (size_t row = 0; row < rows; ++row) {
+        column.push_back(extend(row / stride, input.bits, input.sign));
+      }
+    }
+    const auto evaluate = [&](auto& self, const hhds::Pin_class& pin) -> const Column& {
+      auto [it, fresh] = columns.try_emplace(pin);
+      auto& result     = it->second;
+      if (!fresh) {
+        return result;
+      }
+      if (pin.is_const()) {
+        result.assign(rows, gu::const_of(pin).to_just_i64());
+        return result;
+      }
+      const auto node = pin.get_master_node();
+      const auto op   = gu::type_op_of(node);
+      if (op == Ntype_op::Mux) {
+        const auto& cond = self(self, node.get_sink_pin(0).get_driver_pin());
+        const auto& low  = self(self, node.get_sink_pin(1).get_driver_pin());
+        const auto& high = self(self, node.get_sink_pin(2).get_driver_pin());
+        for (size_t row = 0; row < rows; ++row) {
+          result.push_back(cond[row] ? high[row] : low[row]);
+        }
+      } else {
+        EXPECT_TRUE(op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor);
+        result.assign(rows, op == Ntype_op::And ? ~uint64_t{0} : 0);
+        for (const auto sink : node.inp_sorted_pins()) {
+          const auto& operand = self(self, sink.get_driver_pin());
+          for (size_t row = 0; row < rows; ++row) {
+            if (op == Ntype_op::And) {
+              result[row] &= operand[row];
+            } else if (op == Ntype_op::Or) {
+              result[row] |= operand[row];
+            } else {
+              result[row] ^= operand[row];
+            }
+          }
+        }
+      }
+      const int width = gu::bits_of(pin);
+      if (width > 0) {
+        const bool sign = !gu::is_unsign(pin);
+        for (auto& value : result) {
+          value = extend(value, width, sign);
+        }
+      }
+      return result;
+    };
+    auto result = evaluate(evaluate, graph->get_output_pin("y").get_driver_pin());
+    for (auto& value : result) {
+      value = extend(value, out_bits, false);
+    }
+    return result;
   }
 };
 

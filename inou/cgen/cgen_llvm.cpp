@@ -2652,11 +2652,20 @@ Cgen_llvm::Value Cgen_llvm::binary(Binary_op op, Value lhs, Value rhs, uint32_t 
       const auto source_words = word_count(work_width);
       const auto output_words = word_count(result_width);
       left                    = cast_integer(b, left, work_width, lhs.unsign);
-      auto* padded            = cast_integer(b, left, static_cast<unsigned>(source_words * 64), op != Binary_op::ashr);
-      auto* function          = b.GetInsertBlock()->getParent();
-      auto* source            = impl_->local_words(source_words, "shift.source");
-      auto* output            = impl_->local_words(output_words, "shift.output");
-      impl_->store_packed(padded, source, 0, static_cast<uint32_t>(source_words * 64));
+      auto*        function    = b.GetInsertBlock()->getParent();
+      auto*        output      = impl_->local_words(output_words, "shift.output");
+      // Ordinary packed kernel inputs are read-only, disjoint buffers. Index
+      // those words directly. State and computed operands need their SSA snapshot.
+      const bool   input_words = !impl_->state_abi && !impl_->scalar_abi && lhs.id < impl_->input_types.size()
+                                 && !impl_->input_storage[lhs.id] && impl_->input_bits[lhs.id] == 0
+                                 && impl_->input_types[lhs.id].first == work_width && lhs.width == work_width;
+      llvm::Value* source;
+      if (input_words) {
+        source = b.CreateConstInBoundsGEP1_64(i64, impl_->inputs, impl_->input_word_offsets[lhs.id]);
+      } else {
+        auto* padded = cast_integer(b, left, static_cast<unsigned>(source_words * 64), op != Binary_op::ashr);
+        source       = impl_->packed_alloca(padded, source_words * 64, "shift.source");
+      }
       const auto   compare_width = std::max<unsigned>(rhs.width, 32);
       auto*        count         = cast_integer(b, right, compare_width, true);
       auto*        oversized     = b.CreateICmpUGE(count, llvm::ConstantInt::get(count->getType(), work_width));
@@ -2679,7 +2688,13 @@ Cgen_llvm::Value Cgen_llvm::binary(Binary_op op, Value lhs, Value rhs, uint32_t 
         valid               = b.CreateAnd(valid, b.CreateNot(oversized));
         auto* safe_position = b.CreateSelect(valid, position, llvm::ConstantInt::get(i64, 0));
         auto* ptr           = b.CreateInBoundsGEP(i64, source, safe_position);
-        auto* value         = b.CreateLoad(i64, ptr);
+        llvm::Value* value         = b.CreateLoad(i64, ptr);
+        // The ABI does not constrain padding in the last input word.
+        if (input_words && work_width % 64 != 0 && op != Binary_op::shl) {
+          auto* lane   = b.CreateTrunc(value, b.getIntNTy(work_width % 64));
+          auto* padded = cast_integer(b, lane, 64, op != Binary_op::ashr);
+          value        = b.CreateSelect(b.CreateICmpEQ(position, b.getInt64(source_words - 1)), padded, value);
+        }
         return b.CreateSelect(valid, value, fill);
       };
       llvm::Value* shifted = nullptr;

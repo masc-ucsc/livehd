@@ -39,11 +39,11 @@ def run(case, args, output):
             shutil.rmtree(directory/scratch)
     points, edges = topology(case)
     source_path = ROOT/(case['name']+'.prp')
-    if args.logic_depth is not None:
+    if args.logic_depth is not None or args.tile_bits != 32:
         # Keep every macro, edge and hierarchy level, but avoid replicating
         # benchmark-sized combinational cones in a physical handoff test.
         source_path = directory/(case['name']+'.prp')
-        source_path.write_text(fixture_source(dict(case, depth=args.logic_depth)))
+        source_path.write_text(fixture_source(dict(case, depth=args.logic_depth or case["depth"]), args.tile_bits))
     render.expected(case, points, edges, directory/'expected.png')
     started = time.monotonic()
     binary_hash = render.digest(args.lhd)
@@ -90,7 +90,7 @@ def run(case, args, output):
     units, die, cells = render.read_def(place/'out.def')
     macros = sum(c['master'] == 'REG_MACRO' for c in cells.values())
     standard_cells = len(cells)-macros
-    minimum_cells = 32 * len(points) if args.logic_depth is not None else 10000
+    minimum_cells = 32 * len(points) if args.logic_depth is not None or args.tile_bits != 32 else 10000
     if macros != len(points) or not minimum_cells <= standard_cells <= 110000:
         raise ValueError(f'fixture size outside intended range: {standard_cells} cells, {macros} macros')
     _, _, macro_cells = render.read_def(place/'macro/out.def')
@@ -128,14 +128,14 @@ def run(case, args, output):
             positions = {row[0]: (row[1], row[2]) for row in snapshot['nodes']}
         render.actual(case, stage_units, stage_die, stage_cells, directory/(name+'.png'), positions)
         views[name] = render.scores(case, points, edges, stage_cells, positions)
-    inputs = [Path(args.lhd), source_path, ROOT/'macros.v', ROOT/'fake.lib', ROOT/'fake.lef', ROOT/'timing.sdc', ROOT/'run.py', ROOT/'render.py']
+    inputs = [source_path, ROOT/'macros.v', ROOT/'fake.lib', ROOT/'fake.lef', ROOT/'timing.sdc', ROOT/'run.py', ROOT/'render.py']
     if case.get('fixed_macros'):
         inputs.append(ROOT/(case['name']+'.def'))
     metrics = dict(name=case['name'], standard_cells=standard_cells, macros=macros,
                    fixed_macro_anchors=len(case.get('fixed_macros', [])), seconds=time.monotonic()-started,
                    hpwl_um=qor['hpwl_um'], wns=qor['wns'], tns=qor['tns'], time_unit=qor.get('time_unit'),
                    legal=qor['legal'], gp_converged=qor['gp_converged'], stages=views,
-                   provenance={p.name: render.digest(p) for p in inputs},
+                   provenance={Path(args.lhd).name: binary_hash, **{p.name: render.digest(p) for p in inputs}},
                    settings={k:str(v) for k,v in settings.items()})
     if render.digest(args.lhd) != binary_hash:
         raise ValueError('lhd binary changed during measurement; rebuild first, then rerun')
@@ -196,6 +196,8 @@ def main():
     parser.add_argument('--iterations', type=int, default=1500)
     parser.add_argument('--logic-depth', type=int,
                         help='generate a smaller logic cone per tile; topology, state width and physical checks stay unchanged')
+    parser.add_argument('--tile-bits', type=int, choices=(8, 16, 32), default=32,
+                        help='active data lanes per tile in the generated fixture')
     parser.add_argument('--min-macros', type=int, default=0,
                         help='synth.place.fp.min_macros: a hierarchy candidate needs more macros than this; 0 makes each one-macro tile a candidate')
     parser.add_argument('--set', action='append', default=[], help='additional lhd setting KEY=VALUE')

@@ -784,6 +784,28 @@ TEST(CgenLlvm, WideVariableShiftsCompileAsPackedLoops) {
       ASSERT_TRUE(kernel.write_bitcode(path.string(), error, false)) << error;
       const auto native = path.string() + ".o";
       ASSERT_TRUE(Cgen_llvm::link_bitcode_object(path.string(), {}, native, error)) << error;
+      livehd::sim::Native_objects objects;
+      ASSERT_TRUE(objects.load(native, error)) << error;
+      using Packed     = void (*)(const uint64_t*, uint64_t*, uint64_t*, void*);
+      const auto shift = std::bit_cast<Packed>(objects.lookup("variable_shift", error));
+      ASSERT_NE(shift, nullptr) << error;
+      const size_t          words = (width + 63) / 64;
+      std::vector<uint64_t> inputs(words + 1, 0x123456789abcdef0ULL), outputs(words + 2);
+      // Set the unused input padding opposite to the sign. Both right shifts
+      // must recover the declared top bit even when a lane straddles the end.
+      const auto            sign = uint64_t{1} << ((width - 1) % 64);
+      for (const uint64_t top : {sign, ~(sign | (sign - 1))}) {
+        inputs[words - 1] = top;
+        const llvm::APInt source(width, llvm::ArrayRef<uint64_t>(inputs.data(), words));
+        for (const auto count : {0u, 63u, width - 64, width - 1, width, width + 1}) {
+          inputs[words] = count;
+          shift(inputs.data(), outputs.data(), nullptr, nullptr);
+          const auto amount = std::min(count, width);
+          EXPECT_EQ(llvm::APInt(width, llvm::ArrayRef<uint64_t>(outputs.data(), words)), source.shl(amount));
+          EXPECT_EQ(outputs[words], source.lshr(amount).getLoBits(64).getZExtValue());
+          EXPECT_EQ(outputs[words + 1], source.ashr(amount).getLoBits(64).getZExtValue());
+        }
+      }
       std::filesystem::remove(native);
       std::filesystem::remove(path);
     }
