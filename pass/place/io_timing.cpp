@@ -89,17 +89,27 @@ std::map<std::string, synth::Io_environment> Io_timing_flow::harvest(const Resul
   // persisted key is the stable region module + port bit, never a flat net name.
   occurrence_environments_.clear();
   struct Physical_pin_owner {
-    std::string      name;
-    std::string_view prefix;  // owned by the flat origin map throughout harvest
+    std::string            name;
+    synth::Io_environment* occurrence;  // Stable map element throughout harvest.
   };
   std::map<std::pair<std::string, std::string>, std::vector<Physical_pin_owner>> occurrences;
-  std::map<std::string, std::string>                                      owners, masters;
+  struct Driver_owner {
+    std::string            module;
+    synth::Io_environment* occurrence = nullptr;
+  };
+  std::map<std::string, Driver_owner> owners;
+  std::map<std::string, std::string>  masters;
   for (const auto& [node, origin] : origins) {
     const auto module = std::string(origin.src_node.get_graph()->get_name());
     const auto name   = std::string(node.get_name());
     if (modules.contains(module)) {
-      occurrences[{module, std::string(origin.src_node.get_name())}].push_back({name, origin.occurrence_prefix()});
-      owners[name] = module;
+      auto path = origin.occurrence_prefix();
+      if (path.ends_with('.')) {
+        path.remove_suffix(1);
+      }
+      auto& env = occurrence_environments_[{module, std::string(path)}];
+      occurrences[{module, std::string(origin.src_node.get_name())}].push_back({name, &env});
+      owners[name] = {module, &env};
     }
     if (auto io = node.get_subnode_io()) {
       masters[name] = std::string(io->get_name());
@@ -114,7 +124,11 @@ std::map<std::string, synth::Io_environment> Io_timing_flow::harvest(const Resul
   }
   for (auto node : placed.graph->body().nodes()) {
     if (const auto id = node.attr(attrs::synth_region_id); id.has() && module_ids.contains(id.get())) {
-      owners[std::string(node.get_name())] = module_ids.at(id.get());
+      auto&       owner  = owners[std::string(node.get_name())];
+      const auto& module = module_ids.at(id.get());
+      if (owner.module != module) {
+        owner = {module, nullptr};  // A region ID alone cannot identify a physical occurrence.
+      }
     }
     if (auto io = node.get_subnode_io()) {
       masters[std::string(node.get_name())] = std::string(io->get_name());
@@ -154,7 +168,7 @@ std::map<std::string, synth::Io_environment> Io_timing_flow::harvest(const Resul
       if (names == occurrences.end()) {
         continue;
       }
-      for (const auto& [name, prefix] : names->second) {
+      for (const auto& [name, occurrence] : names->second) {
         const auto key = name + ":" + binding.pin;
         const auto pin = timing.find_label(key);
         if (protected_pins.contains(key) || pin == nullptr || pin->clock) {
@@ -173,8 +187,7 @@ std::map<std::string, synth::Io_environment> Io_timing_flow::harvest(const Resul
           }
         };
         record(env);
-        const auto path = prefix.ends_with('.') ? prefix.substr(0, prefix.size() - 1) : prefix;
-        record(occurrence_environments_[{module, std::string(path)}]);
+        record(*occurrence);
       }
     }
     // Fresh measurements replace the previous stage's connectivity histogram.
@@ -216,27 +229,38 @@ std::map<std::string, synth::Io_environment> Io_timing_flow::harvest(const Resul
     if (!std::isfinite(length) || length < 0) {
       continue;
     }
-    global.length_um[fanout] += length;
-    ++global.samples[fanout];
-    const auto owner = owners.find(instance(net.driver));
-    if (owner != owners.end()) {
-      auto& wire              = result[owner->second].wire;
+    const auto add_sample = [&](synth::Wire_load& wire) {
       wire.length_um[fanout] += length;
       ++wire.samples[fanout];
+    };
+    add_sample(global);
+    const auto owner = owners.find(instance(net.driver));
+    if (owner != owners.end()) {
+      add_sample(result[owner->second.module].wire);
+      if (owner->second.occurrence) {
+        add_sample(owner->second.occurrence->wire);
+      }
     }
   }
-  for (auto& [fanout, length] : global.length_um) {
-    length /= global.samples.at(fanout);
-  }
+  const auto average_lengths = [](synth::Wire_load& wire) {
+    for (auto& [fanout, length] : wire.length_um) {
+      length /= wire.samples.at(fanout);
+    }
+  };
+  average_lengths(global);
   store_->global_wire = global;
   for (auto& [module, env] : result) {
     (void)module;
-    for (auto& [fanout, length] : env.wire.length_um) {
-      length /= env.wire.samples.at(fanout);
-    }
+    average_lengths(env.wire);
     if (env.wire.empty()) {
       env.wire = global;
     }
+  }
+  for (auto& [key, env] : occurrence_environments_) {
+    (void)key;
+    average_lengths(env.wire);
+    env.wire.capacitance_ff_um = global.capacitance_ff_um;
+    env.wire.resistance_ohm_um = global.resistance_ohm_um;
   }
   return result;
 }
@@ -414,6 +438,9 @@ std::string Io_timing_flow::report() const {
   w.Key("occurrence_timing");
   w.StartArray();
   for (const auto& [key, env] : occurrence_environments_) {
+    if (env.inputs.empty() && env.required.empty() && env.wire.samples.empty()) {
+      continue;
+    }
     w.StartObject();
     w.Key("module");
     w.String(key.first.c_str());
@@ -430,6 +457,19 @@ std::string Io_timing_flow::report() const {
     };
     pins("arrival_ps", env.inputs);
     pins("required_ps", env.required);
+    w.Key("driven_wires");
+    w.StartArray();
+    for (const auto& [fanout, count] : env.wire.samples) {
+      w.StartObject();
+      w.Key("fanout");
+      w.Uint(fanout);
+      w.Key("nets");
+      w.Uint(count);
+      w.Key("mean_length_um");
+      w.Double(env.wire.length_um.at(fanout));
+      w.EndObject();
+    }
+    w.EndArray();
     w.EndObject();
   }
   w.EndArray();

@@ -179,7 +179,7 @@ TEST(IoTiming, CrossingColorsAndSingleAutomaticRound) {
   }
   placed.parasitics = std::make_shared<physical::Parasitics>(*placed.parasitics);
   for (auto& net : placed.parasitics->nets) {
-    net.wire_length_um = 1000;
+    net.wire_length_um = net.driver.starts_with("right_copy.") ? 400 : 1000;
   }
   const auto calls_before_macro = timing_calls;
   EXPECT_FALSE(probe.after_stage(Placement_stage::macro, placed));
@@ -199,13 +199,20 @@ TEST(IoTiming, CrossingColorsAndSingleAutomaticRound) {
   EXPECT_FALSE(probe.after_stage(Placement_stage::final, placed));
   EXPECT_EQ(timing_calls, calls_before_macro + 2);
   EXPECT_EQ(probe_store->rows.at("top__c1").placed.inputs.at("a[0]"), 950);
-  EXPECT_EQ(probe_store->global_wire.length_um.at(1), 1000);
+  EXPECT_EQ(probe_store->global_wire.length_um.at(1), 800);
+  EXPECT_EQ(probe_store->rows.at("top__c2").placed.wire.length_um.at(1), 700);
   rapidjson::Document occurrence_report;
   occurrence_report.Parse(probe.report().c_str());
   std::map<std::string, double> arrivals;
   for (const auto& row : occurrence_report["occurrence_timing"].GetArray()) {
     if (std::string_view(row["module"].GetString()) == "top__c2") {
-      arrivals[row["instance"].GetString()] = row["arrival_ps"]["a[0]"].GetDouble();
+      const std::string occurrence = row["instance"].GetString();
+      arrivals[occurrence] = row["arrival_ps"]["a[0]"].GetDouble();
+      const auto& wires = row["driven_wires"];
+      ASSERT_EQ(wires.Size(), 1U);
+      EXPECT_EQ(wires[0]["fanout"].GetUint(), 1U);
+      EXPECT_EQ(wires[0]["nets"].GetUint(), 4U);
+      EXPECT_DOUBLE_EQ(wires[0]["mean_length_um"].GetDouble(), occurrence == "right_copy" ? 400 : 1000);
     }
   }
   EXPECT_EQ(arrivals.at("right"), 950);

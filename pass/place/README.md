@@ -2877,6 +2877,10 @@ occurrences together. The detector compares their multisets of module-local colo
 The remaining logic gets a glue home. The worker budget can still split an oversized occurrence.
 An explicit `synth.place.chunk.target` takes precedence.
 
+In `io_resynth.json`, each `occurrence_timing` row includes the measured arrival and required times for that copy.
+Its `driven_wires` array gives the net count and mean wire length in µm for each observed fanout.
+The shared mapping uses all copies. A repair driver with only a region ID contributes to the shared wire model.
+
 At the macro stage, shift-select two SRAMs with matching footprint dimensions and choose **Trial macro swap**.
 The trial exchanges their positions in the current worker and keeps both axes fixed during legalization.
 The control and the proposed placement are available in the branch selector. The socket equivalent is

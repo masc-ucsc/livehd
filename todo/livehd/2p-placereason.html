@@ -90,7 +90,8 @@ and 16 NVDLA banks. CNN and CoralNPU stayed in single homes with the downstream 
 Workers consume the exclusion rectangles, boundary segments and unchanged placement handoffs.
 The floorplan and chunk views show the physical SRAM footprint. A GUI or socket trial can exchange
 two equal-footprint SRAMs in one live worker. IO timing reports expose each measured region occurrence
-alongside the shared worst-case mapping environment.</p>
+alongside the shared worst-case mapping environment. Each occurrence reports the number and mean length
+of its driven wires by fanout. A buffer with only a color ID contributes to the shared measurement.</p>
 <p>Exchanging 20 SRAM assignments inside one Eyeriss cluster reduced whole-chip pin HPWL from
 5.996970 to 5.991720 m. A fresh full global route used 7.254824 m versus 7.261395 m, both at zero
 overflow. Setup changed from −10.6493 to −10.6443 ns and hold from −0.4795 to −0.4883 ns.
