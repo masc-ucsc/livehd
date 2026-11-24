@@ -2,6 +2,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <iosfwd>
 #include <string>
 #include <vector>
 
@@ -122,7 +123,7 @@ Legroute_congestion  resample_legroute_congestion(const Legroute_congestion&, co
 // (no rows, one row site, a routing stack without both directions). The floorplan is not modified.
 Legroute_plan_report legroute_plan(const physical::Technology&, physical::Floorplan&, const timing::Feedback&,
                                    const Legroute_options&, const Legroute_power& = {}, const physical::Tech_profile* = nullptr,
-                                   size_t net_pops = 100000, Legroute_congestion* congestion = nullptr);
+                                   size_t net_pops = 100000, Legroute_congestion* congestion = nullptr, std::ostream* tree_report = nullptr);
 void                 write_legroute_plan_failures(const Legroute_plan_report&, const std::string& path);
 // The routing part of a plan report as one JSON object (no trailing newline): counts, overflow per direction and
 // the per-layer capacity.

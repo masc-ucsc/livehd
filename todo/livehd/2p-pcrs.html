@@ -41,6 +41,12 @@ page with its full subtask log is at
 <code>/lscratch/renau/domplace_runs/pcrs_gui/2p-pcrs.before-trim.html</code> (local, never committed).</li>
 </ul>
 
+<h2 id="routefirst-handoff">Frozen clock and reset routing findings</h2>
+<p>On the 2026-11-23 native ASAP7 sha3 frame, OpenROAD connected all 278 protected nets and the isolated clock/reset layout passed the independent rule check. With signal wiring present, 549 of the 586 shorts at detailed-route iteration 5 named a protected reset net; 13 named clock nets. The reset group around <code>__pcrs_rsti1_b82d62aa88fa</code> is one affected window.
+On minimax, final independent checking found an M2 short to the protected clock leaf driven by <code>__pcrs_clk_bd033c26c3d3ecf9</code>, near (25.83, 44.09) &micro;m.
+On both minimax placements the data gate <code>register_file.g6033_AO21x1_ASAP7_75t_R</code> occupies the same site. On a diagnostic copy, removing only this clock leaf restored two feasible M2 escapes for its B pin in the control and two for A2 in the F1 arm. Both pins had zero options in their respective routed layouts. The scored layouts retained the leaf. Check data-pin escape space against the actual leaf routes after legalizing the anchors. The protected nets passed connectivity in isolation, and all arms retained their geometry.
+<a href="3r-routefirst.html#native-pcrs-runs">Route-first measurements and reproduction files</a>.</p>
+
 <h2 id="chunk-review">2026-11-23 live chunk review</h2>
 <p>Final placement requests now dispatch macro planning first for homes with at least two macros.
 The coordinator accepts boundary measurements from either stage and marks dependent homes stale.

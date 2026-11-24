@@ -1,0 +1,58 @@
+load("//tools:regression.bzl", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+
+cc_binary(
+    name = "pin_options",
+    srcs = ["pin_options.cpp"],
+    tags = ["manual"],
+    deps = ["//inou/lefdef:inou_lefdef"],
+)
+
+cc_binary(
+    name = "check_connections",
+    srcs = ["check_connections.cpp"],
+    tags = ["manual"],
+    deps = ["//inou/lefdef:inou_lefdef"],
+)
+
+cc_binary(
+    name = "frame_trees",
+    srcs = ["frame_trees.cpp"],
+    tags = ["manual"],
+    deps = [
+        "//inou/lefdef:inou_lefdef",
+        "//pass/place:legroute",
+    ],
+)
+
+cc_library(
+    name = "row_solve",
+    srcs = ["row_solve.cpp"],
+    hdrs = ["row_solve.hpp"],
+    deps = ["@dreamplace_lemon//:graph"],
+)
+
+cc_test(
+    name = "row_solve_test",
+    size = "small",
+    srcs = ["row_solve_test.cpp"],
+    deps = [
+        ":row_solve",
+        "//inou/lefdef:inou_lefdef",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_binary(
+    name = "row_probe",
+    srcs = ["row_probe.cpp"],
+    tags = ["manual"],
+    deps = [":row_solve"],
+)
+
+cc_binary(
+    name = "retained_metal",
+    srcs = ["retained_metal.cpp"],
+    tags = ["manual"],
+    deps = ["//inou/lefdef:inou_lefdef"],
+)

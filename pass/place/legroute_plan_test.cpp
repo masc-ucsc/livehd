@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <sstream>
 
 #include "gtest/gtest.h"
 #include "legroute_test_frame.hpp"
@@ -11,6 +12,22 @@
 
 namespace livehd::placement {
 using Fixture = Legroute_test_frame;
+
+TEST(LegroutePlan, TreeReportKeepsEveryPinOfASingleTileNet) {
+  Fixture f(64, 4);
+  const auto a = f.cell("inv", 0, 0), b = f.cell("inv", 0, 0), c = f.cell("inv", 2500, 250);
+  f.net({{a, "Y"}, {b, "A"}});
+  f.net({{b, "Y"}, {c, "A"}});
+  std::ostringstream trees;
+  const auto plan = legroute_plan(f.tech, f.fp, f.timing, {}, {}, nullptr, 100000, nullptr, &trees);
+  const auto dump = trees.str();
+  EXPECT_EQ(plan.unrouted, 0u);
+  EXPECT_NE(dump.find("n0\tpin\tc0\tY\t0\n"), dump.npos);
+  EXPECT_NE(dump.find("n0\tpin\tc1\tA\t0\n"), dump.npos);
+  EXPECT_NE(dump.find("n0\trouted\t"), dump.npos);
+  EXPECT_EQ(dump.find("n0\tedge\t"), dump.npos);
+  EXPECT_NE(dump.find("n1\tedge\t"), dump.npos);
+}
 
 TEST(LegroutePlan, AcceptsOverlappingCellsAndLeavesThePlacementUnchanged) {
   Fixture    f(64, 4);

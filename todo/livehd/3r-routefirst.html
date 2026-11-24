@@ -107,8 +107,41 @@
 </ul></li>
 </ul>
 
-<h2>Subtasks — landed</h2>
-<p>None yet.</p>
+<h2>Implemented experimental tools</h2>
+<p>The native frame-tree dump, pin-access placement trials, full-net conductor check and fixed-choice row solver are available in <a href="../../tools/routefirst/README.md">tools/routefirst</a>. The design-scale results below use separate HighTide runs.</p>
+
+<h2 id="native-pcrs-runs">Measurements on native PCRS frames</h2>
+<p>On 2026-11-23, minimax and sha3 were synthesized and placed with the native PCRS clock tree on ASAP7.
+Each pair shares a frozen clock/reset route and the native power grid.
+An independent geometric check connected all 108 protected nets on minimax and all 278 on sha3.
+OpenROAD global routing had zero overflow on both the ordinary and access-guided placements at the platform's 0.25 layer adjustment.</p>
+<table>
+<thead><tr><th>Design</th><th>Cells moved by F1</th><th>F1 search CPU-s</th><th>Iteration 0 markers, ordinary</th><th>Iteration 0 markers, F1</th></tr></thead>
+<tbody><tr><td>minimax</td><td>1,392</td><td>102.83</td><td>4,394</td><td>4,331</td></tr>
+<tr><td>sha3</td><td>806</td><td>103.77</td><td>13,104</td><td>12,847</td></tr></tbody></table>
+<p><strong>F3 requires whole-net ownership on this OpenROAD build.</strong> A completed minimax signal provided an M1-to-M2 via and a horizontal escape for a partial FIXED handoff.
+OpenROAD left the escape unchanged and reported a routed design with zero markers. The geometric check found two disconnected components.
+In the row test all 37 nets with a fixed escape remained disconnected. In the paired test OpenROAD connected all 37 when they entered unrouted.
+The frozen PCRS nets remained connected throughout.</p>
+<p><strong>Independent checks change the minimax verdict.</strong> Both ordinary and F1 detail runs reported zero markers.
+Checking the routed ODB independently found 80 and 61 markers respectively. Repeating that check on the exported DEF gave the same counts.
+Both layouts connected all 15,317 signal and protected nets. The ordinary layout had three short markers between clock leaf <code>net_112</code> and data net <code>net_497</code>.
+A local repair reduced the counts to 19 and 16 on its first pass with the exterior wires fixed. Sign-off closure remains unproven.</p>
+<p>In a separate whole-net test the native router completed one signal on each F1 placement. On minimax the 0.281 &micro;m M2 segment and both V1 vias survived full routing, with all signal conductors connected. That run took 2,412.67 detail CPU-seconds and had 76 independent markers. The ordinary and F1 comparisons took 2,404.71 and 2,151.80 detail CPU-seconds respectively, excluding the F1 search. This single-seed handoff test did not meet the speed or density gate.</p>
+<p><strong>Matched minimax closure after revising one PCRS leaf.</strong> Reserving the M2 access region of <code>register_file.g6033</code> during the scratch route of <code>net_112</code> restored two access options on the affected pins. The other 107 protected wires and all anchor poses were identical. The revised control and F1 both passed independent full-layout DRC and conductor checks on 15,317 nets. The clock target was 900 ps, the row area was 3,135.76 &micro;m&sup2; and cell occupancy was 66.08% in both arms.</p>
+<table><thead><tr><th>Same revised minimax frame, seed 1</th><th>Extracted Fmax (MHz)</th><th>Setup WNS / TNS (ps)</th><th>Hold WNS (ps)</th><th>Wire length (&micro;m)</th><th>Routing, search and marker scans (CPU-s)</th></tr></thead>
+<tbody><tr><td>OpenROAD</td><td>1,060.23</td><td>&minus;43.19 / &minus;1,239.50</td><td>+36.96</td><td>77,809.44</td><td>4,346.18</td></tr>
+<tr><td>F1 and OpenROAD</td><td>1,073.04</td><td>&minus;31.93 / &minus;682.05</td><td>+37.20</td><td>77,995.95</td><td>2,876.18</td></tr></tbody></table>
+<p>Each arm reopened nets implicated by the independent scan until the layout checked clean. CPU includes the initial global and detailed routing, native placement search, each local router attempt in the shared policy through first closure, and the scans used to identify the remaining markers. Extraction and final verification are outside that subtotal. Most of the single-seed saving came from fewer finishing attempts. F1 used 1286.23 first-pass detail CPU-seconds to the control's 1321.19.</p>
+<p><strong>F2, reusing clean OpenROAD wires.</strong> On the same frame, 12,070 complete data nets stayed within the lower routing stack. Retaining 25%, 50%, 75% and 100% of those nets took 1,279.50, 1,264.27, 1,202.14 and 1,180.31 first-pass detail CPU-seconds. Every retained wire survived. The independent checks found 54, 44, 54 and 47 markers before local repair. The largest first-pass saving was 10.7%. The 30% gate compares CPU at equal closure on both designs.</p>
+<p><strong>B, moving the cell inside a routed window.</strong> On sha3, 115 of 187 nonoverlapping sampled windows retained their target violation after a zero-displacement reroute. A legal move of up to four sites cleared the target in 95 of those 115, preserved conductor connectivity and introduced no new tracked boundary conflict. Four of four sampled wins reproduced when each gate was rerouted in isolation. Two clean control windows, including one beside a fixed flop, introduced no new related conflicts. The 187 windows are a sample of 913 iteration-5 markers.</p>
+<p><strong>C, planted recovery.</strong> The fixed-choice solver passed the row fixtures and matched exhaustive feasibility and cost on 400 small problems.
+On an independently clean minimax layout, removing 52,946 signal V1 paths and jittering 12,865 cells gave a different result.
+The retained-M2 experiment found no candidate site for 4,774 cells, and no complete solution in any of 207 rows.
+Reinstating the recorded accesses recovered all 207 rows, all conductor geometry and zero independent markers.
+The standalone pin-access model rejected 5,593 pin contacts at their known-good poses. Of those, 3,894 had a lower via landing extending beyond the M1 port union, 1,299 reappeared when other routed signal metal was removed, 361 were outside the enumerated X coordinates and 39 were mixed-layer ports.</p>
+<p>A separate reconstruction used the jittered input, cell LEFs and merged retained M2 strips to choose sites and V1 contacts without the original positions or removed-via ledger. It placed every row and connected all 15,317 nets. Scoring candidate landings against M1 pin and obstruction spacing reduced independent markers from 1,401 to 151. Three rounds of independently checked local alternatives reduced the count to 63, 14, and zero. The final 15,317-net connectivity check passed. A polygon-union comparison confirmed exactly the same M2 conductor footprint. Every other retained path, frozen anchor, IO and the power grid survived. The reference wire length of 77,995.95 &micro;m was preserved. This passes the planted recovery gate with a geometry checker in the refinement loop. The F2 routing-CPU gate still applies independently.</p>
+<p>Replay inputs, tile trees, routed checkpoints, per-wire checks and the measured comparison are kept under <code>repros/3r-routefirst/</code>.</p>
 
 <h2 id="evidence">Evidence from existing runs (2026-11-23)</h2>
 <p>Read from the logs and saved DRC reports of the routed LiveHD → ORFS runs in <code>~/projs/HighTide/artifacts/lhd_route/runs</code>. Nothing was rerun. These frames carry OpenROAD's clock tree on a LiveHD placement. They are the reference the PCRS frames are compared with, not PCRS results. The scripts are <code>repros/3r-routefirst/drt_iterations.py</code> and <code>repros/3r-routefirst/marker_census.py</code> (local).</p>

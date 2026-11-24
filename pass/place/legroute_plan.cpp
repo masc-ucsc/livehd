@@ -34,7 +34,8 @@ void validate_legroute_options(const Legroute_options& o) {
 
 Legroute_plan_report legroute_plan(const physical::Technology& tech, physical::Floorplan& fp, const timing::Feedback& timing,
                                    const Legroute_options& options, const Legroute_power& power,
-                                   const physical::Tech_profile* profile, size_t net_pops, Legroute_congestion* congestion) {
+                                   const physical::Tech_profile* profile, size_t net_pops, Legroute_congestion* congestion,
+                                   std::ostream* tree_report) {
   const auto start = lr::Clock::now();
   validate_legroute_options(options);
   auto                 d = lr::build_design(tech, fp, timing, options, profile);
@@ -128,6 +129,27 @@ Legroute_plan_report legroute_plan(const physical::Technology& tech, physical::F
                                        net_pops,
                                        options.global_astar_weight,
                                        options.global_pattern);
+  if (tree_report) {
+    // Each physical terminal has its own row even when several terminals share a tile.
+    // Tile pairs are the coarse tree before any detailed routing or track assignment.
+    *tree_report << "net\trecord\tinstance_or_from\tpin_or_to\ttile\n";
+    for (size_t i = 0; i < nets.size(); ++i) {
+      const auto& net  = d.nets[size_t(nets[i].net)];
+      const auto& name = fp.nets[net.frame].name;
+      for (const auto& pin : net.pins) {
+        *tree_report << name << "\tpin\t" << (pin.comp < 0 ? "PIN" : fp.components[size_t(pin.comp)].name.str()) << '\t'
+                     << pin.name << '\t' << lr::physical_pin_access(d, g, pin).tile << '\n';
+      }
+      const auto& tree = routes.trees[i];
+      for (const auto& [a, b] : tree.edges) {
+        *tree_report << name << "\tedge\t" << a << '\t' << b << "\t\n";
+      }
+      *tree_report << name << (tree.routed ? "\trouted\t\t\t\n" : "\tunresolved\t\t\t\n");
+    }
+    if (!*tree_report) {
+      throw std::runtime_error("cannot write legroute trees");
+    }
+  }
   std::vector<size_t> use_h(g.size()), use_v(g.size());
   for (const auto& tree : routes.trees) {
     for (const auto& [a, b] : tree.edges) {
