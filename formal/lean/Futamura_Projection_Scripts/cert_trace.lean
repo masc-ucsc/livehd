@@ -59,7 +59,9 @@ The event-driven step keeps each memory as a TABLE (`Compiler/ResidualFlat`): a 
 one chunk instead of adding a closure in front of the image, so a read costs the same at any
 age. `runEvFlatOpt_correct` proves such a run is `interpretDesign`'s run from the state the
 tables stand for (`absS_ofState`: tables built from the start state stand for it). Automatic
-compaction is not needed then and is skipped; an explicit `compact:<K>` still compacts.
+compaction is not needed then and is skipped; an explicit `compact:<K>` still compacts. The
+pass keeps one more mark per chunk of 16 bindings and jumps over a chunk with nothing pending
+(`Compiler/ResidualWork`, `evEnvFW_eq`: equal to the pass for every input; `@[csimp]`).
 `mem:fun` runs the event-driven step with memories as functions (the closure chains).
 
 Checkpoints (`lhdcert-ckpt v1`, `Compiler/Ckpt.lean`, `pass/lean/tools/formats/ckpt.md`):
@@ -112,6 +114,8 @@ import LeanSemanticPrimitives.Compiler.ResidualInc
 import LeanSemanticPrimitives.Compiler.ResidualEv
 -- ... with memories as tables (`runEvFlatOpt_correct`)
 import LeanSemanticPrimitives.Compiler.ResidualFlat
+-- the event-driven pass with tables skips chunks with nothing pending (`@[csimp] evEnvF_eq_work`)
+import LeanSemanticPrimitives.Compiler.ResidualWork
 import Std.Data.HashMap
 
 open Compiler

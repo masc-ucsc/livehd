@@ -13,13 +13,16 @@ event-driven step (`ResidualEv`: only the bindings a changed slot's fanout reach
 `runEv_eq_runFull`) runs the same cases, and `fanout` must list every reader of every slot.
 The same step with memories as tables (`ResidualFlat`, `runEvF_correct`) runs them too, and a
 table must read as its image after random writes, byte-enable writes and loads, at addresses in
-and out of the table, for several chunk sizes.
+and out of the table, for several chunk sizes. The pass that skips chunks of 16 bindings with
+nothing pending (`ResidualWork`, `evEnvFW`) runs them as well, and a program of 8 independent
+chains of 12 bindings, one chain's input changing per step, makes it skip.
 
 Prints `PASS residual_inc: <n> cases` or one `FAIL` line per case that went wrong.
 -/
 import LeanSemanticPrimitives.Compiler.ResidualInc
 import LeanSemanticPrimitives.Compiler.ResidualEv
 import LeanSemanticPrimitives.Compiler.ResidualFlat
+import LeanSemanticPrimitives.Compiler.ResidualWork
 import LeanSemanticPrimitives.Compiler.CompileDesignDefs
 
 open Compiler Compiler.ResidualOpt Compiler.ResidualInc Compiler.ResidualFlat
@@ -136,6 +139,39 @@ def tableAgrees (n c seed : Nat) : Bool := Id.run do
       ok := ok && t.read yy == g yy
   return ok
 
+/-- Runs with tables, the passes after the first chunked (`evEnvFW`). -/
+def runW (R : ResidualProgram) (s : RuntimeStateF) : List (ClockEdges × RuntimeInput) →
+    List RuntimeResult
+  | [] => []
+  | (e, i) :: rest => Id.run do
+    let fan := fanout R
+    let mut env := fullEnvF R i s
+    let r0 := stepOfEnvF R env e s
+    let mut out := #[absRes r0]
+    let mut st := r0.2
+    for (e, i) in rest do
+      env := evEnvFW R fan env i st
+      let r := stepOfEnvF R env e st
+      out := out.push (absRes r)
+      st := r.2
+    return out.toList
+
+/-- 8 inputs `a0 .. a7` (8 bits); for each input `g`, a chain of 12 bindings
+(`x0 = a + 1`, `x(j+1) = x j xor a`); one binding adding the chains' last values. Slots: inputs
+0..7, chain `g` at `8 + 12 g ..`, the sum at `8 + 96`. -/
+def chainsProg : ResidualProgram := Id.run do
+  let mut bs : Array ResidualBinding := #[]
+  for g in [0:8] do
+    for j in [0:12] do
+      let slot := 8 + bs.size
+      bs := bs.push (if j == 0 then ⟨.bv 8, .rsum 8 2 #[g, g]⟩ else ⟨.bv 8, .rxor 8 #[slot - 1, g]⟩)
+  bs := bs.push ⟨.bv 8, .rsum 8 8 ((List.range 8).toArray.map fun g => 8 + 12 * g + 11)⟩
+  return { sources := (List.range 8).toArray.map fun g => .input g 8
+           bindings := bs
+           outputs := #[{ slot := 8 + 96, width := 8 }, { slot := 8 + 12 * 3 + 5, width := 8 }]
+           flopUpdates := #[]
+           memoryUpdates := #[] }
+
 def sameRuns (a b : List RuntimeResult) : Bool :=
   a.length == b.length && (a.zip b).all fun (x, y) => sameRes x y
 
@@ -159,9 +195,11 @@ def main : IO UInt32 := do
     fails := check s!"{name}: fanout lists every reader" (fanOKb R) fails
     fails := check s!"{name}: event-driven run = full run, 40 steps"
       (sameRuns (runEv R s1 ticks) (runFull R s1 ticks)) fails
-    n := n + 1
+    n := n + 2
     fails := check s!"{name}: run with tables = full run, 40 steps"
       (sameRuns ((runEvF R (ofState (fun _ => 0) s1) ticks).map absRes) (runFull R s1 ticks)) fails
+    fails := check s!"{name}: chunked run with tables = full run, 40 steps"
+      (sameRuns (runW R (ofState (fun _ => 0) s1) ticks) (runFull R s1 ticks)) fails
   -- 2. a compiled RAM: the address changes every step, the data every 3rd, the enable toggles
   match compileDesign ramCert with
   | .error e => fails := fails.push s!"compileDesign refused the RAM: {repr e}"
@@ -200,13 +238,30 @@ def main : IO UInt32 := do
           (sameRuns runT (runFull P s0 ticks)) fails
         fails := check s!"{name}: the same memory image after 60 steps with tables ({dep}, {c})"
           (img (runT.getLast?.map (·.nextState)) == img lastF) fails
-  -- 3. tables against closure images: random writes in and out of the table
+        n := n + 2
+        let runCW := runW P sF ticks
+        fails := check s!"{name}: chunked run with tables ({dep}, {c}) = full run, 60 steps"
+          (sameRuns runCW (runFull P s0 ticks)) fails
+        fails := check s!"{name}: the same memory image after 60 chunked steps ({dep}, {c})"
+          (img (runCW.getLast?.map (·.nextState)) == img lastF) fails
+  -- 3. chains: one chain's input changes per step, so most chunks of 16 have nothing pending
+  let tickC : List (ClockEdges × RuntimeInput) := (List.range 50).map fun k =>
+    (#[true], (List.range 8).toArray.map fun g =>
+      mk_bv 8 (if g == k % 8 then (k * 37 + g : Nat) else ((k - k % 8) * 11 + g : Nat)))
+  let sC : RuntimeState := { flops := #[], mems := #[] }
+  n := n + 3
+  fails := check "chains: well-ordered" (wellOrdered chainsProg) fails
+  fails := check "chains: chunked run with tables = full run, 50 steps"
+    (sameRuns (runW chainsProg (ofState (fun _ => 0) sC) tickC) (runFull chainsProg sC tickC)) fails
+  fails := check "chains: event-driven run = full run, 50 steps"
+    (sameRuns (runEv chainsProg sC tickC) (runFull chainsProg sC tickC)) fails
+  -- 4. tables against closure images: random writes in and out of the table
   for (tn, tc) in [(12, 4), (12, 16), (12, 1), (40, 7), (0, 1), (5, 0)] do
     for seed in [1, 2, 3] do
       n := n + 1
       fails := check s!"a table of {tn} words, chunks of {tc}, seed {seed}, reads as its image"
         (tableAgrees tn tc seed) fails
-  -- 4. a binding that reads a later slot is refused
+  -- 5. a binding that reads a later slot is refused
   n := n + 1
   fails := check "a forward reference is not well-ordered" (!wellOrdered forwardProg) fails
   for f in fails do IO.println s!"FAIL {f}"

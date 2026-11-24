@@ -93,6 +93,8 @@ MODULES=(
   Compiler/ResidualEv
   # ... with memories as tables (ResidualFlat)
   Compiler/ResidualFlat
+  # ... skipping chunks with nothing pending (ResidualWork, @[csimp])
+  Compiler/ResidualWork
   Compiler/CompileOpDefs Compiler/CompileGraphDefs Compiler/CompileDesignDefs
   # checkpoints (lhdcert-ckpt v1: drivers/lhd_ckpt, and the ckpt options of cert_trace and
   # dcert2_memroute): the start states, the format, its proofs, the FP state conversion

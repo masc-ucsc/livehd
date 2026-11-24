@@ -60,6 +60,8 @@ MODULES=(
   Compiler/ResidualEv
   # the same step with memories as tables (reads no longer walk every earlier write), and its proof.
   Compiler/ResidualFlat
+  # ... skipping chunks with nothing pending (proved equal, @[csimp]).
+  Compiler/ResidualWork
   Compiler/CompileOpDefs
   Compiler/CompileGraphDefs
   Compiler/CompileDesignDefs
