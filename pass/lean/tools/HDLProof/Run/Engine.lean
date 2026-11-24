@@ -1,25 +1,63 @@
 /-
-# Knobs and `mkEngine`: one place that builds a route
+# `EngineSelector`: choose a route, prepare it for a design, get its engine
 
-A driver says which route it runs and how, as `Knobs`, and `mkEngine` builds the route's engine
-(`Compiler.Engine σ`, `Compiler/Engine`): a step on a state of the route's own kind, so a route
-keeps between steps whatever makes its next step fast.
+`EngineSelector D knobs` is the one place that turns a design and a choice of route into a
+simulator that can be stepped:
+
+    D      : DesignCert                        the design certificate (`CertIO.admitAny` on a `.dcert`)
+    knobs  : Knobs                             the route and its modes (defaults: the fastest proved)
+    result : Except SelectError SelectedEngine
+
+It does the route's one-time work for `D` and hands back the engine:
+- ir: `checkDesign`, then `Staged.prepare` (or nothing more with `irStaged := false`);
+- vc: `compileDesign`, the optimizer (unless `vcOpt := false`), the well-ordering check, the
+  fanout table;
+- ref: nothing (`interpretDesign` itself);
+- fp: the certificate checks, the specialization, `checkResidual`, the shared tails.
+`SelectedEngine` is `{ σ, engine, notes }`: the engine (`Compiler.Engine σ`: `load`, `step`,
+`view`, `reload`, `peek?`) on a state type `σ` of the route's own kind, and one line per thing
+prepared (`cert_trace opt:stats` prints vc's). `SelectError` carries the refusal itself
+(`detail`) and the message the drivers print (`message`).
+
+## How to use it
+
+    -- a loop over an engine: the state goes from one step to the next as the argument of a
+    -- recursive function, so each step holds the only reference to it (`Compiler/Engine`)
+    partial def run {σ : Type} (E : Engine σ) (n k : Nat) (q : σ) : IO Unit := do
+      if k ≥ n then return
+      match E.step (edgesAt D .all k) (inputsAt k) q with
+      | .ok (outs, q') => IO.println outs; run E n (k + 1) q'
+      | .error (why, _) => IO.eprintln why            -- a refusal hands the state back
+
+    match EngineSelector D {} with                     -- {}: vc, optimized, event-driven, tables
+    | .error e => IO.eprintln e.message                -- e.g. "vc: compileDesign refused: ..."
+    | .ok sel => run sel.engine n 0 (sel.engine.load (Direct.resetState D))
+
+Other routes and modes: `EngineSelector D { route := .ir }`, `{ route := .vc, vcInc := .off }`,
+or the drivers' options through `Knobs.parse {} ["route:fp", "share:off"]`.
+`withSelectedEngine D knobs k` runs `k σ engine notes` instead of returning the engine.
+`EngineSelector_ir_sound`, `EngineSelector_ref_sound`, `EngineSelector_vc_sound` and
+`EngineSelector_fp_agree` say that whatever it returns is the design's semantics; a closed loop on it
+(`cycleStep`, `runCycles_sound`, `EngineSelector_runCycles_fp`) is the reference trace of its ticks.
+`cert_run` is the first driver on it.
+
+## Knobs
 
 `Knobs`' defaults are the fastest proved combination: vc, optimized, event-driven, memories as
 tables. A driver that runs another route by default (`cert_run`, `cert_trace`: ir) sets its route
 first and applies its options on top (`Knobs.apply?`). Every route option the drivers took
 before maps onto a knob, and every combination they could run is still built:
 
-| option      | knob                                        | drivers that took it         |
-|-------------|---------------------------------------------|------------------------------|
-| `route:R`   | `route` (ir, vc, ref, fp; `tv` = vc)        | cert_run, cert_trace         |
-| `opt:off`   | `vcOpt := false` and `fpShare := false`     | cert_run, cert_trace         |
-| `inc:off`   | `vcInc := .off` (the full step every time)  | cert_trace                   |
-| `inc:scan`  | `vcInc := .scan` (unless `inc:off`)         | cert_trace                   |
-| `mem:fun`   | `vcMem := .func` (memories as functions)    | cert_trace                   |
-| `share:off` | `fpShare := false`                          | dcert2_memroute              |
-| `ir:raw`    | `irStaged := false` (`directStepRaw`)       | new (the judge's step)       |
-| `compact:K` | `compact := some K` (`0`: off)              | cert_run, cert_trace         |
+| option      | knob                                        | drivers that take it              |
+|-------------|---------------------------------------------|-----------------------------------|
+| `route:R`   | `route` (ir, vc, ref, fp; `tv` = vc)        | cert_run, cert_trace              |
+| `opt:off`   | `vcOpt := false` and `fpShare := false`     | cert_run, cert_trace              |
+| `inc:off`   | `vcInc := .off` (the full step every time)  | cert_run, cert_trace              |
+| `inc:scan`  | `vcInc := .scan` (unless `inc:off`)         | cert_run, cert_trace              |
+| `mem:fun`   | `vcMem := .func` (memories as functions)    | cert_run, cert_trace              |
+| `share:off` | `fpShare := false`                          | cert_run, dcert2_memroute         |
+| `ir:raw`    | `irStaged := false` (`directStepRaw`)       | cert_run (the judge's step)       |
+| `compact:K` | `compact := some K` (`0`: off)              | cert_run, cert_trace              |
 
 The engines and what proves them:
 - ir: `irEngine` (staged) or `irRawEngine`, after `checkDesign`; `irEngine_sound`.
@@ -33,9 +71,6 @@ The engines and what proves them:
 - fp: `mkStepper`'s step (`fpStep`, shared tails unless `fpShare := false`) as an engine on
   runtime states; `fpStep_agree`: its outputs are `interpretDesign`'s and its state agrees below
   every memory's depth.
-`mkEngine_ir_sound`, `mkEngine_ref_sound`, `mkEngine_vc_sound` and `mkEngine_fp_agree` say this of
-whatever `mkEngine` returns.
-
 Mathlib-free.
 -/
 import HDLProof.Run.Sound
@@ -106,16 +141,16 @@ def Knobs.parse (k : Knobs) (opts : List String) : Except String (Knobs × List 
     | some (.ok k') => .ok (k', rest)
     | some (.error e) => .error e
 
-/-- A built route: its state type, its engine, and what was built (one line each; `cert_trace
-opt:stats` prints vc's). -/
-structure Built where
+/-- What `EngineSelector` returns: the route's state type `σ`, its engine on `σ`, and one note per
+thing prepared (`cert_trace opt:stats` prints vc's). -/
+structure SelectedEngine where
   σ      : Type
   engine : Engine σ
   notes  : Array String := #[]
 
-/-- Why a route could not be built: the refusal itself (`detail`: a check's rendering, the
-compiler's error) and the message `mkStepper` gives for it. -/
-structure BuildError where
+/-- Why `EngineSelector` could not prepare the route for the design: the refusal itself (`detail`:
+a check's rendering, the compiler's error) and the message drivers print (`mkStepper`'s wording). -/
+structure SelectError where
   route   : Route
   detail  : String
   message : String
@@ -125,7 +160,7 @@ def vcDepth (D : DesignCert) : Nat → Nat := fun k => (D.memories[k]?.map (·.d
 
 /-- vc's engine on the program `R`, chosen by the knobs (a program that is not well-ordered runs
 the full step). -/
-def vcEngineOf (D : DesignCert) (k : Knobs) (R : ResidualProgram) : Built :=
+def vcEngineOf (D : DesignCert) (k : Knobs) (R : ResidualProgram) : SelectedEngine :=
   if k.vcInc != .off && ResidualInc.wellOrdered R then
     match k.vcInc, k.vcMem with
     | .scan, _ => ⟨_, vcScanEngine R, #[]⟩
@@ -146,8 +181,9 @@ def vcNotes (k : Knobs) (R0 R : ResidualProgram) (accepted : Bool) : Array Strin
       bindings {R0.bindings.size} -> {R.bindings.size}",
     s!"vc incremental: {incNote}"]
 
-/-- The engine `knobs` name for design `D`, or why it cannot be built. -/
-def mkEngine (D : DesignCert) (k : Knobs) : Except BuildError Built :=
+/-- **Choose the route `knobs` name, prepare it for design `D`, and return its engine** (with its
+state type and notes), or why the route refuses `D`. See the module header for how to use it. -/
+def EngineSelector (D : DesignCert) (k : Knobs) : Except SelectError SelectedEngine :=
   match k.route with
   | .ir =>
     match Direct.checkDesign D with
@@ -178,17 +214,17 @@ def mkEngine (D : DesignCert) (k : Knobs) : Except BuildError Built :=
             (fpStep D ⟨sim, if k.fpShare then Projection.ShareTails.shareSim sim else none⟩), #[]⟩
 
 /-- Run `cont` on the engine `knobs` name for `D`; the build's refusal otherwise. -/
-def withEngine {α : Type} (D : DesignCert) (k : Knobs)
-    (cont : (σ : Type) → Engine σ → Array String → IO α) : IO (Except BuildError α) :=
-  match mkEngine D k with
+def withSelectedEngine {α : Type} (D : DesignCert) (k : Knobs)
+    (cont : (σ : Type) → Engine σ → Array String → IO α) : IO (Except SelectError α) :=
+  match EngineSelector D k with
   | .error e => pure (.error e)
   | .ok b => do return .ok (← cont b.σ b.engine b.notes)
 
-/-! ## What `mkEngine` builds is sound -/
+/-! ## What `EngineSelector` builds is sound -/
 
-theorem mkEngine_ir_sound {D : DesignCert} {k : Knobs} {b : Built} (hr : k.route = .ir)
-    (h : mkEngine D k = .ok b) : b.engine.Sound (interpretDesign D) := by
-  unfold mkEngine at h
+theorem EngineSelector_ir_sound {D : DesignCert} {k : Knobs} {b : SelectedEngine} (hr : k.route = .ir)
+    (h : EngineSelector D k = .ok b) : b.engine.Sound (interpretDesign D) := by
+  unfold EngineSelector at h
   rw [hr] at h
   dsimp only at h
   split at h
@@ -200,9 +236,9 @@ theorem mkEngine_ir_sound {D : DesignCert} {k : Knobs} {b : Built} (hr : k.route
     · exact irRawEngine_sound hd
     · exact irEngine_sound hd
 
-theorem mkEngine_ref_sound {D : DesignCert} {k : Knobs} {b : Built} (hr : k.route = .ref)
-    (h : mkEngine D k = .ok b) : b.engine.Sound (interpretDesign D) := by
-  unfold mkEngine at h
+theorem EngineSelector_ref_sound {D : DesignCert} {k : Knobs} {b : SelectedEngine} (hr : k.route = .ref)
+    (h : EngineSelector D k = .ok b) : b.engine.Sound (interpretDesign D) := by
+  unfold EngineSelector at h
   rw [hr] at h
   cases h
   exact refEngine_sound D
@@ -227,10 +263,10 @@ theorem vcEngineOf_sound (D : DesignCert) (k : Knobs) (R : ResidualProgram) :
 /-- vc's engine is `denoteResidual`'s of the compiled program, optimized unless `opt:off`
 (`ResidualOpt.optimize` is the optimizer's program); `compileDesign_correct` and
 `compileOpt_correct` (lake side) make that `interpretDesign`'s. -/
-theorem mkEngine_vc_sound {D : DesignCert} {k : Knobs} {b : Built} (hr : k.route = .vc)
-    (h : mkEngine D k = .ok b) : ∃ R0, compileDesign D = .ok R0 ∧
+theorem EngineSelector_vc_sound {D : DesignCert} {k : Knobs} {b : SelectedEngine} (hr : k.route = .vc)
+    (h : EngineSelector D k = .ok b) : ∃ R0, compileDesign D = .ok R0 ∧
       b.engine.Sound (denoteResidual (if k.vcOpt then ResidualOpt.optimize R0 else R0)) := by
-  unfold mkEngine at h
+  unfold EngineSelector at h
   rw [hr] at h
   dsimp only at h
   split at h
@@ -249,10 +285,10 @@ theorem mkEngine_vc_sound {D : DesignCert} {k : Knobs} {b : Built} (hr : k.route
 
 /-- fp's engine is a step on runtime states that agrees with `interpretDesign` (`StepAgree`), for
 a certificate `fpChecks` accepts. -/
-theorem mkEngine_fp_agree {D : DesignCert} {k : Knobs} {b : Built} (hr : k.route = .fp)
-    (h : mkEngine D k = .ok b) :
+theorem EngineSelector_fp_agree {D : DesignCert} {k : Knobs} {b : SelectedEngine} (hr : k.route = .fp)
+    (h : EngineSelector D k = .ok b) :
     fpChecks D = none ∧ ∃ step, StepAgree D step ∧ b = ⟨RuntimeState, Engine.ofStep "fp" step, #[]⟩ := by
-  unfold mkEngine at h
+  unfold EngineSelector at h
   rw [hr] at h
   dsimp only at h
   cases hc : fpChecks D with
@@ -270,24 +306,24 @@ theorem mkEngine_fp_agree {D : DesignCert} {k : Knobs} {b : Built} (hr : k.route
         exact ⟨rfl, _, fpStep_agree hsem haddr hdepth hroot hword hproj hs
           (by cases k.fpShare <;> simp), h.symm⟩
 
-/-- **A closed-loop run on the engine `mkEngine` builds is the reference trace of its ticks**: for
+/-- **A closed-loop run on the engine `EngineSelector` builds is the reference trace of its ticks**: for
 ir, ref and vc (`runCycles_sound`; vc against its program's `denoteResidual`, which
 `compileOpt_correct` makes `interpretDesign`'s on the lake side) the run's outputs and final state
 are `refTrace`'s; for fp (`runCycles_fp_outputs`) the outputs, and a final state that agrees. -/
-theorem mkEngine_runCycles_fp {ctx : Ctx} {k : Knobs} {b : Built} (hr : k.route = .fp)
-    (h : mkEngine ctx.D k = .ok b) {n : Nat} {st : LoopState b.σ} {ts : List Tick}
+theorem EngineSelector_runCycles_fp {ctx : Ctx} {k : Knobs} {b : SelectedEngine} (hr : k.route = .fp)
+    (h : EngineSelector ctx.D k = .ok b) {n : Nat} {st : LoopState b.σ} {ts : List Tick}
     {os : List (Array BV)} {st' : LoopState b.σ} {why : Option String}
     (hfit : Fits ctx.D (b.engine.view st.s)) (hrun : runCycles ctx b.engine n st = .ok (ts, os, st', why)) :
     (refTrace ctx.D (b.engine.view st.s) ts).steps.map (·.outputs) = os ∧
     Projection.CkptResume.StateAgree ctx.D (b.engine.view st'.s)
       (refTrace ctx.D (b.engine.view st.s) ts).finalState := by
-  obtain ⟨hc, step, hs, rfl⟩ := mkEngine_fp_agree hr h
+  obtain ⟨hc, step, hs, rfl⟩ := EngineSelector_fp_agree hr h
   exact runCycles_fp_outputs hs hc hfit hrun
 
 end Run
 end HDLProof
 
-#audit_axioms HDLProof.Run.mkEngine_ir_sound
-#audit_axioms HDLProof.Run.mkEngine_vc_sound
-#audit_axioms HDLProof.Run.mkEngine_fp_agree
-#audit_axioms HDLProof.Run.mkEngine_runCycles_fp
+#audit_axioms HDLProof.Run.EngineSelector_ir_sound
+#audit_axioms HDLProof.Run.EngineSelector_vc_sound
+#audit_axioms HDLProof.Run.EngineSelector_fp_agree
+#audit_axioms HDLProof.Run.EngineSelector_runCycles_fp

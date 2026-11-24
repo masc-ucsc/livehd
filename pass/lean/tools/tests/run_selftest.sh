@@ -27,7 +27,7 @@ set -euo pipefail
 #   RTL load  seqm with load:prog8.hex:mem0, and with load:prog8.bin@0:mem0, prints what seqm_init
 #             prints; a word past the memory's depth is refused
 #   vcd       the VCD names every port and has value changes
-#   engines   every route and knob combination `mkEngine` builds (HDLProof/Run/Engine) on busm,
+#   engines   every route and knob combination `EngineSelector` builds (HDLProof/Run/Engine) on busm,
 #             busm_mealy, seqm and seqm_init: 300 cycles of random ticks, stepped once, twice from
 #             one state, after two peeks, and reloaded from a checkpoint, against ref
 #             (tests/engine_check.lean, interpreted against .olean-dev)
@@ -367,7 +367,7 @@ run "$OUT/seqm_lean/seqm.dcert" load:"$OUT/prog8_long.hex:mem0" max:5
 grep -q '^\$var wire 1 .* mem_valid \$end$' "$OUT/busm.vcd" && grep -q '^\$var wire 32 .* mem_rdata \$end$' "$OUT/busm.vcd" \
   && [[ $(grep -c '^#' "$OUT/busm.vcd") -gt 10 ]] || { head -20 "$OUT/busm.vcd"; echo "FAIL: vcd"; exit 1; }
 
-# the engines `mkEngine` builds, against ref (tests/engine_check.lean)
+# the engines `EngineSelector` builds, against ref (tests/engine_check.lean)
 (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/tests/engine_check.lean" 300 \
    "$B" "$OUT/busm_mealy_lean/busm_mealy.dcert" "$OUT/seqm_lean/seqm.dcert" "$OUT/seqm_init_lean/seqm_init.dcert") \
   > "$OUT/engine_check.log" 2>&1 && grep -q '^PASS engine' "$OUT/engine_check.log" \

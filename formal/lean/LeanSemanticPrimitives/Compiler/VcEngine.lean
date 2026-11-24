@@ -180,7 +180,7 @@ def vcScanEngine (R : ResidualProgram) : Engine VcFunState :=
   vcFunEngine R (incEnv R)
 
 /-- OLDER, SLOWEST (about 25x `vcEngine`'s time per cycle on SoC): the whole `denoteResidual`
-every step, which `cert_run` ran before engines. Selected by `inc:off`; `mkEngine` also falls back
+every step, which `cert_run` ran before engines. Selected by `inc:off`; `EngineSelector` also falls back
 to it for a program that is not well-ordered (the incremental modes need that). -/
 def vcFullEngine (R : ResidualProgram) : Engine RuntimeState :=
   Engine.ofStep "vc" fun e i s => .ok (denoteResidual R e i s)

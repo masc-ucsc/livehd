@@ -18,7 +18,7 @@ keeps its result.
   staged form (the one `mkStepper` builds); `refStep_sound` for `ref`.
   For route `vc` it is `compileDesign_correct` / `compileOpt_correct` (on the lake side).
 * `cycleStep_sound`: on an engine sound against `interpretDesign` (`Engine.SoundWith`: ir, ref and
-  every vc mode, `mkEngine_*_sound`), an applied cycle's outputs and next state are
+  every vc mode, `EngineSelector_*_sound`), an applied cycle's outputs and next state are
   `interpretDesign`'s on the recorded tick.
 * `runCycles_sound`: for every host (every bind file, image, latency and stimulus) the run's
   outputs and final state are those of `refTrace` (iterated `interpretDesign`) on the recorded

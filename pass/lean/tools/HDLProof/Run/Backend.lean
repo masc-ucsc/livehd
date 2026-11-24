@@ -14,7 +14,7 @@ outputs BEFORE the edge and the state AFTER it, exactly `interpretDesign`'s shap
   `interpretDesign`. A stepper carries no state between steps, so this is the full step:
   `cert_trace route:vc` runs it only with `inc:off`; its default step reuses the last step's
   environment (`Compiler/ResidualEv`, `ResidualFlat`, `ResidualWork`). `Run/Engine`'s
-  `mkEngine` builds every route and mode as an engine that keeps such state; `cert_run` runs
+  `EngineSelector` builds every route and mode as an engine that keeps such state; `cert_run` runs
   those engines. The steppers here remain, with their theorems, for code that steps runtime
   states; `fpStep` is also the `fp` engine's step.
 * `ref`: `interpretDesign` itself. Exact by definition and slow on memories (a write wraps the

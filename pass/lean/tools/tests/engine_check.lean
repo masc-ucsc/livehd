@@ -1,10 +1,10 @@
 /-
-Conformance of the engines `mkEngine` builds (`HDLProof/Run/Engine`).
+Conformance of the engines `EngineSelector` builds (`HDLProof/Run/Engine`).
 
   (cd formal/lean && LEAN_PATH=$PWD/.olean-dev lean --run ../../pass/lean/tools/tests/engine_check.lean \
      <cycles> <cert.dcert> [<cert.dcert> ...])
 
-`mkEngine_*_sound` and `mkEngine_fp_agree` PROVE what these runs check. For each certificate,
+`EngineSelector_*_sound` and `EngineSelector_fp_agree` PROVE what these runs check. For each certificate,
 every route and knob combination (ir staged and raw; ref; vc optimized or not, each with the
 event-driven step on tables and on functions, the scan step and the full step; fp with and
 without shared tails) runs `<cycles>` cycles of pseudo-random inputs and clock edges (a fixed
@@ -151,13 +151,13 @@ def main (args : List String) : IO UInt32 := do
         | .error e => do IO.println s!"FAIL {cert}: {e}"; return 1
       let ticks := (Array.range n).map (tick D 12345)
       let s0 := Direct.resetState D
-      let ref ← match mkEngine D { route := .ref } with
+      let ref ← match EngineSelector D { route := .ref } with
         | .error e => do IO.println s!"FAIL {cert}: ref: {e.message}"; return 1
         | .ok b => match runE D b.engine s0 n ticks .plain with
           | .ok r => pure r
           | .error e => do IO.println s!"FAIL {cert}: ref: {e}"; return 1
       for (name, k) in combos do
-        match mkEngine D k with
+        match EngineSelector D k with
         | .error e => IO.println s!"note {cert}: {name}: not built: {e.message}"
         | .ok b =>
           for m in [Mode.plain, .twice, .peeked, .reloaded] do

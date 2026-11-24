@@ -24,7 +24,7 @@ cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<p
   with its constant operands folded in, and every slot kept as its reduced value;
   `Staged.step_eq` (`Compiler/DirectStagedSound`) proves the step equal to `directStepRaw`. `ref` is exact by definition and slow on designs
   with memories. `opt:off` runs `vc` without its optimizer.
-- The route runs as an engine (`HDLProof/Run/Engine`: `mkEngine` builds it from `Knobs`), a step
+- The route runs as an engine (`HDLProof/Run/Engine`: `EngineSelector` builds it from `Knobs`), a step
   on a state of the route's own kind. `vc`'s default engine keeps each memory as a table
   (`Compiler/ResidualFlat`) and the last cycle's slot environment, and each cycle after the first
   updates only what a changed slot reaches (`Compiler/ResidualEv`, `ResidualWork`). A closed-loop
@@ -42,7 +42,7 @@ cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<p
   table below its depth), checks the runtime policy and runs the residual. Its outputs are
   `interpretDesign`'s and its state agrees with `interpretDesign`'s on every flop and on every
   memory word below its depth (`Run/Sound.lean`: `fpStep_agree`, `runCycles_agree`;
-  `Run/Engine.lean`: `mkEngine_fp_agree`, `mkEngine_runCycles_fp`), so its traces and checkpoints are the other routes' (the selftest compares
+  `Run/Engine.lean`: `EngineSelector_fp_agree`, `EngineSelector_runCycles_fp`), so its traces and checkpoints are the other routes' (the selftest compares
   them). It refuses a certificate the direct check, the address, depth, image-root or word
   checks refuse, or one the memory route does not admit.
 - `bind:` adds a host: reset, constants, buses, memory, console, exit, registers, stop
@@ -114,8 +114,8 @@ the design steps. `HDLProof/Run/Sound.lean` proves:
   `interpretDesign` step on the tick it records (`cycleStep_spec` for any engine and step spec).
 - `runCycles_sound`: for every host (any bind file, image, latency and stimulus), a run's outputs
   and final state are those of `refTrace`, iterated `interpretDesign`, on the recorded ticks.
-- `mkEngine_ir_sound`, `mkEngine_ref_sound`, `mkEngine_vc_sound` (`Run/Engine.lean`): the engines
-  `mkEngine` builds are sound (`Engine.SoundWith`: every step and peek); for `vc` against its
+- `EngineSelector_ir_sound`, `EngineSelector_ref_sound`, `EngineSelector_vc_sound` (`Run/Engine.lean`): the engines
+  `EngineSelector` builds are sound (`Engine.SoundWith`: every step and peek); for `vc` against its
   program's `denoteResidual`, which `compileDesign_correct` and `compileOpt_correct` make
   `interpretDesign` (`CompileOpt`'s `*_interp`).
 - `compacted_outputs`: a run cut into segments, with its state replaced by the restored

@@ -48,7 +48,7 @@ documents every option; in short:
   summary says why not, and nothing is compacted). The summary's `compactions` line then ends
   in `automatic`.
 * A stimulus file's inputs come from a table built once (`StimTab`), with `inputAt`'s rules.
-* The route runs as an engine (`HDLProof/Run/Engine`'s `mkEngine`, from `Knobs`): ir staged, vc
+* The route runs as an engine (`HDLProof/Run/Engine`'s `EngineSelector`, from `Knobs`): ir staged, vc
   optimized and event-driven with its memories as tables, fp with shared tails. `inc:off` runs
   vc's full step every cycle (this driver's earlier vc step), `inc:scan` and `mem:fun` its other
   modes, `share:off` fp without shared tails, `ir:raw` the unstaged direct step. Each cycle uses
@@ -404,7 +404,7 @@ def runFrom {σ : Type} (o : Opts) (D : DesignCert) (io : IoMeta) (bind : Bind) 
   match o.lockstep with
   | none => runWith o D io bind edges hash ctx s0 h0 c0 E (none : Option (Engine Unit))
   | some r =>
-    match mkEngine D { o.runKnobs with route := r } with
+    match EngineSelector D { o.runKnobs with route := r } with
     | .error e => IO.eprintln s!"lockstep: {e.message}"; return 3
     | .ok b2 => runWith o D io bind edges hash ctx s0 h0 c0 E (some b2.engine)
 
@@ -441,7 +441,7 @@ def main (args : List String) : IO UInt32 := do
     let edges ← match ← readEdgeSpec o.edges with
       | .ok e => pure e
       | .error e => do IO.eprintln e; return 2
-    match mkEngine D o.runKnobs with
+    match EngineSelector D o.runKnobs with
     | .error e => IO.eprintln e.message; say "RESULT: refused"; return 3
     | .ok b => runFrom o D io bind stim edges b.engine
   catch e =>
