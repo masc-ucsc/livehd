@@ -78,3 +78,8 @@ contacts. The retained-M2 variant enumerates V1 sites against merged strips and
 the oriented pin library. A local independent DRC scan selects alternatives.
 The final full-layout DRC, frozen-metal polygon comparison, and net continuity
 result are in `plant/checked-access/accepted2/physical-audit.json`.
+
+Use `retained_metal --all-layers layout.def geometry.tsv tech.lef cells.lef`
+to compare a native handoff with the final design independently of DEF path
+spelling. Each row contains the net, layer and four rectangle coordinates
+in DEF units. This mode includes via cuts and both metal landings.

@@ -47,6 +47,8 @@ On minimax, final independent checking found an M2 short to the protected clock 
 On both minimax placements the data gate <code>register_file.g6033_AO21x1_ASAP7_75t_R</code> occupies the same site. On a diagnostic copy, removing only this clock leaf restored two feasible M2 escapes for its B pin in the control and two for A2 in the F1 arm. Both pins had zero options in their respective routed layouts. The scored layouts retained the leaf. Check data-pin escape space against the actual leaf routes after legalizing the anchors. The protected nets passed connectivity in isolation, and all arms retained their geometry.
 <a href="3r-routefirst.html#native-pcrs-runs">Route-first measurements and reproduction files</a>.</p>
 
+<p>In a subsequent sha3 scratch trial, OpenROAD reopened 103 implicated nets on the routed control, including 44 protected paths. Protected/data markers in that reference dropped from 66 to zero. The regenerated frame kept only the new protected wiring. Anchors, PG and all other protected paths were unchanged. In fresh five-iteration data routes, independent shorts on the control fell from 61 to one and on the access-guided placement from 64 to five. The control still had 110 total independent DRC markers and the positions arm had 95.</p>
+
 <h2 id="chunk-review">2026-11-23 live chunk review</h2>
 <p>Final placement requests now dispatch macro planning first for homes with at least two macros.
 The coordinator accepts boundary measurements from either stage and marks dependent homes stale.
