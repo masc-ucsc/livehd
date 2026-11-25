@@ -168,8 +168,15 @@ cert() { # <design> <top> <src> : compile [-> single_edge] -> certificate in <de
   fi
 }
 for d in accS acc2 acc2b pv0 pv1 pv1b rS rD rDb; do cert "$d" "$d" "$OUT/$d.v"; done
-# the falling-edge capture makes pv* two slots per clock
-grep -q 'P=2 slots' "$OUT/pv0.se.log" || { cat "$OUT/pv0.se.log" | tail -5; echo "FAIL: pv0 is not P = 2"; exit 1; }
+# the falling-edge capture makes pv* two slots per clock: single_edge then adds its 1-bit phase
+# divider, the flop `single_edge_phase` (created only when P > 1), which the certificate's
+# _io.json lists; accS (one edge, P = 1) gets none
+has_phase() { "$PY" -c 'import json, sys
+sys.exit(0 if any(f.get("name") == "single_edge_phase" for f in json.load(open(sys.argv[1]))["flops"]) else 1)' "$1"; }
+has_phase "$OUT/pv0_lean/pv0_io.json" \
+  || { cat "$OUT/pv0_lean/pv0_io.json"; echo "FAIL: pv0 is not P = 2 (no single_edge_phase flop)"; exit 1; }
+! has_phase "$OUT/accS_lean/accS_io.json" \
+  || { cat "$OUT/accS_lean/accS_io.json"; echo "FAIL: accS has a single_edge_phase flop (P > 1)"; exit 1; }
 
 acc_map() { # <name> <impl> <slot kind> <maxstall>
   printf '%s\n' "impl $2_lean/$2.dcert" "spec accS_lean/accS.dcert" \
@@ -208,7 +215,7 @@ r_map r_quiet   rD  v,yg,req "$LATE" 'xfer out:v@next' 'drive vin 0 0 0'
 drv() { # <driver> args...
   local d=$1; shift
   if [[ -n "$SYM_NAT" ]]; then "$SYM_NAT/$d" "$@"
-  else (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/drivers/$d.lean" "$@"); fi
+  else (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/proof/$d.lean" "$@"); fi
 }
 N=0
 judge() { # <expect> <refmap> args...
@@ -258,9 +265,10 @@ has 'CLASS: STUTTER\? \(maxstall 1' "a missing hold is classed STUTTER?"
 judge "NO MATCH"    r_same    random:40,4 classify:0
 ! grep -q 'CLASS:' "$OUT/judge_$N.log" || { echo "FAIL: classify:0 still classifies"; exit 1; }
 echo "ok:   classify:0 turns the classification off"
-# timing lints
+# timing lints (the judge prints its own as `  warning: ...`; a run interpreted from source also
+# shows Lean's `<file>:<line>:<col>: warning:` lines about the tool's code, which are not lints)
 judge "MATCH FOUND" r_late    random:4,1
-! grep -q 'warning:' "$OUT/judge_$N.log" || { grep warning "$OUT/judge_$N.log"; echo "FAIL: a lint on a consistent contract"; exit 1; }
+! grep -q '^  warning:' "$OUT/judge_$N.log" || { grep '^  warning:' "$OUT/judge_$N.log"; echo "FAIL: a lint on a consistent contract"; exit 1; }
 judge "NO MATCH"    r_lint    random:20,2
 has 'warning: observed word out:y@next\?out:v.0 reads its payload at cycle n\+1 and its guard at cycle n' "lint: payload and guard at different cycles"
 judge "MATCH FOUND" r_lint2   random:20,2

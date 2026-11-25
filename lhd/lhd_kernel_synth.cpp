@@ -124,6 +124,8 @@ namespace lhd {
 
 namespace {
 
+constexpr std::string_view placement_timing_weights_class = "livehd.placement.timing_weights";
+
 bool truthy(std::string_view v) { return !v.empty() && v != "false" && v != "0" && v != "off"; }
 
 std::string physical_descriptor(const Options& opts, const livehd::placement::Options& place_options, const std::string& top) {
@@ -132,7 +134,12 @@ std::string physical_descriptor(const Options& opts, const livehd::placement::Op
   w.StartArray();
   w.Uint64(kPhysicalSrcSalt);
   w.String(top.c_str());
-  const std::array<std::string_view, 5> metadata_classes{"livehd.physical.power_grid", "livehd.placement.hints", "livehd.placement.state", "livehd.placement.chunk_guidance", "livehd.placement.chunk_plan"};
+  const std::array<std::string_view, 6> metadata_classes{"livehd.physical.power_grid",
+                                                         "livehd.placement.hints",
+                                                         "livehd.placement.state",
+                                                         "livehd.placement.chunk_guidance",
+                                                         "livehd.placement.chunk_plan",
+                                                         placement_timing_weights_class};
   w.String(place_options.metadata ? place_options.metadata->identity(metadata_classes, top).c_str() : "[]");
   w.String(opts.seed.c_str());
   w.Uint(opts.jobs);
@@ -489,18 +496,52 @@ stage::Stage_timing stage_timing_report(const stage::Stage_timer& timer, const h
   }
 }
 
+double placement_number(const Options& opts, std::string_view key, std::string_view fallback) {
+  const auto   text  = synth_set(opts, key, fallback);
+  char*        end   = nullptr;
+  const double value = std::strtod(text.c_str(), &end);
+  if (end != text.c_str() + text.size() || end == text.c_str() || !std::isfinite(value)) {
+    throw Lhd_error{"usage", "invalid synth." + std::string(key) + ": " + text, "expected a finite number"};
+  }
+  return value;
+}
+
+void set_placement_timing_weights(const Options& opts, livehd::placement::Options& out) {
+  const rapidjson::Value* record = nullptr;
+  if (out.metadata) {
+    const auto records = out.metadata->select(placement_timing_weights_class, opts.top);
+    if (records.size() > 1) {
+      throw Lhd_error{"config", "multiple placement timing weight records match this design", "keep one record per design"};
+    }
+    if (!records.empty()) {
+      record = records.front();
+    }
+  }
+  const auto weight = [&](const char* field, std::string_view fallback) {
+    const auto option = std::format("place.timing_{}", field);
+    if (record && record->HasMember(field)) {
+      const auto& value = (*record)[field];
+      if (!value.IsNumber()) {
+        throw Lhd_error{"config", std::format("placement timing weight '{}' must be numeric", field), ""};
+      }
+      return placement_number(opts, option, std::format("{}", value.GetDouble()));
+    }
+    return placement_number(opts, option, fallback);
+  };
+  out.timing_max_weight = weight("max_weight", "2");
+  out.timing_min_weight = weight("min_weight", "0.5");
+  out.timing_margin     = weight("margin", "0.2");
+  out.timing_exponent   = weight("exponent", "1");
+  if (out.timing_max_weight < 1 || out.timing_max_weight > livehd::placement::max_net_weight || out.timing_min_weight <= 0
+      || out.timing_min_weight > 1 || out.timing_margin < 0 || out.timing_margin > 1 || out.timing_exponent <= 0 || out.timing_exponent > 8) {
+    throw Lhd_error{"usage", "invalid synth.place timing/density tuning controls", "check lhd describe synth for allowed values"};
+  }
+}
+
 livehd::placement::Options placement_options(const Options& opts) {
   livehd::placement::Options out;
   out.metadata = opts.metadata;
-  auto number  = [&](std::string_view key, std::string_view fallback) {
-    const auto   text  = synth_set(opts, key, fallback);
-    char*        end   = nullptr;
-    const double value = std::strtod(text.c_str(), &end);
-    if (end != text.c_str() + text.size() || end == text.c_str() || !std::isfinite(value)) {
-      throw Lhd_error{"usage", "invalid synth." + std::string(key) + ": " + text, "expected a finite number"};
-    }
-    return value;
-  };
+  const auto number = [&](std::string_view key, std::string_view fallback) { return placement_number(opts, key, fallback); };
   // auto -> -1 (the placer resolves it per technology), else a nonnegative number
   auto auto_number = [&](std::string_view key) {
     if (synth_set(opts, key, "auto") == "auto") {
@@ -727,21 +768,15 @@ livehd::placement::Options placement_options(const Options& opts) {
       || out.legalize_timing_threshold > 1) {
     throw Lhd_error{"usage", "invalid timing legalization controls", "strength: 0..99, threshold: 0..1"};
   }
-  out.timing_max_weight      = number("place.timing_max_weight", "2");
-  out.timing_min_weight      = number("place.timing_min_weight", "0.5");
-  out.timing_margin          = number("place.timing_margin", "0.2");
-  out.timing_exponent        = number("place.timing_exponent", "1");
   out.timing_spread_weight   = number("place.timing_spread_weight", "0");
   out.macro_timing_interval  = static_cast<int>(integer("place.macro.timing_interval", "50"));
   out.timing_smoothing       = number("place.timing_smoothing", "0.5");
   out.fp_timing_max_updates  = integer("place.fp.timing_max_updates", "10");
   out.stop_overflow          = number("place.stop_overflow", "0.1");
   out.initial_density_weight = number("place.initial_density_weight", "0.01");
-  if (out.timing_max_weight < 1 || out.timing_max_weight > livehd::placement::max_net_weight || out.timing_smoothing < 0
-      || out.timing_smoothing > 1 || out.fp_timing_max_updates < 2 || out.stop_overflow < 0 || out.stop_overflow > 1
-      || out.initial_density_weight <= 0 || out.timing_min_weight <= 0 || out.timing_min_weight > 1 || out.macro_timing_interval < 0
-      || out.timing_spread_weight < 0 || out.timing_spread_weight > 1 || out.timing_margin < 0 || out.timing_margin > 1
-      || out.timing_exponent <= 0 || out.timing_exponent > 8) {
+  if (out.timing_smoothing < 0 || out.timing_smoothing > 1 || out.fp_timing_max_updates < 2 || out.stop_overflow < 0
+      || out.stop_overflow > 1 || out.initial_density_weight <= 0 || out.macro_timing_interval < 0
+      || out.timing_spread_weight < 0 || out.timing_spread_weight > 1) {
     throw Lhd_error{"usage", "invalid synth.place timing/density tuning controls", "check lhd describe synth for allowed values"};
   }
   out.snapshots = truthy(synth_set(opts, "place.snapshots", "false"));
@@ -3058,6 +3093,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
     throw Lhd_error{"usage", "PG channels require final full placement, handoff taps and native power grid", ""};
   }
   opts.top = top;
+  if (run_place) {
+    set_placement_timing_weights(opts, place_options);
+  }
   if (run_place && opts.metadata) {
     auto poses = livehd::placement::read_macro_state(*opts.metadata, top);
     if (!poses.empty()) {

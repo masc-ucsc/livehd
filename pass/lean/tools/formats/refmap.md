@@ -1,7 +1,7 @@
 # The `.refmap` format: refinement maps and spec facts
 
 A `.refmap` file says how an implementation certificate refines a spec certificate with
-stuttering. `drivers/sym_refmap.lean` reads it in two modes:
+stuttering. `proof/sym_refmap.lean` reads it in two modes:
 
 ```bash
 sym_refmap refmap    <file.refmap> [jobs:<n>] [runs:<n>] [sf:<n>] [wf:<n>] [emit:[f1:|f2:]<file>] [cache] [solver:<cadical>] [work:<dir>]

@@ -4,7 +4,8 @@
 # binaries of in-flight experiments -- is touched.
 #
 #   OPT=-O2 ROOT=/abs/path bash Futamura_Projection_Scripts/build-opt.sh Futamura_Projection_Scripts/total_probe.lean [more.lean ...]
-#   (the proof-tool drivers: ../../pass/lean/tools/drivers/sym_verify.lean sym_refmap.lean)
+#   (the proof tools: ../../pass/lean/tools/proof/sym_verify.lean sym_refmap.lean ...;
+#    the simulation drivers: ../../pass/lean/tools/sim/cert_run.lean lhd_ckpt.lean)
 # OPT may carry several flags, e.g. OPT="-O2 -g -fno-omit-frame-pointer"
 # for a profiling build that keeps -O2 but can be unwound.
 #
@@ -29,104 +30,48 @@ mkdir -p "$OUT/LeanSemanticPrimitives/Projection/Proto" \
          "$OUT/LeanSemanticPrimitives/Translation" "$NAT"
 export LEAN_PATH="$OUT"
 
-MODULES=(
-  SemanticPrimitives Translation/LGraphModel Translation/FastBV Translation/GraphRefine
-  Compiler/DesignCert Compiler/Runtime Compiler/DesignCertWF
-  # master's Compiler/CertIO imports the Mathlib compiler chain, which this
-  # route does not build; its DCERT2 CODEC is Compiler/CertIOCodec and the
-  # format router Compiler/CertIORoute, both Mathlib-free. The probes load
-  # through Projection/CertLoadAny: DCERT1 exactly as before (CertIOV1),
-  # DCERT2 via readCertChecked. Dependency ORDER and the invalidation rule
-  # below are unchanged; nothing is deleted.
-  # MemDomains (decision #9: which clock domains of a memory fire) before the
-  # step semantics that reads it.
-  Compiler/MemDomains
-  # MemAddr (DCERT4): the load-time memory-address check the codec runs.
-  Compiler/DesignSemantics Compiler/MemStepFast Compiler/MemAddr Compiler/CertIOV1 Compiler/CertIOCodec Compiler/CertIORoute
-  Compiler/ResetPolarity Compiler/RunAdmission
-  Projection/ObjectLanguage Projection/ObjectLanguageSemantics
-  Projection/BindingTime Projection/Encoding Projection/Surface
-  Projection/SurfaceSemantics Projection/BTA Projection/PartialEvaluator
-  Projection/PartialEvaluatorS3 Projection/S3Correct
-  Projection/MixProgram Projection/PartialEvaluatorCorrect
-  Projection/SecondProjection Projection/SimulatorContract
-  Projection/DesignEncoding Projection/RuntimeEncoding Projection/OperatorBridge
-  Projection/HardwareInterpreter Projection/SetMaskLoop Projection/HardwareAdequacy
-  Projection/ProjectionCorrect Projection/ResidualFragment
-  Projection/ProjectedStep Projection/CertLoad Projection/CertLoadAny
-  # The memory route, for the DCERT2 memory-route driver (dcert2_memroute):
-  # the axiom gate first (the memory modules audit their theorems with it),
-  # then the chain in dependency order, Compiler/DirectCheck before the
-  # traversal that uses it.
-  Projection/AxiomGate
-  Projection/MemImage Projection/HardwareMem Projection/HardwareMemSource
-  Projection/HardwareMemOp Projection/HardwareMemSlots Compiler/DirectCheck
-  # the whole-array load and read (decision #2), before the nodes that admit them
-  Projection/HardwareMemLoad
-  Projection/HardwareMemTraversal Projection/HardwareMemShapes
-  # the commit table's evaluation lemmas (decision #9), before the commit proofs
-  Projection/HardwareMemNodes Projection/HardwareMemFold Projection/HardwareMemTable Projection/HardwareMemCommit
-  Projection/HardwareMemOutFlop Projection/HardwareMemMain Projection/HardwareMemWidth
-  Projection/HardwareMemAdmit Projection/HardwareMemSlotTy Projection/HardwareMemRuntime
-  Projection/HardwareMemFixture Projection/HardwareMemWrite Projection/MemSupport
-  Projection/EvalFuelArr Projection/MemProjection Projection/MemRunFast Projection/ShareTails Projection/HardwareMemWriteAdmit
-  # residual serialization (gen_probe_v2 save:, gen_readiness_v2 load:)
-  Projection/ResidualIO
-  Projection/Proto/PartialEvaluatorFast Projection/Proto/PartialEvaluatorSummary
-  Projection/Proto/PartialEvaluatorShift
-  Projection/Proto/InterpreterVariant
-  Projection/Proto/VariantTransport Projection/Proto/RewriteTotal
-  Projection/Proto/VariantAdequacy Projection/Proto/VariantExec
-  Projection/Proto/RunnerSupport
-  # the memory entry with env0 inlined (projectMemVarDesignAt)
-  Projection/MemVariant Projection/MemVariantSim Projection/MemFused
-  # The IR/VC trace driver (cert_trace, and its route:vc): the direct simulator
-  # and the verified compiler's executable half, all Mathlib-free.
-  Compiler/DirectSemantics Compiler/DirectStaged Compiler/DirectStagedSound Compiler/ResidualIR Compiler/ResidualSemantics
-  # vc's step after its operators' fast forms (ResidualFast: @[csimp], equal by proof).
-  Compiler/FastResidual Compiler/ResidualFast
-  # vc's optimizer and its checker (ResidualOpt; sound by ResidualOptSound)
-  Compiler/ResidualOpt
-  # vc's incremental step (ResidualInc imports the optimizer's proof module for its lemmas)
-  Compiler/ResidualOptSound Compiler/ResidualInc
-  # the same step, event-driven (ResidualEv: only the readers of changed slots are visited)
-  Compiler/ResidualEv
-  # ... with memories as tables (ResidualFlat)
-  Compiler/ResidualFlat
-  # ... skipping chunks with nothing pending (ResidualWork, @[csimp])
-  Compiler/ResidualWork
-  Compiler/CompileOpDefs Compiler/CompileGraphDefs Compiler/CompileDesignDefs
-  # checkpoints (lhdcert-ckpt v1: drivers/lhd_ckpt, and the ckpt options of cert_trace and
-  # dcert2_memroute): the start states, the format, its proofs, the FP state conversion
-  Compiler/DirectTrace Compiler/Ckpt Compiler/CkptSound Projection/CkptStateM
-  # ... resuming is exact (T4), used by sym_verify's unreach: (Reach/Refute)
-  Projection/MemAddrSound Projection/CkptResume
-)
-# The proof tools (pass/lean/tools, HDLProof): a second source root.
+# The modules are the import closure of the roots below and of the probes on the command line,
+# in dependency order (lean_modules.py, next to this script): a module that a root or a probe
+# imports, however indirectly, is built and linked; a new module needs adding here only when
+# nothing imports it. The list fails the build when an imported file is missing or anything
+# imports Mathlib.
 TOOLS="$(cd ../../pass/lean/tools && pwd)"
-TOOL_MODULES=(
-  # verified symbolic interpretation and k-induction (sym_verify, sym_refmap)
-  HDLProof/Sym/Kit HDLProof/Sym/IntDiv HDLProof/Sym/Bridge HDLProof/Sym/Val HDLProof/Sym/Prim
-  HDLProof/Sym/Mem HDLProof/Sym/EqV HDLProof/Sym/CtorP HDLProof/Sym/Dispatch HDLProof/Sym/Wire HDLProof/Sym/Eval HDLProof/Sym/Asg
-  HDLProof/Sym/Sat HDLProof/Sym/Layout HDLProof/Sym/Step
-  HDLProof/Sym/NativeOps HDLProof/Sym/NativeSound HDLProof/Sym/NativeBuilders HDLProof/Sym/Native HDLProof/Sym/Trace HDLProof/Sym/NativeInterp HDLProof/Sym/NativeRoute HDLProof/Kit/SymRoute
-  HDLProof/Sym/Shape HDLProof/Sym/Unroll HDLProof/Sym/Oblig HDLProof/Sym/KInd HDLProof/Sym/Conj HDLProof/Sym/ConjT HDLProof/Sym/Closed
-  HDLProof/Sym/BvLit HDLProof/Sym/Diag
-  # refinement maps (sym_refmap): theory, kit, checker, spec facts, composition
-  HDLProof/Theory/Channels HDLProof/Theory/Stutter HDLProof/Theory/Compose HDLProof/Theory/Progress
-  HDLProof/Kit/Norm HDLProof/Kit/BitE HDLProof/Check/RefMap HDLProof/Check/RefMapSound
-  HDLProof/Check/SpecFacts HDLProof/Check/RefMapCompose HDLProof/Check/RefMapRef
-  # the judge (sym_refmap judge): every stuttering alignment on one concrete run
-  HDLProof/Kit/Judge
-  # the drivers' shared IO helpers
-  HDLProof/Kit/Driver
-  # stimulus files as ticks, and reachability (ckpt_reach)
-  HDLProof/Run/Stim HDLProof/Reach/Defs HDLProof/Reach/Refute
-  # running a program on a design (cert_run)
-  HDLProof/Run/IoMeta HDLProof/Run/Image HDLProof/Run/Backend HDLProof/Run/Host
-  HDLProof/Run/Loop HDLProof/Run/Sound HDLProof/Run/Vcd
+ROOTS=(
+  # vc (the chain below ResidualWork) and the fp memory route's variants and runner support
+  LeanSemanticPrimitives.Compiler.ResidualWork
+  # the routes as engines (a route's step on a state of its own kind) and their soundness
+  LeanSemanticPrimitives.Compiler.Engine
+  LeanSemanticPrimitives.Compiler.VcEngine
+  LeanSemanticPrimitives.Projection.MemVariantSim
+  LeanSemanticPrimitives.Projection.ResidualIO
+  LeanSemanticPrimitives.Projection.MixProgram
+  LeanSemanticPrimitives.Projection.SecondProjection
+  LeanSemanticPrimitives.Projection.Proto.RunnerSupport
+  LeanSemanticPrimitives.Projection.Proto.PartialEvaluatorFast
+  LeanSemanticPrimitives.Projection.Proto.PartialEvaluatorSummary
+  LeanSemanticPrimitives.Projection.Proto.PartialEvaluatorShift
+  # the proof tools: symbolic routes, refinement maps, the judge, the drivers' helpers,
+  # reachability, cert_run
+  HDLProof.Kit.SymRoute
+  HDLProof.Sym.Diag
+  HDLProof.Check.RefMapRef
+  HDLProof.Kit.Judge
+  HDLProof.Kit.Driver
+  HDLProof.Reach.Refute
+  HDLProof.Run.Sound
+  HDLProof.Run.Vcd
+  HDLProof.Run.Engine
 )
 [ $# -ge 1 ] || { echo "usage: OPT=.. ROOT=.. build-opt.sh probe.lean [probe.lean ...]" >&2; exit 2; }
+GEN=$(python3 Futamura_Projection_Scripts/lean_modules.py "${ROOTS[@]}" "$@") \
+  || { echo "the module list could not be made (above)" >&2; exit 1; }
+MODULES=(); TOOL_MODULES=()
+while IFS= read -r m; do
+  case "$m" in
+    LeanSemanticPrimitives/*) MODULES+=("${m#LeanSemanticPrimitives/}") ;;
+    HDLProof/*) TOOL_MODULES+=("$m") ;;
+  esac
+done <<< "$GEN"
 JOBS=${JOBS:-4}
 STAMP="$ROOT/build-opt.stamp"
 WANT="$(lean --version) | leanc $OPT"
@@ -164,6 +109,7 @@ module() {
   OBJS+=("$NAT/$flat.o")
   if ! stale "$src" "$olean" "$NAT/$flat.c" "$NAT/$flat.o"; then KEPT=$((KEPT + 1)); return 0; fi
   local t=$SECONDS
+  mkdir -p "$(dirname "$olean")"
   lean "$@" -o "$olean" -c "$NAT/$flat.c" "$src" || { wait; exit 1; }
   echo "  lean $flat: $((SECONDS - t)) s"
   REBUILT=$((REBUILT + 1))
@@ -183,7 +129,7 @@ echo "modules: $REBUILT rebuilt, $KEPT up to date ($((SECONDS - T0)) s)"
 for PROBE in "$@"; do
   pb=$(basename "$PROBE" .lean)
   # the probe's own directory is its root, so a driver outside formal/lean
-  # (pass/lean/tools/drivers) compiles too
+  # (pass/lean/tools/proof, pass/lean/tools/sim) compiles too
   root="$(cd "$(dirname "$PROBE")" && pwd)"
   slot
   (

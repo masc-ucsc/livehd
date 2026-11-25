@@ -122,6 +122,42 @@ theorem ult_nonzero {w : Nat} {a b : BV} (h : bv_nonzero (eval_op .Op_ULT w [a, 
   · rw [if_neg hab, bv_nonzero_iff, uintNat_mk_bv_zero] at h'
     exact absurd rfl h'
 
+/-- `Op_And [x, y]`: an unsigned `and` is no larger than either operand. -/
+theorem and2_le (w : Nat) (x y : BV) :
+    uintNat (eval_op .Op_And w [x, y]) ≤ uintNat x ∧ uintNat (eval_op .Op_And w [x, y]) ≤ uintNat y := by
+  show uintNat (bv_bitwise w (fun a b => a && b) (bv_resize w x) y) ≤ uintNat x ∧
+    uintNat (bv_bitwise w (fun a b => a && b) (bv_resize w x) y) ≤ uintNat y
+  unfold bv_bitwise
+  have hb : bits_to_int w (fun i => bv_bit (bv_resize w x) i && bv_bit y i)
+      = (((uintNat (bv_resize w x) &&& uintNat y) % 2 ^ w : Nat) : Int) := by
+    apply bits_to_int_eq w _ _ (Nat.mod_lt _ (Nat.two_pow_pos w))
+    intro i hi
+    rw [bv_bit_eq, bv_bit_eq, Nat.testBit_mod_two_pow, Nat.testBit_and]
+    simp [hi]
+  rw [hb, uintNat_mk_bv_nat]
+  have h1 : (uintNat (bv_resize w x) &&& uintNat y) % 2 ^ w % 2 ^ w
+      ≤ uintNat (bv_resize w x) &&& uintNat y := Nat.le_trans (Nat.mod_le _ _) (Nat.mod_le _ _)
+  exact ⟨Nat.le_trans h1 (Nat.le_trans Nat.and_le_left (uintNat_resize_le w x)),
+    Nat.le_trans h1 Nat.and_le_right⟩
+
+/-- A sign extension keeps zero at zero: when `Op_Sext [a, n]` is nonzero, so is `a`. -/
+theorem sext_nonzero {w : Nat} {a n : BV} (h : bv_nonzero (eval_op .Op_Sext w [a, n]) = true) :
+    bv_nonzero a = true := by
+  have h' : bv_nonzero (sextOp w a n) = true := h
+  unfold sextOp at h'
+  rw [bv_nonzero_iff]
+  intro ha
+  have hu : bv_uint a = 0 := by rw [bv_uint_eq_uintNat, ha]; rfl
+  simp only [hu] at h'
+  split at h'
+  · rw [bv_nonzero_iff, uintNat_mk_bv_zero] at h'; exact h' rfl
+  · split at h'
+    · rw [bv_nonzero_iff, uintNat_mk_bv_zero] at h'; exact h' rfl
+    · simp only [Int.zero_emod] at h'
+      have hp : (0 : Int) < 2 ^ ((bv_uint n).toNat - 1) := Int.pow_pos (by decide)
+      simp only [hp, ite_true] at h'
+      rw [bv_nonzero_iff, uintNat_mk_bv_zero] at h'; exact h' rfl
+
 /-- Every operator's value, as a bit vector, is no wider than its node. -/
 theorem eval_op_cert_width_le (op : LGraphOp) (w : Nat) (vs : List CertVal) :
     (eval_op_cert op w vs).asBV.width ≤ w := by
@@ -286,6 +322,67 @@ theorem ultGuard_sound (hwf : DesignCert.DesignCertWF D) {sel t K : Nat}
             exact hlt
           · simp [ht] at hg
 
+/-- A mask `maskGuard` recognizes: when it is nonzero, its compared slot is below `K`. -/
+theorem maskGuard_sound (hwf : DesignCert.DesignCertWF D) :
+    ∀ (f : Nat) {m t K : Nat}, maskGuard D f m t = some K →
+      bv_nonzero (rhoOf D i s m).asBV = true → uintNat (rhoOf D i s t).asBV < K := by
+  intro f
+  induction f with
+  | zero => intro m t K hg; simp [maskGuard] at hg
+  | succ f ih =>
+    intro m t K hg hnz
+    unfold maskGuard at hg
+    cases hu : ultGuard D m t with
+    | some K' =>
+      rw [hu] at hg
+      cases hg
+      exact ultGuard_sound hwf hu hnz
+    | none =>
+      rw [hu] at hg
+      simp only at hg
+      by_cases hs : m < D.sources.size
+      · simp [hs] at hg
+      simp only [hs, ite_false] at hg
+      cases hgn : D.nodes[m - D.sources.size]? with
+      | none => simp [hgn] at hg
+      | some g =>
+        simp only [hgn] at hg
+        have hval := rho_node (i := i) (s := s) hwf hgn
+        rw [show D.sources.size + (m - D.sources.size) = m by omega] at hval
+        rw [hval] at hnz
+        cases hop : g.op <;> simp only [hop] at hg <;> try (simp at hg; done)
+        cases hd : g.deps.toList with
+        | nil => simp [hd] at hg
+        | cons a rest =>
+          cases rest with
+          | nil => simp [hd] at hg
+          | cons n rest2 =>
+            cases rest2 with
+            | cons _ _ => simp [hd] at hg
+            | nil =>
+              simp only [hd] at hg
+              rw [hop, hd] at hnz
+              exact ih hg (sext_nonzero (w := g.width) hnz)
+
+/-- `andCap`: a bound on the `and` of slots `t` and `m`, given a bound `b` on `t`. -/
+theorem andCap_sound (hwf : DesignCert.DesignCertWF D) {r t m b : Nat}
+    (hb : uintNat (rhoOf D i s t).asBV ≤ b)
+    (hrt : uintNat (rhoOf D i s r).asBV ≤ uintNat (rhoOf D i s t).asBV)
+    (hrm : uintNat (rhoOf D i s r).asBV ≤ uintNat (rhoOf D i s m).asBV) :
+    uintNat (rhoOf D i s r).asBV ≤ andCap D b m t := by
+  unfold andCap
+  cases hg : maskGuard D maskFuel m t with
+  | none => show _ ≤ b; omega
+  | some K =>
+    show _ ≤ min b (K - 1)
+    by_cases hnz : bv_nonzero (rhoOf D i s m).asBV = true
+    · have hK := maskGuard_sound hwf maskFuel hg hnz
+      omega
+    · have h0 : uintNat (rhoOf D i s m).asBV = 0 := by
+        rw [bv_nonzero_iff] at hnz
+        omega
+      omega
+
 theorem ub_sound (hwf : DesignCert.DesignCertWF D) :
     ∀ (fuel r : Nat), uintNat (rhoOf D i s r).asBV ≤ ub D fuel r := by
   intro fuel
@@ -338,6 +435,16 @@ theorem ub_sound (hwf : DesignCert.DesignCertWF D) :
           | some K =>
             show _ ≤ min _ (max _ (min (ub D f ta) (K - 1)))
             omega
+      next x y hop hdeps =>
+        -- `x & y`, and the clamp written as a mask
+        have hxy : uintNat (rhoOf D i s r).asBV ≤ uintNat (rhoOf D i s x).asBV ∧
+            uintNat (rhoOf D i s r).asBV ≤ uintNat (rhoOf D i s y).asBV := by
+          rw [hv, hop, hdeps]
+          exact and2_le c.width (rhoOf D i s x).asBV (rhoOf D i s y).asBV
+        have hcx := andCap_sound hwf (ih x) hxy.1 hxy.2
+        have hcy := andCap_sound hwf (ih y) hxy.2 hxy.1
+        show _ ≤ min _ (min _ _)
+        omega
       next => exact hcap
     · rw [hc, hv]
       show uintNat (mk_bv 0 0) ≤ 0

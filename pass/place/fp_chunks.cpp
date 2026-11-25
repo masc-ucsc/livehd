@@ -1574,14 +1574,14 @@ rapidjson::Document Chunk_model::record(const Chunk_plan& p, const std::string& 
     for (const auto& member : p.repeated_family.members) {
       rapidjson::Value item(rapidjson::kObjectType);
       item.AddMember("scope", str(member.scope), a)
-          .AddMember("cells", member.cells, a)
-          .AddMember("macros", member.macros, a)
-          .AddMember("template_colors", member.template_colors, a);
+          .AddMember("cells", uint64_t(member.cells), a)
+          .AddMember("macros", uint64_t(member.macros), a)
+          .AddMember("template_colors", uint64_t(member.template_colors), a);
       siblings.PushBack(item, a);
     }
     family.AddMember("siblings", siblings, a)
-        .AddMember("glue_cells", p.repeated_family.glue_cells, a)
-        .AddMember("shared_color_uses_per_copy", p.repeated_family.shared_color_uses, a);
+        .AddMember("glue_cells", uint64_t(p.repeated_family.glue_cells), a)
+        .AddMember("shared_color_uses_per_copy", uint64_t(p.repeated_family.shared_color_uses), a);
     d.AddMember("repeated_scope_candidate", family, a);
   }
   if (!p.shape_candidates.empty()) {

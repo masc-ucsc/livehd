@@ -840,7 +840,11 @@ bool apply_candidate(hhds::Graph& graph, Node_index& nodes, const Candidate& c, 
     }
     return true;
   }
-  auto root = nodes.at(c.driver.substr(0, c.driver.rfind(':')));
+  const auto root_binding = nodes.find(c.driver.substr(0, c.driver.rfind(':')));
+  if (root_binding == nodes.end()) {
+    return false;
+  }
+  auto root = root_binding->second;
   auto cell = combinational(root, roots);
   if (!cell || !root.attr(attrs::place).has()) {
     return false;
@@ -1006,6 +1010,19 @@ bool apply_candidate(hhds::Graph& graph, Node_index& nodes, const Candidate& c, 
     changed.push_back(original_name);
     return true;
   }
+  std::vector<std::pair<Node, const Buffer*>> cone_members;
+  cone_members.reserve(c.copied_inputs.size());
+  for (auto label = c.copied_inputs.rbegin(); label != c.copied_inputs.rend(); ++label) {
+    const auto binding = nodes.find(label->substr(0, label->rfind(':')));
+    if (binding == nodes.end()) {
+      return false;
+    }
+    const auto* type = combinational(binding->second, cells);
+    if (!type || physical_label(output(binding->second, *type)) != *label) {
+      return false;
+    }
+    cone_members.emplace_back(binding->second, type);
+  }
   std::map<std::string, Pin> local_inputs;
   const auto                 local_driver = [&](Pin old_input) {
     if (old_input.is_const()) {
@@ -1014,14 +1031,8 @@ bool apply_candidate(hhds::Graph& graph, Node_index& nodes, const Candidate& c, 
     auto i = local_inputs.find(physical_label(old_input));
     return i == local_inputs.end() ? old_input : i->second;
   };
-  for (auto i = c.copied_inputs.rbegin(); i != c.copied_inputs.rend(); ++i) {
-    const auto  name = i->substr(0, i->rfind(':'));
-    auto        orig = nodes.at(name);
-    const auto* type = combinational(orig, cells);
-    if (!type) {
-      throw std::runtime_error("missing wirelength cone member");
-    }
-    auto member = new_gate(orig, "__wl_copy_" + name, orig.get_subnode_io(), seed);
+  for (const auto& [orig, type] : cone_members) {
+    auto member = new_gate(orig, "__wl_copy_" + std::string(orig.get_name()), orig.get_subnode_io(), seed);
     for (const auto& arg : type->inputs) {
       auto expected = local_driver(orig.get_sink_pin(arg).get_driver_pin());
       member.create_sink_pin(arg).connect_driver(expected);
@@ -1031,7 +1042,7 @@ bool apply_candidate(hhds::Graph& graph, Node_index& nodes, const Candidate& c, 
     }
     auto out = member.create_driver_pin(type->output);
     gu::set_bits(out, 1);
-    local_inputs.emplace(*i, out);
+    local_inputs.emplace(physical_label(output(orig, *type)), out);
   }
   auto copy = new_gate(root, "__wl_copy_" + original_name, root.get_subnode_io(), seed);
   for (const auto& input : cell->inputs) {
@@ -1181,6 +1192,9 @@ Repair_result wirelength_resynthesize(Result initial, const Options& options, co
     std::erase_if(batch, [&](const auto& c) {
       return !apply_candidate(*graph, nodes, c, cells, roots, *previous, trial_options.changed_cells, *trees);
     });
+    if (batch.empty()) {
+      return;
+    }
     if (std::ranges::any_of(batch, [&](const Candidate& c) {
           if (!c.duplicate) {
             return false;

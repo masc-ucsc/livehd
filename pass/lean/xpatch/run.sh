@@ -39,9 +39,9 @@ mkdir -p "$OUT"
 L="$OUT/run.log"; : > "$L"
 LAST="$OUT/.last"; CHK="$OUT/.checks"; : > "$CHK"
 OUTR="${OUT#"$ROOT"/}"
-SV="$ROOT/pass/lean/tools/drivers/sym_verify.lean"
+SV="$ROOT/pass/lean/tools/proof/sym_verify.lean"
 CT="$ROOT/formal/lean/Futamura_Projection_Scripts/cert_trace.lean"
-CK="$ROOT/pass/lean/tools/drivers/lhd_ckpt.lean"
+CK="$ROOT/pass/lean/tools/sim/lhd_ckpt.lean"
 
 rel()  { sed "s|$ROOT/||g"; }                        # paths inside the checkout, relative to it
 say()  { printf '%s\n' "$*" | rel >> "$L"; }

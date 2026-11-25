@@ -7,8 +7,8 @@ failure rather than a test someone forgot to run.
 Three kinds of check:
 
   1. the five accepted shapes execute, for several cycles, and agree with
-     `interpretDesign` (which is quadratic and never otherwise run — these
-     designs are small enough that it can be);
+     `interpretDesign` (which is quadratic, and elsewhere runs only as the slow
+     `route:ref`; these designs are small enough for it);
   2. each malformed certificate is REFUSED, and refused for the stated reason,
      rather than evaluating to zero through a fallback;
   3. the asynchronous-reset and memory cycle rules produce the values the

@@ -20,239 +20,65 @@ OUT=.olean-dev
 export LEAN_PATH="$PWD/$OUT"
 export LEAN_NUM_THREADS=4
 
-# Module paths relative to LeanSemanticPrimitives/, in dependency order.
-MODULES=(
-  SemanticPrimitives
-  Translation/LGraphModel
-  Translation/FastBV
-  Translation/GraphRefine
-  Compiler/DesignCert
-  Compiler/Runtime
-  Compiler/MemDomains
-  Compiler/DesignCertWF
-  Compiler/DesignSemantics
-  # the memory step as values: next images stored without a closure over the step
-  Compiler/MemStepFast
-  # Load-time check: every memory address stays inside the memory's depth (DCERT4).
-  Compiler/MemAddr
-  # Compiler/CertIO itself is NOT built here: its verified entry point
-  # (runChecked_correct) imports Compiler/CompileDesign, whose chain imports
-  # Mathlib, so it belongs to `lake build`. The DCERT2 CODEC it used to
-  # contain is Compiler/CertIOCodec (Mathlib-free), and the format router is
-  # Compiler/CertIORoute; both are built here, next to FP's DCERT1 codec.
-  Compiler/CertIOV1
-  Compiler/CertIOCodec
-  Compiler/CertIORoute
-  # Run admission (decisions C3, C4): exact edge vectors, reset-polarity guard.
-  Compiler/ResetPolarity
-  Compiler/RunAdmission
-  Compiler/ResidualIR
-  Compiler/ResidualSemantics
-  # vc's step compiled after its operators' fast forms (`@[csimp]`, equal by proof).
-  Compiler/FastResidual
-  Compiler/ResidualFast
-  # Proved compiler passes on vc's program: optimizer, checker, soundness.
-  Compiler/ResidualOpt
-  Compiler/ResidualOptSound
-  # vc's incremental step (reuse last step's unchanged values) and its proof.
-  Compiler/ResidualInc
-  # the same step, event-driven: only the readers of changed slots are visited, and its proof.
-  Compiler/ResidualEv
-  # the same step with memories as tables (reads no longer walk every earlier write), and its proof.
-  Compiler/ResidualFlat
-  # ... skipping chunks with nothing pending (proved equal, @[csimp]).
-  Compiler/ResidualWork
-  Compiler/CompileOpDefs
-  Compiler/CompileGraphDefs
-  Compiler/CompileDesignDefs
-  # The axiom gate (`#audit_axioms`), first: every module that audits imports it.
-  Projection/AxiomGate
-  Projection/ObjectLanguage
-  Projection/ObjectLanguageSemantics
-  Projection/BindingTime
-  Projection/Encoding
-  Projection/Surface
-  Projection/SurfaceSemantics
-  Projection/BTA
-  Projection/PartialEvaluator
-  # S3 (deferred shifting) and its proof; the @[csimp] lemma must be in scope
-  # wherever mixDriver is compiled, so this precedes HardwareInterpreter.
-  Projection/PartialEvaluatorS3
-  Projection/S3Correct
-  Projection/MixProgram
-  Projection/Demo
-  Projection/Gate0
-  Projection/PartialEvaluatorCorrect
-  Projection/SecondProjection
-  Projection/SimulatorContract
-  Projection/DesignEncoding
-  Projection/RuntimeEncoding
-  Projection/OperatorBridge
-  Projection/HardwareInterpreter
-  Projection/SetMaskLoop
-  Projection/HardwareAdequacy
-  Projection/ProjectionCorrect
-  Projection/ResidualFragment
-  Projection/ProjectedStep
-  Projection/CertLoad
-  # DCERT1 or DCERT2: one loader for the FP runners (CertLoad stays DCERT1-only).
-  Projection/CertLoadAny
-  # The memory route (master-only): finite memory images, the hwMemS entry,
-  # its adequacy chain, the static and runtime admission checks, BTA and the
-  # proved specialization on the memory entry. Mathlib-free; Compiler/DirectCheck
-  # (also Mathlib-free) supplies the checker's slot kinds.
-  Projection/MemImage
-  Projection/HardwareMem
-  Projection/HardwareMemSource
-  Projection/HardwareMemOp
-  Projection/HardwareMemLoad
-  Projection/HardwareMemSlots
-  Compiler/DirectCheck
-  Projection/HardwareMemTraversal
-  Projection/HardwareMemShapes
-  Projection/HardwareMemNodes
-  Projection/HardwareMemFold
-  Projection/HardwareMemTable
-  Projection/HardwareMemCommit
-  Projection/HardwareMemOutFlop
-  Projection/HardwareMemMain
-  Projection/HardwareMemWidth
-  # The load-time memory-address check is sound for interpretDesign.
-  Projection/MemAddrSound
-  Projection/HardwareMemAdmit
-  Projection/HardwareMemChecks
-  Projection/HardwareMemCycle
-  Projection/HardwareMemSlotTy
-  Projection/HardwareMemRuntime
-  Projection/HardwareMemFixture
-  Projection/HardwareMemWrite
-  Projection/MemSupport
-  Projection/EvalFuelArr
-  Projection/MemProjection
-  # the FP step loop without the repeated state check and codec (dcert2_memroute)
-  Projection/MemRunFast
-  # the FP residual with its list tails shared, and its step equal to runMemSim (dcert2_memroute)
-  Projection/ShareTails
-  Projection/HardwareMemWriteAdmit
-  # The memory entry with `env0` inlined (the scalar route's TOTAL-variant
-  # rewrite, applied to mainM): memVar_iff(W), projectMemVarDesignAt(W)_correct.
-  # The specializer's fast, summary and shift forms, and the variant runner
-  # (VariantAdequacy, VariantExec, RunnerSupport) that dcert2_memroute imports:
-  # built here too, so the drivers run interpreted against .olean-dev, in the
-  # order build-opt.sh builds them.
-  Projection/Proto/PartialEvaluatorFast
-  Projection/Proto/PartialEvaluatorSummary
-  Projection/Proto/PartialEvaluatorShift
-  Projection/Proto/InterpreterVariant
-  Projection/Proto/VariantTransport
-  Projection/Proto/RewriteTotal
-  Projection/Proto/VariantAdequacy
-  Projection/Proto/VariantExec
-  Projection/Proto/RunnerSupport
-  Projection/MemVariant
-  Projection/MemVariantSim
-  # ... and the node fold fused into its readers (MemFused): the default route
-  Projection/MemFused
-  Projection/MemLog
-  Projection/MemPrimChecks
-  # host vs object specializer on the three memory primitives
-  Projection/MemMixMirrorCheck
-  Projection/Proto/ShiftBridge
-  # The bridge: exact edges + certWfError imply every route's edge premise.
-  Projection/EdgePolicy
-  # Residual serialization: a proved codec (decodeProgram_encodeProgram).
-  Projection/ResidualIO
-  Projection/Scaling
-  # Checkpoints (`lhdcert-ckpt v1`, drivers/lhd_ckpt): the direct simulator's
-  # start states (DirectTrace), lgraph-sim's `--state` reader (DirectSim; the
-  # checkpoint's to-state text is tested against it), the format with its
-  # load-time checks (Ckpt), and save/restore proved inverse (CkptSound).
-  Compiler/DirectSemantics
-  # the direct simulator, staged: every node specialized once per design
-  Compiler/DirectStaged
-  Compiler/DirectStagedSound
-  Compiler/DirectTrace
-  Compiler/DirectSim
-  Compiler/Ckpt
-  Compiler/CkptSound
-  # ... and on the FP route: a checkpoint as its StateM (toStateM_denote, T6)
-  Projection/CkptStateM
-  # ... and resuming is exact: states equal where a step can see them step alike (T4)
-  Projection/CkptResume
-  # The central audit: `#audit_axioms` FAILS this build on any axiom outside
-  # propext/Classical.choice/Quot.sound. The memory-route modules above audit
-  # their own theorems in place with the same command.
-  Projection/Audit
-)
-
-# The proof tools (HDLProof, pass/lean/tools): a second source root, compiled
-# into the same olean dir after the simulator above, which they import.
+# The modules to build are the import closure of the roots below, in dependency order
+# (Futamura_Projection_Scripts/lean_modules.py): a module that any root imports, however
+# indirectly, is built, and a new module needs adding here only when no root imports it. The
+# list fails the build when an imported file is missing or anything imports Mathlib.
+# Mathlib-free modules only (see the header). The tools (pass/lean/tools, HDLProof) are a second
+# source root, compiled into the same olean dir after the semantic core, which they import.
 TOOLS="$(cd ../../pass/lean/tools && pwd)"
-TOOL_MODULES=(
-  # refinement theory, pure Lean: channel specs and Kahn determinism, stuttering
-  # runs, horizontal/vertical composition, progress under fairness
-  HDLProof/Theory/Channels
-  HDLProof/Theory/Stutter
-  HDLProof/Theory/Compose
-  HDLProof/Theory/Progress
-  # the verified symbolic interpretation of a residual
-  HDLProof/Sym/Kit
-  HDLProof/Sym/IntDiv
-  HDLProof/Sym/Bridge
-  HDLProof/Sym/Val
-  HDLProof/Sym/Prim
-  HDLProof/Sym/Mem
-  HDLProof/Sym/EqV
-  HDLProof/Sym/CtorP
-  HDLProof/Sym/Dispatch
-  HDLProof/Sym/Wire
-  HDLProof/Sym/Eval
-  HDLProof/Sym/Asg
-  HDLProof/Sym/Sat
-  HDLProof/Sym/Layout
-  HDLProof/Sym/Step
-  HDLProof/Sym/NativeOps
-  HDLProof/Sym/NativeSound
-  HDLProof/Sym/NativeBuilders
-  HDLProof/Sym/Native
-  HDLProof/Sym/Trace
-  HDLProof/Sym/NativeInterp
-  HDLProof/Sym/NativeRoute
-  HDLProof/Kit/SymRoute
-  HDLProof/Sym/Shape
-  HDLProof/Sym/Unroll
-  HDLProof/Sym/Oblig
-  HDLProof/Sym/KInd
-  HDLProof/Sym/Conj
-  HDLProof/Sym/ConjT
-  HDLProof/Sym/Closed
-  HDLProof/Sym/BvLit
-  # diagnostics for sym_probe (untrusted: no theorems)
-  HDLProof/Sym/Diag
-  # refinement maps: kit (normalized states, port formulas) and the checker
-  HDLProof/Kit/Norm
-  HDLProof/Kit/BitE
-  HDLProof/Check/RefMap
-  HDLProof/Check/RefMapSound
-  HDLProof/Check/SpecFacts
-  HDLProof/Check/RefMapCompose
-  HDLProof/Check/RefMapRef
-  # the judge (sym_refmap judge): every stuttering alignment on one concrete run
-  HDLProof/Kit/Judge
-  # the drivers' shared IO helpers (untrusted: no theorems)
-  HDLProof/Kit/Driver
-  # stimulus and edge files as ticks (cert_trace's formats), and reachability: the
-  # definitions and the witness checker (ckpt_reach)
-  HDLProof/Run/Stim
-  HDLProof/Reach/Defs
-  HDLProof/Reach/Refute
-  # running a program on a design (cert_run; formats/run.md, formats/bind.md): ports by name,
-  # program images, the steppers, the host, one cycle, its soundness, VCD
-  HDLProof/Run/IoMeta HDLProof/Run/Image HDLProof/Run/Backend HDLProof/Run/Host
-  HDLProof/Run/Loop HDLProof/Run/Sound HDLProof/Run/Vcd
+ROOTS=(
+  # vc: the verified compiler, its proved optimizer and its incremental, event-driven, memory
+  # table and chunk-skipping steps (the chain below ResidualWork)
+  LeanSemanticPrimitives.Compiler.ResidualWork
+  # the routes as engines (a route's step on a state of its own kind) and their soundness
+  LeanSemanticPrimitives.Compiler.Engine
+  LeanSemanticPrimitives.Compiler.VcEngine
+  # the direct simulator's small examples
+  LeanSemanticPrimitives.Compiler.DirectSim
+  # fp: the memory route's variants, residual IO and the drivers' shared runner support
+  LeanSemanticPrimitives.Projection.MemVariantSim
+  LeanSemanticPrimitives.Projection.ResidualIO
+  LeanSemanticPrimitives.Projection.Proto.RunnerSupport
+  LeanSemanticPrimitives.Projection.Proto.PartialEvaluatorFast
+  LeanSemanticPrimitives.Projection.Proto.PartialEvaluatorSummary
+  LeanSemanticPrimitives.Projection.Proto.PartialEvaluatorShift
+  LeanSemanticPrimitives.Projection.Proto.ShiftBridge
+  # fp's checks, audits and measurements
+  LeanSemanticPrimitives.Projection.Gate0
+  LeanSemanticPrimitives.Projection.HardwareMemChecks
+  LeanSemanticPrimitives.Projection.HardwareMemCycle
+  LeanSemanticPrimitives.Projection.MemLog
+  LeanSemanticPrimitives.Projection.MemPrimChecks
+  LeanSemanticPrimitives.Projection.MemMixMirrorCheck
+  LeanSemanticPrimitives.Projection.EdgePolicy
+  LeanSemanticPrimitives.Projection.Scaling
+  LeanSemanticPrimitives.Projection.Audit
+  # the proof tools: symbolic routes, the judge, the drivers' helpers, reachability, cert_run
+  HDLProof.Kit.SymRoute
+  HDLProof.Sym.Diag
+  HDLProof.Kit.Judge
+  HDLProof.Kit.Driver
+  HDLProof.Reach.Refute
+  HDLProof.Run.Sound
+  HDLProof.Run.Vcd
+  HDLProof.Run.Engine
   # the tools' audit: fails the build on a non-standard axiom
-  HDLProof/Check/Audit
+  HDLProof.Check.Audit
 )
+# The proof tools (pass/lean/tools/proof), the simulation drivers (pass/lean/tools/sim) and the
+# tools' tests run interpreted against .olean-dev: their imports are roots.
+ROOT_FILES=(../../pass/lean/tools/proof/*.lean ../../pass/lean/tools/sim/*.lean Futamura_Projection_Scripts/cert_trace.lean
+  Futamura_Projection_Scripts/dcert2_memroute.lean ../../pass/lean/tools/tests/*.lean)
+GEN=$(python3 Futamura_Projection_Scripts/lean_modules.py "${ROOTS[@]}" "${ROOT_FILES[@]}") \
+  || { echo "the module list could not be made (above)" >&2; exit 1; }
+MODULES=(); TOOL_MODULES=()
+while IFS= read -r m; do
+  case "$m" in
+    LeanSemanticPrimitives/*) MODULES+=("${m#LeanSemanticPrimitives/}") ;;
+    HDLProof/*) TOOL_MODULES+=("$m") ;;
+  esac
+done <<< "$GEN"
 
 # A bare name on the command line means a Projection module; a path is taken
 # as given, so `./.build-proj.sh Compiler/DesignSemantics` also works, and a
@@ -286,11 +112,9 @@ build_one() {
 }
 for m in "${MODULES[@]}"; do
   src="LeanSemanticPrimitives/$m.lean"
-  [ -f "$src" ] || continue
   build_one "$m" "$PWD" "$src" "$OUT/LeanSemanticPrimitives/$m.olean"
 done
 for m in "${TOOL_MODULES[@]}"; do
-  [ -f "$TOOLS/$m.lean" ] || continue
   build_one "$m" "$TOOLS" "$TOOLS/$m.lean" "$OUT/$m.olean"
 done
 exit $rc

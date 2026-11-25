@@ -2,7 +2,7 @@
 set -euo pipefail
 # Self-test of `lhdcert-ckpt v1` checkpoints: the library
 # (formal/lean/LeanSemanticPrimitives/Compiler/Ckpt.lean) and its driver lhd_ckpt
-# (pass/lean/tools/drivers/lhd_ckpt.lean), on certificates lhd exports.
+# (pass/lean/tools/sim/lhd_ckpt.lean), on certificates lhd exports.
 #
 # Fixtures, through the real flow (slang reader -> LGraph -> DCERT4):
 #   pw     an 8-bit counter with a power-on value and no reset (`reg [7:0] c = 8'd5`) and a
@@ -115,7 +115,7 @@ drv() { # <native name> <source> args... -> RC, LOG
     (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$src" "$@") > "$LOG" 2>&1 && RC=0 || RC=$?
   fi
 }
-ck() { drv lhd_ckpt "$ROOT/pass/lean/tools/drivers/lhd_ckpt.lean" "$@"; }
+ck() { drv lhd_ckpt "$ROOT/pass/lean/tools/sim/lhd_ckpt.lean" "$@"; }
 ct() { drv cert_trace "$ROOT/formal/lean/Futamura_Projection_Scripts/cert_trace.lean" "$@"; }
 mr() { drv dcert2_memroute "$ROOT/formal/lean/Futamura_Projection_Scripts/dcert2_memroute.lean" "$@"; }
 expect() { # <exit code> <text> args...

@@ -3209,6 +3209,44 @@ TEST(Placement, SnapshotsPreserveUnconnectedInputNets) {
   }
 }
 
+TEST(Placement, GeneratedDefInstancesDoNotShadowPorts) {
+  hhds::GraphLibrary source, flat;
+  auto io = source.create_io("port_collision");
+  io->add_input("input_signal", 0);
+  io->set_bits("input_signal", 1);
+  io->add_output("result", 0);
+  io->set_bits("result", 1);
+  auto graph = io->create_graph();
+  auto inv = source.create_io("sky130_fd_sc_hd__inv_1");
+  inv->add_input("A", 0);
+  inv->add_output("Y", 0);
+  auto driver = graph->get_input_pin("input_signal");
+  for (const auto* name : {"result__inst", "result"}) {
+    auto cell = gu::create_typed_node(*graph, Ntype_op::Sub);
+    cell.set_subnode(inv);
+    cell.set_name(name);
+    cell.create_sink_pin("A").connect_driver(driver);
+    driver = cell.create_driver_pin("Y");
+    gu::set_bits(driver, 1);
+  }
+  graph->get_output_pin("result").connect_driver(driver);
+  auto options = plain_options();
+  options.lefs = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/port_collision";
+  ASSERT_NO_THROW(place(*graph, flat, options));
+  const auto frame = physical::read_def(options.output_dir + "/out.def");
+  const auto renamed = std::ranges::find_if(frame.components, [](const auto& component) { return component.name == "result__inst_"; });
+  ASSERT_NE(renamed, frame.components.end());
+  EXPECT_TRUE(std::ranges::any_of(frame.components, [](const auto& component) { return component.name == "result__inst"; }));
+  const auto terminal = std::ranges::find_if(frame.terminals, [](const auto& pin) { return pin.name == "result"; });
+  ASSERT_NE(terminal, frame.terminals.end());
+  const auto net = std::ranges::find(frame.nets, terminal->net, &physical::Net::name);
+  ASSERT_NE(net, frame.nets.end());
+  EXPECT_TRUE(std::ranges::any_of(net->connections, [&](const auto& endpoint) {
+    return endpoint.instance == renamed->name && endpoint.pin == "Y";
+  }));
+}
+
 TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
   hhds::GraphLibrary source;
   auto               io = source.create_io("top");
@@ -3628,6 +3666,27 @@ TEST(Placement, AFixedFrameFullerThanTheTargetDensityRaisesTheTarget) {
   qor.Parse(place(*graph, sparse, o).qor.c_str());
   ASSERT_FALSE(qor.HasParseError());
   EXPECT_DOUBLE_EQ(qor["gp_target_density"].GetDouble(), .1);
+}
+
+TEST(Placement, AFullFixedFrameLegalizesWithTheRaisedDensity) {
+  hhds::GraphLibrary source, placed;
+  auto               graph                       = tie_graph(source, false);
+  auto               options                     = plain_options();
+  options.lefs                                   = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.core = options.die                     = {0, 0, 2.76, 2.72};
+  options.bins                                   = 2;
+  options.legalize_bins                          = 1;
+  options.density                                = .1;
+  options.iterations                             = 200;
+  options.optimization_pending                   = false;
+  options.terminal_legalize_options.padding_sites = 0;
+  options.output_dir                             = std::string(std::getenv("TEST_TMPDIR")) + "/full_fixed_frame";
+  const auto result                              = place(*graph, placed, options);
+  EXPECT_NO_THROW(check_legality(physical::read_lef(options.lefs), result.floorplan));
+  rapidjson::Document qor;
+  qor.Parse(result.qor.c_str());
+  ASSERT_FALSE(qor.HasParseError());
+  EXPECT_GT(qor["gp_target_density"].GetDouble(), .99);
 }
 
 TEST(Placement, ATrialInsideTheRunsOwnFrameKeepsTheDensityItWasPlacedWith) {

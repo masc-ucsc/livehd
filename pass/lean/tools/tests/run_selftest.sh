@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Self-test of `cert_run` (pass/lean/tools/drivers/cert_run.lean, HDLProof/Run/*): running a
+# Self-test of `cert_run` (pass/lean/tools/sim/cert_run.lean, HDLProof/Run/*): running a
 # program on a design. Formats: pass/lean/tools/formats/run.md and bind.md.
 #
 # Fixtures, through the real flow (slang reader -> LGraph -> DCERT4):
@@ -27,6 +27,10 @@ set -euo pipefail
 #   RTL load  seqm with load:prog8.hex:mem0, and with load:prog8.bin@0:mem0, prints what seqm_init
 #             prints; a word past the memory's depth is refused
 #   vcd       the VCD names every port and has value changes
+#   engines   every route and knob combination `EngineSelector` builds (HDLProof/Run/Engine) on busm,
+#             busm_mealy, seqm and seqm_init: 300 cycles of random ticks, stepped once, twice from
+#             one state, after two peeks, and reloaded from a checkpoint, against ref
+#             (tests/engine_check.lean, interpreted against .olean-dev)
 #
 # CK_NAT=<dir with native cert_run and cert_trace> uses them; otherwise the drivers run
 # interpreted against formal/lean/.olean-dev (build it with formal/lean/.build-proj.sh).
@@ -172,7 +176,7 @@ drv() { # <native name> <source> args... -> RC, LOG
     (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$src" "$@") > "$LOG" 2>&1 && RC=0 || RC=$?
   fi
 }
-run() { drv cert_run "$ROOT/pass/lean/tools/drivers/cert_run.lean" "$@"; }
+run() { drv cert_run "$ROOT/pass/lean/tools/sim/cert_run.lean" "$@"; }
 ct() { drv cert_trace "$ROOT/formal/lean/Futamura_Projection_Scripts/cert_trace.lean" "$@"; }
 expect() { # <exit code> <status> args... (cert_run)
   local want=$1 st=$2; shift 2
@@ -362,5 +366,12 @@ run "$OUT/seqm_lean/seqm.dcert" load:"$OUT/prog8_long.hex:mem0" max:5
 # vcd
 grep -q '^\$var wire 1 .* mem_valid \$end$' "$OUT/busm.vcd" && grep -q '^\$var wire 32 .* mem_rdata \$end$' "$OUT/busm.vcd" \
   && [[ $(grep -c '^#' "$OUT/busm.vcd") -gt 10 ]] || { head -20 "$OUT/busm.vcd"; echo "FAIL: vcd"; exit 1; }
+
+# the engines `EngineSelector` builds, against ref (tests/engine_check.lean)
+(cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/tests/engine_check.lean" 300 \
+   "$B" "$OUT/busm_mealy_lean/busm_mealy.dcert" "$OUT/seqm_lean/seqm.dcert" "$OUT/seqm_init_lean/seqm_init.dcert") \
+  > "$OUT/engine_check.log" 2>&1 && grep -q '^PASS engine' "$OUT/engine_check.log" \
+  || { tail -5 "$OUT/engine_check.log"; echo "FAIL: engine_check"; exit 1; }
+echo "ok: $(tail -1 "$OUT/engine_check.log")"
 
 echo "PASS run_selftest: $N driver runs"

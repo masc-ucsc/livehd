@@ -1,8 +1,9 @@
 /-
 # One cycle of a closed-loop run
 
-`cycleStep` is one cycle, as a pure function. The driver (`drivers/cert_run.lean`) iterates it
-and does the I/O (traces, VCD, checkpoints, lockstep).
+`cycleStep ctx E` is one cycle on engine `E` (`Compiler/Engine`: a route's step on a state of
+its own kind), as a pure function. The driver (`sim/cert_run.lean`) iterates it and does the
+I/O (traces, VCD, checkpoints, lockstep).
 
 1. The inputs: the stimulus's for this cycle (or all zero), then the bind file's constants and
    reset, then every bus's `ready = 0`, `rdata = 0`. This is the GUESS.
@@ -15,6 +16,10 @@ and does the I/O (traces, VCD, checkpoints, lockstep).
 5. When a request completed, step again on the final inputs. The outputs must equal the
    guess's: the host decided on them. A design whose outputs depend on `ready` or `rdata` in
    the same cycle stops with `mealy`.
+   An engine with a `peek` (vc) does steps 2 and 5 without stepping twice from one state: it
+   peeks with the guess (outputs, no edge), peeks again with the final inputs when a request
+   completed (the `mealy` check), and takes the one step from there. Each state is used once,
+   so vc updates its environment in place.
 6. Commit: the next state, and each completed write (memory, console, `exit`, a register). A
    write to a `rom` region stops with `rom-write`, a write to `exit` with `exit`, and a data
    access to a `watch` word with `watchpoint`, all after the edge.
@@ -22,6 +27,7 @@ and does the I/O (traces, VCD, checkpoints, lockstep).
 `applied` says whether the cycle's edge was committed. Statuses stop the run; `none` continues.
 -/
 import HDLProof.Run.Host
+import LeanSemanticPrimitives.Compiler.Engine
 import HDLProof.Run.Stim
 import HDLProof.Run.Backend
 
@@ -35,23 +41,21 @@ structure Ctx where
   bind    : Bind
   stim    : Option Stim := none
   edges   : EdgeSpec := .all
-  step    : ClockEdges → RuntimeInput → RuntimeState → Except String RuntimeResult
   /-- the declared width of each input ordinal, `0 .. maxInput D - 1` -/
   inW     : Array Nat
   /-- `stim` as tables (`StimTab.of`), when there is one: the same inputs, built once -/
   stimTab : Option StimTab := none
 
-def Ctx.mk' (D : DesignCert) (bind : Bind) (stim : Option Stim) (edges : EdgeSpec)
-    (st : Stepper) : Ctx :=
-  { D, bind, stim, edges, step := st.step,
+def Ctx.mk' (D : DesignCert) (bind : Bind) (stim : Option Stim) (edges : EdgeSpec) : Ctx :=
+  { D, bind, stim, edges,
     inW := (Array.range (maxInput D)).map (inputWidth D),
     stimTab := stim.map (StimTab.of D) }
 
-structure LoopState where
-  s     : RuntimeState
+/-- The engine's state (`E.view s` is the design's), the host, the cycle. -/
+structure LoopState (σ : Type) where
+  s     : σ
   host  : HostState
   cycle : Nat
-deriving Inhabited
 
 /-- One bus transfer, for the bus trace. -/
 structure BusEvent where
@@ -66,8 +70,8 @@ deriving Inhabited
 
 def BusEvent.kind (e : BusEvent) : Char := if e.instr then 'I' else if e.strb != 0 then 'W' else 'R'
 
-structure CycleOut where
-  next    : LoopState
+structure CycleOut (σ : Type) where
+  next    : LoopState σ
   tick    : Tick
   outs    : Array BV
   events  : Array BusEvent := #[]
@@ -118,12 +122,12 @@ inductive Plan where
   | stop (why : String) (h : HostState)
   | go (inputs : RuntimeInput) (h : HostState) (done : Array (Nat × Pending)) (events : Array BusEvent)
 
-def plan (ctx : Ctx) (st : LoopState) (guess : RuntimeInput) (outs : Array BV) : Plan := Id.run do
-  let k := st.cycle
-  if ctx.inReset k then return .go guess st.host #[] #[]
-  if ctx.bind.stops.any (fun (o, v) => outVal outs o == v) then return .stop "stop-output" st.host
+def plan (ctx : Ctx) (host : HostState) (k : Nat) (guess : RuntimeInput) (outs : Array BV) : Plan :=
+  Id.run do
+  if ctx.inReset k then return .go guess host #[] #[]
+  if ctx.bind.stops.any (fun (o, v) => outVal outs o == v) then return .stop "stop-output" host
   -- the buses: new requests, protocol, breakpoints, completions
-  let mut h := st.host
+  let mut h := host
   let mut done : Array (Nat × Pending) := #[]
   for j in [0:ctx.bind.buses.size] do
     let b := ctx.bind.buses[j]!
@@ -173,33 +177,58 @@ def commit (ctx : Ctx) (h : HostState) (done : Array (Nat × Pending)) : HostSta
     if !p.instr && ctx.bind.watches.contains wa && status.isNone then status := some "watchpoint"
   return (h, status)
 
-/-- The step on the final inputs: the guess's result when no request completed. -/
-def stepFinal (ctx : Ctx) (e : ClockEdges) (s : RuntimeState) (guess : RuntimeInput)
-    (rg : RuntimeResult) (inputs : RuntimeInput) : Except String RuntimeResult :=
-  if inputs == guess then .ok rg else ctx.step e inputs s
-
-/-- One cycle. `.error` only when the stepper refuses (the run's status is then `refused`). -/
-def cycleStep (ctx : Ctx) (st : LoopState) : Except String CycleOut :=
-  let e := edgesAt ctx.D ctx.edges st.cycle
-  let guess := ctx.guess st.cycle
-  match ctx.step e guess st.s with
-  | .error err => .error err
-  | .ok rg =>
-    match plan ctx st guess rg.outputs with
-    | .stop why h =>
-      .ok { next := { st with host := h }, tick := { edges := e, input := guess }, outs := rg.outputs,
-            status := some why, applied := false }
-    | .go inputs h done events =>
-      match stepFinal ctx e st.s guess rg inputs with
-      | .error err => .error err
-      | .ok r =>
-        if r.outputs == rg.outputs then
-          .ok { next := { s := r.nextState, host := (commit ctx h done).1, cycle := st.cycle + 1 },
-                tick := { edges := e, input := inputs }, outs := r.outputs, events,
-                status := (commit ctx h done).2 }
-        else
-          .ok { next := { st with host := h }, tick := { edges := e, input := inputs },
-                outs := rg.outputs, status := some "mealy", applied := false }
+/-- One cycle. `.error` only when the engine refuses (the run's status is then `refused`), with
+the loop state as it was before the cycle (the engine hands its state back). `st` is taken apart
+first, so the engine's state is used once on each path (module header). -/
+def cycleStep {σ : Type} (ctx : Ctx) (E : Engine σ) (st : LoopState σ) :
+    Except (String × LoopState σ) (CycleOut σ) :=
+  match st with
+  | ⟨q, host, k⟩ =>
+    let e := edgesAt ctx.D ctx.edges k
+    let guess := ctx.guess k
+    match E.peek? with
+    | some pk =>
+      match pk e guess q with
+      | .error (err, q') => .error (err, ⟨q', host, k⟩)
+      | .ok (og, q1) =>
+        match plan ctx host k guess og with
+        | .stop why h =>
+          .ok { next := ⟨q1, h, k⟩, tick := { edges := e, input := guess }, outs := og,
+                status := some why, applied := false }
+        | .go inputs h done events =>
+          match (if inputs == guess then .ok (og, q1) else pk e inputs q1) with
+          | .error (err, q') => .error (err, ⟨q', host, k⟩)
+          | .ok (o, q2) =>
+            if o == og then
+              match E.step e inputs q2 with
+              | .error (err, q') => .error (err, ⟨q', host, k⟩)
+              | .ok (o', q3) =>
+                .ok { next := ⟨q3, (commit ctx h done).1, k + 1⟩,
+                      tick := { edges := e, input := inputs }, outs := o', events,
+                      status := (commit ctx h done).2 }
+            else
+              .ok { next := ⟨q2, h, k⟩, tick := { edges := e, input := inputs }, outs := og,
+                    status := some "mealy", applied := false }
+    | none =>
+      match E.step e guess q with
+      | .error (err, q') => .error (err, ⟨q', host, k⟩)
+      | .ok (og, qg) =>
+        match plan ctx host k guess og with
+        | .stop why h =>
+          .ok { next := ⟨q, h, k⟩, tick := { edges := e, input := guess }, outs := og,
+                status := some why, applied := false }
+        | .go inputs h done events =>
+          -- the guess's step when no request completed, else a step on the final inputs
+          match (if inputs == guess then .ok (og, qg) else E.step e inputs q) with
+          | .error (err, q') => .error (err, ⟨q', host, k⟩)
+          | .ok (o, q') =>
+            if o == og then
+              .ok { next := ⟨q', (commit ctx h done).1, k + 1⟩,
+                    tick := { edges := e, input := inputs }, outs := o, events,
+                    status := (commit ctx h done).2 }
+            else
+              .ok { next := ⟨q, h, k⟩, tick := { edges := e, input := inputs }, outs := og,
+                    status := some "mealy", applied := false }
 
 end Run
 end HDLProof

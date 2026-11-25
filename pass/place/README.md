@@ -278,8 +278,9 @@ own slack now within 10 ps of OpenSTA's instead of 24 ps optimistic).
 effort, min_topologies)` returns a `Buffer_tree` (buffers in postorder, each with a position, its loads and a drive
 index into `drives`; `root` lists what the original driver keeps). Geometry is DBU, capacitance fF, time ps.
 `Buffer_drive` describes a candidate cell (or the original driver): input cap, `max_cap_ff`, `max_fanout`, intrinsic
-delay and drive resistance, and area. The planner generates
-spatial topologies, picks drives bottom-up by required time with the Elmore delay over each branch's Steiner tree,
+delay and drive resistance, and area. The planner generates Steiner and spatially grouped topologies, including a
+bounded-fanout spatial backbone for wide nets. A rejected deep tree does not set the wire budget for alternatives.
+The planner picks drives bottom-up by required time with the Elmore delay over each branch's Steiner tree,
 splits the root when the original driver would break its own cap/fanout limit, and rejects
 trees beyond `Buffer_limits` (cells/area of the growth allowance left). It only proposes: callers apply the tree and
 accept it with fresh STA. `LHD_STEINER_TRACE=<n>` explains every rejected candidate on nets of at least n loads, and
@@ -530,6 +531,18 @@ their existing policy.
 
 `synth.place.resize=true` enables timing-checked sizing and buffering in full
 placement with OpenTimer. Explicitly disable it for a geometry-only comparison.
+To replay a measured timing-weight policy for one design, add a record to the
+placement metadata sidecar:
+
+```json
+{"class":"livehd.placement.timing_weights","design":"top","id":"timing-weights","margin":0,"max_weight":4}
+```
+
+The optional numeric fields `margin`, `max_weight`, `min_weight`, and `exponent`
+use the same ranges and defaults as the corresponding `synth.place.timing_*`
+settings. Explicit settings override the record. These weights guide placement;
+they do not change the clock constraints or independent timing measurement.
+
 The shared synthesis defaults use coarse partitions, state sweeping and register
 merging, a delay budget of 0.4 of the SDC clock period when available, ABC fanout
 32 with area relaxation off, and flat reset fanout 32. Explicit options override
@@ -562,7 +575,10 @@ Always-transparent latch declarations from fully assigned combinational regs
 are bypassed only in the private physical graph; gated or resettable latches
 still require cell mapping. DEF input nets retain their port names, and internal
 net names reserve every port name, so OpenROAD's structural Verilog writer keeps
-input connectivity when exporting a DEF-imported design.
+input connectivity when exporting a DEF-imported design. When placing a mapped
+graph without an input DEF, a physical instance that shadows a top-level port
+receives a unique suffix. This lets structural Verilog readback preserve the
+port's spelling and connectivity.
 
 Physical constant drivers are discovered from `synth.liberty`: usable input-free
 cells with scalar output functions `0` or `1`, including dual-output ties. The
@@ -929,7 +945,11 @@ planning pad also keeps a movable macro that far from the core edge.
 Track alignment prefers a full wire width inside a signal pin. When snapping one
 macro at a time leaves only a partial-width connection, the legalizer tries moving
 neighboring macros together onto their best track phases. Fixed neighbors, hard
-placement blockages and required channels still take precedence. At perimeter IOs
+placement blockages and required channels still take precedence. If the local
+and blocker-edge searches cannot find a legal frame, a full-core repack can
+recover movable macros whose pins each have a single routing direction. It
+keeps finite track coverage, orientations and fixed geometry intact.
+At perimeter IOs
 the legalizer can also leave rows for downstream buffer placement; those moves
 preserve both signal-track phase and standard-cell row or site pitch.
 If signal pins on both outward faces of a corner macro lie close to the same

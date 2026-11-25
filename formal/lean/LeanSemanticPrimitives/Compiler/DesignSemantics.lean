@@ -12,10 +12,11 @@ sibling: one generic traversal, instantiated at `CertVal`, plus every proof in
 
 Note the deliberate asymmetry with the target: the source environment is a
 nested `Nat → CertVal` built by `envSetG`, so a lookup costs O(N) and evaluating
-every slot costs O(N²).  That is *fine here* — `interpretDesign` is never
-executed.  It is only ever reasoned about, through `evalGraphG_char`, which
-materialises no lookups at all.  `denoteResidual` is the one that runs, and it
-uses dense arrays.
+every slot costs O(N²).  That is *fine here*: `interpretDesign` is the reference, reasoned
+about through `evalGraphG_char`, which materialises no lookups at all.  It does run, slowly,
+as `cert_run route:ref` and `lockstep:ref` (its compiled form is `interpretDesignFast`,
+`Compiler/MemStepFast`); the routes that run fast (`directStepRaw`, `denoteResidual`) use
+dense arrays.
 
 ## Clocks
 

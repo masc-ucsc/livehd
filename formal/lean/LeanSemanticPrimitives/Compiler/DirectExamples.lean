@@ -7,8 +7,8 @@ NOT exporter output, so they exercise the Lean side independently of the C++
 extraction boundary; real designs arrive as generated certificates and are swept
 separately.
 
-Each one is small enough that `interpretDesign` — quadratic and never otherwise
-executed — can actually be run and compared against the direct evaluator.
+Each one is small enough that `interpretDesign` (quadratic, and elsewhere run only as
+the slow `route:ref`) can be run and compared against the direct evaluator.
 -/
 import LeanSemanticPrimitives.Compiler.DirectTrace
 

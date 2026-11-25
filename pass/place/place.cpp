@@ -300,6 +300,35 @@ void sat_window_statistics(rapidjson::Value& json, const Satlegalize_report& rep
   }
 }
 
+void disambiguate_physical_instances(hhds::Graph& graph) {
+  absl::flat_hash_set<std::string> ports;
+  for (const auto& [declaration, is_input] : graph.get_io()->decls_in_port_order()) {
+    ports.emplace(declaration->name);
+  }
+  std::vector<Node> conflicts;
+  for (auto node : graph.body().nodes()) {
+    if (ports.contains(node.get_name()) && (node.get_subnode_io() || gu::type_op_of(node) == Ntype_op::Memory)) {
+      conflicts.push_back(node);
+    }
+  }
+  if (conflicts.empty()) {
+    return;
+  }
+  auto used = std::move(ports);
+  for (auto node : graph.body().nodes()) {
+    if (!node.get_name().empty()) {
+      used.emplace(node.get_name());
+    }
+  }
+  for (auto node : conflicts) {
+    auto name = std::format("{}__inst", node.get_name());
+    while (!used.insert(name).second) {
+      name += '_';
+    }
+    node.set_name(name);
+  }
+}
+
 // Fully assigned combinational Verilog regs can retain a Latch declaration
 // after mapping. Like cgen's always_comb emission, an always-open latch with
 // no reset is just its data value. Normalize only the private physical graph.
@@ -8715,6 +8744,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     release_source();  // Nothing below this point may read source or its library.
   }
   remove_transparent_latches(graph);
+  if (options.floorplan.empty()) {
+    disambiguate_physical_instances(graph);
+  }
   View       v;
   v.chunk_plan=options.accepted_chunk_plan;
   auto weight_roles       = prects_library(options.technology().cells, options.control_ports);
@@ -9366,7 +9398,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     if (free_area > 0) {
       const double held = std::min(1., (area - macro_area) / free_area);
       if (options.density < 1.15 * held) {
-        const double raised = held + .25 * (1 - held);
+        const double raised = std::min(held + .25 * (1 - held), std::nextafter(1.0, 0.0));
         livehd::diag::outcome("pass.place", "place-density", "progress")
             .msg("synth.place.density={:.3f} is too low for a fixed frame holding {:.3f}; using {:.3f}", options.density, held, raised)
             .emit();
