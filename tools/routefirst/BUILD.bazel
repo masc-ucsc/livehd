@@ -84,11 +84,13 @@ py_binary(
     name = "rf_chunks",
     srcs = ["rf_chunks.py"],
     data = [":rf_route"],
+    legacy_create_init = 0,
 )
 
 py_binary(
     name = "rf_feedback",
     srcs = ["rf_feedback.py"],
     data = [":rf_route"],
+    legacy_create_init = 0,
     deps = [":rf_chunks_lib"],
 )

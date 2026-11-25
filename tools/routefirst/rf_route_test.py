@@ -196,6 +196,15 @@ class RouteTest(unittest.TestCase):
         self.assertTrue(self.run_router(self.frame(), output="missing/out.def", success=False))
 
     # ---- verification: every finding carries its net and its geometry ----
+    def test_branches_share_one_via(self):
+        self.with_vias()
+        pins = [f"- p{i} + NET n + DIRECTION INOUT + LAYER M{layer} ( -19 -9 ) ( 19 9 ) "
+                f"+ FIXED ( {x} {y} ) N ;" for i, (x, y, layer) in enumerate(((234, 126, 2), (558, 18, 3)))]
+        frame = self.frame(["- b BUF + FIXED ( 540 0 ) N ;"], ["- n ( b A ) ( PIN p0 ) ( PIN p1 ) ;"], pins, sites=13)
+        stats = self.run_router(frame.replace("core 0 270 N", "core 0 0 N"), "--verify")
+        self.assertEqual(stats["nets_routed"], 1)
+        self.assertEqual({k: v for k, v in stats.items() if k.startswith("verify_") and v}, {})
+
     def test_macro_edge_pin_is_reached_through_a_stub(self):
         # The pin is an off-track M3 bar at the bottom edge, under a blockage that covers the macro on M1 to M3.
         self.with_vias()
@@ -208,6 +217,14 @@ class RouteTest(unittest.TestCase):
         self.assertEqual((stats["nets_routed"], stats["edge_pin_stubs"], stats["edge_pin_stub_wires"]), (1, 1, 1))
         self.assertEqual({k: v for k, v in stats.items() if k.startswith("verify_") and v}, {})
         self.assertRegex((self.root / "out.def").read_text(), r"M3 \( 415 360 0 \) \( \* 614 0 \)")
+
+        # With the long extension blocked, the first crossing track below the pin is still accessible.
+        (self.root / "cells.lef").write_text(CELLS.replace("END LIBRARY", block.replace("0.118 0.054", "0.118 0.018")))
+        frame = frame.replace("NETS 1", "BLOCKAGES 1 ;\n- LAYER M3 RECT ( 405 395 ) ( 425 425 ) ;\nEND BLOCKAGES\nNETS 1")
+        stats = self.run_router(frame, "--verify-report", "found.tsv")
+        self.assertEqual((stats["nets_routed"], stats["edge_pin_stub_wires"]), (1, 1))
+        self.assertEqual({k: v for k, v in stats.items() if k.startswith("verify_") and v}, {})
+        self.assertRegex((self.root / "out.def").read_text(), r"M3 \( 415 524 0 \) \( \* 578 0 \)")
 
     def test_direct_macro_via_keeps_pin_metal_in_the_lef(self):
         self.with_vias()

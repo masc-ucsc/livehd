@@ -291,7 +291,7 @@ struct Router {
     --it;
     return it->net == net && it->hi >= a;
   }
-  bool cut_ok(int k, int x, int y, int net) const {
+  bool cut_ok(int k, int x, int y, int net, bool* already_owned = nullptr) const {
     const auto& c  = CL[k];
     const int   xl = x - c.hx, xh = x + c.hx, yl = y - c.hy, yh = y + c.hy;
     const int   r = c.space;
@@ -302,7 +302,13 @@ struct Router {
           continue;
         }
         for (const auto& o : it->second) {
-          if ((o.net == net && o.xl == xl && o.yl == yl && o.xh == xh && o.yh == yh) || skipped(o.net)) {
+          if (o.net == net && o.xl == xl && o.yl == yl && o.xh == xh && o.yh == yh) {
+            if (already_owned) {
+              *already_owned = true;
+            }
+            continue;
+          }
+          if (skipped(o.net)) {
             continue;
           }
           const int64_t dx = std::max({0, o.xl - xh, xl - o.xh});
@@ -1223,7 +1229,11 @@ struct Router {
     if (alo <= box_lo || ahi >= box_hi) {
       const bool down = alo <= box_lo;
       bool       done = false;
-      for (int reach : {200, 120}) {
+      // A power strap can block the long extension while leaving room for
+      // the nearest landing. Every shorter trial must still meet the layer's
+      // minimum length together with the LEF pin and pass the same spacing test.
+      const int shortest = std::max(ly.ext, ly.minlen - (ahi - alo));
+      for (int reach : {200, 120, std::max(shortest, ly.pitch), shortest}) {
         if (done) {
           break;
         }
@@ -1890,6 +1900,7 @@ struct Router {
       return nets[a.first].pins[a.second].cands.size() < nets[b.first].pins[b.second].cands.size();
     });
     std::vector<int>                  choice(todo.size(), -1);
+    std::vector<bool>                 new_cut(todo.size());
     int                               nodes = 0;
     std::vector<Undo>                 undo(todo.size());
     const std::function<bool(size_t)> dfs = [&](size_t i) {
@@ -1901,11 +1912,15 @@ struct Router {
       for (size_t k = 0; k < p.cands.size() && nodes < 4000; ++k) {
         const auto& cd = p.cands[k];
         ++nodes;
-        if (!cand_ok(n2, cd)) {
+        bool already_owned = false;
+        if (!cand_ok(n2, cd, &already_owned)) {
           continue;
         }
         undo[i] = Undo{};
-        add_cut(0, cd.x, cd.y, n2);
+        new_cut[i] = !already_owned;
+        if (new_cut[i]) {
+          add_cut(0, cd.x, cd.y, n2);
+        }
         const int a = std::min(cd.x, L[0].stops[cd.s]), b = std::max(cd.x, L[0].stops[cd.s]);
         if (place(0, cd.t, a - L[0].ext, b + L[0].ext, n2, undo[i]) && pad_escapes(n2, cd)) {
           choice[i] = int(k);
@@ -1914,7 +1929,9 @@ struct Router {
           }
         }
         restore(undo[i]);
-        del_cut(0, cd.x, cd.y, n2);
+        if (new_cut[i]) {
+          del_cut(0, cd.x, cd.y, n2);
+        }
       }
       return false;
     };
@@ -1930,7 +1947,9 @@ struct Router {
       --it;
       term_segs.push_back({n2, 0, cd.t, it->lo, it->hi});
       own[n2].push_back({n2, 0, cd.t, it->lo, it->hi, pi});
-      resv[n2].push_back({0, cd.x, cd.y});
+      if (new_cut[i]) {
+        resv[n2].push_back({0, cd.x, cd.y});
+      }
       cd.v1   = false;
       cd.cut  = -1;  // the pad and its via are reserved metal of the net already
       p.cands = {cd};
@@ -2327,7 +2346,7 @@ struct Router {
     return false;
   }
 
-  bool cand_ok(int ni, const Cand& c) const {
+  bool cand_ok(int ni, const Cand& c, bool* already_owned = nullptr) const {
     int       fl, fh;
     const int a = L[c.L].stops[c.s];
     if (!free_range(c.L, c.t, ni, a, fl, fh)) {
@@ -2335,7 +2354,7 @@ struct Router {
     }
     if (c.cut >= 0) {
       const int at = L[c.L].horiz ? c.x : c.y;
-      if (at < fl || at > fh || !cut_ok(c.cut, c.x, c.y, ni)) {
+      if (at < fl || at > fh || !cut_ok(c.cut, c.x, c.y, ni, already_owned)) {
         return false;
       }
     }
@@ -2442,7 +2461,8 @@ struct Router {
     }
     for (size_t i = 0; i < vias.size(); ++i) {
       const auto& v = vias[i];
-      if (!cut_ok(v.cl, v.x, v.y, ni)) {
+      bool already_owned = false;
+      if (!cut_ok(v.cl, v.x, v.y, ni, &already_owned)) {
         ++stat["reject_cut_" + CL[v.cl].name];
         for (const auto& r : runs) {  // forbid the runs that meet at this cut
           const int c = L[r.l].horiz ? v.x : v.y, tcoord = L[r.l].horiz ? v.y : v.x;
@@ -2451,6 +2471,9 @@ struct Router {
           }
         }
         return false;
+      }
+      if (already_owned) {
+        continue;  // Two branches can meet at one via. Its original owner handles rip-up.
       }
       add_cut(v.cl, v.x, v.y, -9);  // provisional owner so the path checks against itself
       undo.cuts.push_back(v);
