@@ -403,3 +403,28 @@ It also enables the incident-net priority pass. Applied to the same
 four-home NVDLA M checkpoint as the ordinary repair, this removed the
 last open in one round. On two O cohorts it helped one and slightly hurt
 the other, so the default continues to reserve on demand.
+
+Use `rf_feedback --pin-access-layers` to limit spatial release around a
+blocked pin to M1 through M3, including vias starting on those layers.
+Incident nets requested with `--pin-neighbors` and nets named by a geometry
+finding remain eligible on every layer. On the same 80-net O cohort, this
+released 1,067 neighboring nets and left 372 opens. The full-layer window
+released 1,858 and left 395. On C the two windows left 1,846 and 1,845 opens.
+
+After a connected route, try a timing ECO from its saved DEF and verifier
+statistics. Supply native placement pin slacks, the maximum number of
+mutable signals, the previous route directory and the original LEFs.
+
+```sh
+rf_feedback --timing-eco timing.tsv --net-count 12 --pd-alpha 0.6 \
+  --out timing-trial previous-route tech.lef cells.lef
+```
+
+The agent selects ordinary signal nets by worst endpoint slack, breaking ties
+by routed wirelength, and retains the surrounding signal routes and all clock
+wires identified by DEF or the timing file. The output includes the selected
+net names, slacks, wirelengths, router command and whole-design findings.
+Compare extraction on the original and candidate DEFs before accepting the
+timing change. On the two-home A route, 12 signals raised the extracted core
+frequency from 1,314.54 to 1,334.57 MHz with hold slack of −4.34 ps in both
+runs. The same setting lowered frequency on the M and P routes.

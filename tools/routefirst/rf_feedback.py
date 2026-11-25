@@ -4,14 +4,19 @@
 import argparse
 from bisect import bisect_left, bisect_right
 import csv
+import heapq
 import json
+import math
+import re
 from pathlib import Path
 import time
 
 from rf_chunks import CONN, POSE, ROUTE, WIRE, feedback, records, route, section
 
 
-def localized_seed(frame, failed, radius, output, all_pins=False, findings=(), pin_neighbors=False):
+def localized_seed(
+    frame, failed, radius, output, all_pins=False, findings=(), pin_neighbors=False, pin_access_layers=False
+):
     owners = {row["fail_pin"].rsplit("/", 1)[0] for row in failed if row["fail_pin"]}
     owners.update(row["fail_pin"] for row in failed if row["fail_pin"])
     blocked = owners.copy()
@@ -55,13 +60,20 @@ def localized_seed(frame, failed, radius, output, all_pins=False, findings=(), p
             group.sort()
 
         def touches(path):
+            if not xs:
+                return False
             m = WIRE.fullmatch(path)
             if not m:
                 raise ValueError(f"unknown rf_route geometry: {path}")
+            if pin_access_layers and path.partition(" (")[0].split()[-1] not in ("M1", "M2", "M3"):
+                return False
             x, y = int(m[1]), int(m[2])
             x2 = int(m[4]) if m[4] not in (None, "*") else x
             y2 = int(m[5]) if m[5] not in (None, "*") else y
-            for i in range(bisect_left(xs, min(x, x2) - radius), bisect_right(xs, max(x, x2) + radius)):
+            for i in range(
+                bisect_left(xs, min(x, x2) - radius),
+                bisect_right(xs, max(x, x2) + radius),
+            ):
                 yy = ys[xs[i]]
                 j = bisect_left(yy, min(y, y2) - radius)
                 if j < len(yy) and yy[j] <= max(y, y2) + radius:
@@ -93,18 +105,120 @@ def localized_seed(frame, failed, radius, output, all_pins=False, findings=(), p
     return released, priority, blocked_cells
 
 
+def critical_routes(frame, timing, count):
+    slacks, clocks = {}, set()
+    with timing.open() as src:
+        for line in src:
+            if not line.strip() or line.startswith("#"):
+                continue
+            row = re.fullmatch(r'"(.+)"\s+(\S+)\s+([01])', line.strip())
+            if not row or not math.isfinite(value := float(row[2])):
+                raise ValueError(f"invalid LiveHD pin timing row in {timing}: {line.strip()}")
+            pin = row[1].replace(r"\/", "/")
+            slacks[pin] = min(value, slacks.get(pin, math.inf))
+            if row[3] == "1":
+                clocks.add(pin)
+
+    def ranked():
+        for name, head, paths in records(frame):
+            if not paths or not paths[0].startswith("+ ROUTED ") or "+ USE CLOCK" in head:
+                continue
+            pins = [
+                (b if a == "PIN" else a + ":" + b).replace(r"\/", "/")
+                for a, b in CONN.findall(head.partition(" + ")[0])
+            ]
+            if len(pins) < 2 or clocks.intersection(pins):
+                continue
+            slack = min((slacks[p] for p in pins if p in slacks), default=math.inf)
+            if not math.isfinite(slack):
+                continue
+            length = 0
+            for path in paths:
+                wire = WIRE.fullmatch(path)
+                if not wire:
+                    break
+                if wire[4] and wire[4] != "*":
+                    length += abs(int(wire[4]) - int(wire[1]))
+                if wire[5] and wire[5] != "*":
+                    length += abs(int(wire[5]) - int(wire[2]))
+            else:
+                yield slack, -length, name.replace(r"\/", "/")
+
+    return heapq.nsmallest(count, ranked())
+
+
+def timing_eco(args):
+    frame = args.previous / "routed.def"
+    ranked = critical_routes(frame, args.timing_eco, args.net_count)
+    if not ranked:
+        raise ValueError("no routed signal net matched the pin timing")
+    folder = args.out
+    folder.mkdir(parents=True, exist_ok=False)
+    names = folder / "nets.txt"
+    names.write_text("".join(n + "\n" for _, _, n in ranked))
+    (folder / "rank.json").write_text(json.dumps({n: [s, -w] for s, w, n in ranked}, indent=2))
+    seed = folder / "seed.def"
+    localized_seed(frame, [{"net": n, "fail_pin": ""} for _, _, n in ranked], 0, seed)
+    route(
+        [
+            args.router,
+            "--only",
+            names,
+            "--timing",
+            args.timing_eco,
+            "--crit-frac",
+            "1",
+            "--order",
+            "short",
+            "--hweight",
+            "1.1",
+            "--budget",
+            "900000",
+            "--pd-alpha",
+            str(args.pd_alpha),
+            "--ripup",
+            "4",
+            "--final-passes",
+            "3",
+            "--time-limit",
+            str(args.seconds),
+            "--verify-report",
+            folder / "findings.tsv",
+            "--report",
+            folder / "feedback.tsv",
+            seed,
+            folder / "routed.def",
+            *args.lefs,
+        ],
+        folder,
+    )
+    result = feedback(folder)
+    result.update(
+        selected=len(ranked),
+        unrouted=result["violations"].get("verify_nets_without_wires", 0),
+    )
+    (folder / "feedback.json").write_text(json.dumps(result, indent=2))
+    print(json.dumps(result))
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--router", type=Path, default=Path(__file__).with_name("rf_route"))
     p.add_argument("--radius", type=int, default=540, help="access window radius in DEF units")
-    p.add_argument("--all-pins", action="store_true", help="release access at every endpoint of the failed nets")
+    p.add_argument(
+        "--all-pins",
+        action="store_true",
+        help="release access at every endpoint of the failed nets",
+    )
     p.add_argument(
         "--reserve-first",
         action="store_true",
         help="reserve compatible access pads for the blocked cells before routing the priority cohort",
     )
     p.add_argument(
-        "--targets", type=Path, help="repair listed open nets and their released neighbors in this round"
+        "--targets",
+        type=Path,
+        help="repair listed open nets and their released neighbors in this round",
     )
     p.add_argument(
         "--protect-failures",
@@ -115,13 +229,46 @@ def main():
         help="route earlier failed nets from this same placement alongside current failures to break repair cycles",
     )
     p.add_argument(
-        "--pin-neighbors", action="store_true", help="route every net of a blocked cell in the priority pass"
+        "--pin-neighbors",
+        action="store_true",
+        help="route every net of a blocked cell in the priority pass",
     )
     p.add_argument("--seconds", type=float, default=120, help="CPU budget per routing pass")
     p.add_argument("--out", required=True, type=Path)
     p.add_argument("previous", type=Path, help="directory containing routed.def and feedback.tsv")
     p.add_argument("lefs", nargs="+", type=Path)
+    p.add_argument(
+        "--timing-eco",
+        type=Path,
+        metavar="PIN_TIMING",
+        help="reroute critical signals of a completed route using LiveHD pin timing",
+    )
+    p.add_argument("--net-count", type=int, default=12, help="maximum signals in a timing ECO")
+    p.add_argument("--pd-alpha", type=float, default=0.6, help="timing ECO tree weight")
+    p.add_argument(
+        "--pin-access-layers",
+        action="store_true",
+        help="release tracks near failed pins only on M1 through M3, including vias starting on those layers",
+    )
     args = p.parse_args()
+    if args.timing_eco:
+        if (
+            args.targets
+            or args.protect_failures
+            or args.all_pins
+            or args.pin_neighbors
+            or args.pin_access_layers
+            or args.reserve_first
+        ):
+            p.error("timing ECO and pin-access repair options select different cohorts")
+        if not (args.net_count > 0 and args.seconds > 0 and math.isfinite(args.seconds) and 0 <= args.pd_alpha <= 1):
+            p.error("expected positive count and CPU budget and a tree weight between 0 and 1")
+        # A timing ECO freezes all other signals. Keep open-net repairs on the ordinary feedback path.
+        stats = json.loads((args.previous / "stats.json").read_text())
+        if "verify_nets_without_wires" not in stats or any(v for k, v in stats.items() if k.startswith("verify_")):
+            p.error("timing ECO requires a verified connected input without native geometry findings")
+        timing_eco(args)
+        return
     args.pin_neighbors = args.pin_neighbors or args.reserve_first
     if args.radius < 1 or not args.seconds > 0:
         p.error("radius and CPU budget must be positive")
@@ -164,6 +311,7 @@ def main():
         args.all_pins,
         findings,
         args.pin_neighbors,
+        args.pin_access_layers,
     )
     (folder / "released.json").write_text(json.dumps(released))
     first = folder / "priority"
@@ -180,7 +328,14 @@ def main():
         repair_list.write_text("".join(name + "\n" for name in sorted(cohort)))
         selected = ["--only", repair_list]
     only.write_text("".join(n + "\n" for n in sorted(priority)))
-    opts = [args.router, *ROUTE, "--time-limit", str(args.seconds), "--final-passes", "3"]
+    opts = [
+        args.router,
+        *ROUTE,
+        "--time-limit",
+        str(args.seconds),
+        "--final-passes",
+        "3",
+    ]
     route(
         [
             *opts,
@@ -229,16 +384,26 @@ def main():
         old_rows = {r["net"]: r for r in previous}
         with (folder / "feedback.tsv").open("a") as dst:
             writer = csv.DictWriter(
-                dst, fieldnames=fields, delimiter="\t", lineterminator="\n", extrasaction="ignore"
+                dst,
+                fieldnames=fields,
+                delimiter="\t",
+                lineterminator="\n",
+                extrasaction="ignore",
             )
             for net in sorted(bare - reported):
-                writer.writerow(old_rows.get(net, {"net": net, "status": "unattempted", "why": "outside-cohort"}))
+                writer.writerow(
+                    old_rows.get(
+                        net,
+                        {"net": net, "status": "unattempted", "why": "outside-cohort"},
+                    )
+                )
     result = dict(
         feedback(folder),
         previous_unrouted=len(previous),
         targeted_unrouted=len(failed),
         prior_failure_nets=len({name for name, _ in prior}),
         previous_geometry_findings=len(findings),
+        pin_access_layers=args.pin_access_layers,
         released=len(released),
         radius=args.radius,
         all_pins=args.all_pins,

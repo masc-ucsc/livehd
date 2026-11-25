@@ -358,6 +358,21 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(result["violations"], {"verify_nets_without_wires": 1})
         self.assertEqual([r["net"] for r in result["first_failures"]], ["later"])
 
+    def test_pin_access_release_preserves_upper_tracks(self):
+        self.with_vias()
+        pins = [f"- p{i} + NET high + DIRECTION INOUT + LAYER M4 ( -20 -18 ) ( 20 18 ) "
+                f"+ FIXED ( {x} 54 ) N ;" for i, x in enumerate((90, 306))]
+        frame = self.frame(["- a BUF + FIXED ( 108 270 ) N ;", "- b BUF + FIXED ( 324 270 ) N ;"],
+                           ["- n ( a Z ) ( b A ) ;", "- high ( PIN p0 ) ( PIN p1 )\n"
+                            "      + ROUTED M4 ( 90 54 0 ) ( 306 * 0 ) ;"], pins)
+        self.run_router(frame, "--limit", "0", "--report", "feedback.tsv", output="routed.def")
+        for folder, extra, expected in (("all", [], ["high"]), ("lower", ["--pin-access-layers"], [])):
+            run = subprocess.run([FEEDBACK, "--all-pins", *extra, "--out", folder, ".", "tech.lef", "cells.lef"],
+                                 cwd=self.root, capture_output=True, text=True, timeout=10)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertEqual(json.loads((self.root / folder / "released.json").read_text()), expected)
+            self.assertEqual(json.loads(run.stdout)["violations"], {})
+
     def test_placement_home_socket(self):
         self.with_vias()
         (self.root / "in.def").write_text(self.two_cells().replace("( 108 270 )", "( 216 270 )"))
@@ -405,6 +420,26 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(stats["nets_routed"], 1)
         self.assertEqual({k: v for k, v in stats.items() if k.startswith("verify_") and v}, {})
         self.assertEqual(self.findings(), set())
+
+    def test_timing_eco_keeps_clock_and_unselected_signal(self):
+        pins, nets = [], []
+        for net, y in (("critical", 54), ("other", 270), ("clk", 486)):
+            for suffix, x in (("a", 90), ("b", 306)):
+                pins.append(f"- {net}_{suffix} + NET {net} + DIRECTION INOUT + LAYER M2 ( -20 -9 ) ( 20 9 ) "
+                            f"+ FIXED ( {x} {y} ) N ;")
+            nets.append(f"- {net} ( PIN {net}_a ) ( PIN {net}_b ) ;")
+        stats = self.run_router(self.frame(nets=nets, pins=pins), "--verify", output="routed.def")
+        (self.root / "stats.json").write_text(json.dumps(stats))
+        (self.root / "pins.tsv").write_text('"critical_a" -10 0\n"other_a" 3 0\n"clk_a" -20 1\n')
+        run = subprocess.run([FEEDBACK, "--timing-eco", "pins.tsv", "--net-count", "1", "--out", "eco", ".",
+                              "tech.lef", "cells.lef"], cwd=self.root, capture_output=True, text=True, timeout=10)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual((self.root / "eco/nets.txt").read_text(), "critical\n")
+        self.assertEqual(json.loads(run.stdout)["violations"], {})
+        for net in ("other", "clk"):
+            pattern = rf"(?ms)^- {net} \( PIN .*?;"
+            self.assertEqual(re.search(pattern, (self.root / "routed.def").read_text())[0],
+                             re.search(pattern, (self.root / "eco/routed.def").read_text())[0])
 
     def test_omitted_net_is_reported(self):
         self.with_vias()
