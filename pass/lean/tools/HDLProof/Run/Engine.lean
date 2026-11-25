@@ -13,7 +13,8 @@ It does the route's one-time work for `D` and hands back the engine:
 - vc: `compileDesign`, the optimizer (unless `vcOpt := false`), the well-ordering check, the
   fanout table;
 - ref: nothing (`interpretDesign` itself);
-- fp: the certificate checks, the specialization, `checkResidual`, the shared tails.
+- fp: the certificate checks, the specialization, `checkResidual`, the shared tails; the engine
+  keeps the residual's own state between steps (`Run/FpEngine`).
 `SelectedEngine` is `{ σ, engine, notes }`: the engine (`Compiler.Engine σ`: `load`, `step`,
 `view`, `reload`, `peek?`) on a state type `σ` of the route's own kind, and one line per thing
 prepared (`cert_trace opt:stats` prints vc's). `SelectError` carries the refusal itself
@@ -56,6 +57,7 @@ before maps onto a knob, and every combination they could run is still built:
 | `inc:scan`  | `vcInc := .scan` (unless `inc:off`)         | cert_run, cert_trace              |
 | `mem:fun`   | `vcMem := .func` (memories as functions)    | cert_run, cert_trace              |
 | `share:off` | `fpShare := false`                          | cert_run, dcert2_memroute         |
+| `loop:full` | `fpLoopFull := true` (convert every step)   | cert_run, dcert2_memroute         |
 | `ir:raw`    | `irStaged := false` (`directStepRaw`)       | cert_run (the judge's step)       |
 | `compact:K` | `compact := some K` (`0`: off)              | cert_run, cert_trace              |
 
@@ -68,12 +70,15 @@ The engines and what proves them:
   well-ordered). Each is sound against `denoteResidual` of the program it runs
   (`Compiler/VcEngine`), and so against `interpretDesign` (`CompileOpt`'s `*_interp`, on the
   lake side).
-- fp: `mkStepper`'s step (`fpStep`, shared tails unless `fpShare := false`) as an engine on
-  runtime states; `fpStep_agree`: its outputs are `interpretDesign`'s and its state agrees below
-  every memory's depth.
+- fp: `fpEncEngine` (`Run/FpEngine`): the residual's state kept encoded between steps, the policy's
+  size half checked once per sizes, only the outputs decoded; `fpEncEngine_agree`: its outputs are
+  `interpretDesign`'s and its state agrees below every memory's depth (a step is exact; a load goes
+  through a checkpoint). OLDER, SLOWER with `loop:full`: `mkStepper`'s step (`fpStep`), which
+  converts the whole state to the residual's and back every step; `fpStep_agree`. Both with shared
+  tails unless `fpShare := false`.
 Mathlib-free.
 -/
-import HDLProof.Run.Sound
+import HDLProof.Run.FpEngine
 import LeanSemanticPrimitives.Compiler.VcEngine
 
 namespace HDLProof
@@ -107,6 +112,8 @@ structure Knobs where
   vcMem    : VcMem := .table
   irStaged : Bool := true
   fpShare  : Bool := true
+  /-- OLDER, SLOWER: `fp`'s step on runtime states (`fpStep`), converting every step -/
+  fpLoopFull : Bool := false
   /-- `none`: automatic (the driver's policy); `some 0`: off; `some K`: every `K` cycles. -/
   compact  : Option Nat := none
 deriving Inhabited, Repr
@@ -131,6 +138,7 @@ def Knobs.apply? (k : Knobs) (opt : String) : Option (Except String Knobs) :=
     | "mem:fun" => some (.ok { k with vcMem := .func })
     | "share:off" => some (.ok { k with fpShare := false })
     | "ir:raw" => some (.ok { k with irStaged := false })
+    | "loop:full" => some (.ok { k with fpLoopFull := true })
     | _ => none
 
 /-- Apply options in order; the ones that are not knobs come back, in order, for the driver. -/
@@ -210,8 +218,9 @@ def EngineSelector (D : DesignCert) (k : Knobs) : Except SelectError SelectedEng
           let m := "fp: the memory route does not admit the design, or checkResidual rejects its residual"
           .error ⟨.fp, m, m⟩
         | some sim =>
-          .ok ⟨_, Engine.ofStep "fp"
-            (fpStep D ⟨sim, if k.fpShare then Projection.ShareTails.shareSim sim else none⟩), #[]⟩
+          let sh := if k.fpShare then Projection.ShareTails.shareSim sim else none
+          if k.fpLoopFull then .ok ⟨_, Engine.ofStep "fp" (fpStep D ⟨sim, sh⟩), #[]⟩
+          else .ok ⟨_, fpEncEngine D sim sh, #[]⟩
 
 /-- Run `cont` on the engine `knobs` name for `D`; the build's refusal otherwise. -/
 def withSelectedEngine {α : Type} (D : DesignCert) (k : Knobs)
@@ -283,11 +292,12 @@ theorem EngineSelector_vc_sound {D : DesignCert} {k : Knobs} {b : SelectedEngine
       · exact vcEngineOf_sound D k _
     exact key k.vcOpt
 
-/-- fp's engine is a step on runtime states that agrees with `interpretDesign` (`StepAgree`), for
-a certificate `fpChecks` accepts. -/
+/-- fp's engine agrees with `interpretDesign` (`EngineAgree`), for a certificate `fpChecks` accepts:
+the encoded engine (`fpEncEngine_agree`), or with `loop:full` the step on runtime states
+(`fpStep_agree`). -/
 theorem EngineSelector_fp_agree {D : DesignCert} {k : Knobs} {b : SelectedEngine} (hr : k.route = .fp)
     (h : EngineSelector D k = .ok b) :
-    fpChecks D = none ∧ ∃ step, StepAgree D step ∧ b = ⟨RuntimeState, Engine.ofStep "fp" step, #[]⟩ := by
+    fpChecks D = none ∧ ∃ Inv : b.σ → Prop, EngineAgree D b.engine Inv := by
   unfold EngineSelector at h
   rw [hr] at h
   dsimp only at h
@@ -302,23 +312,35 @@ theorem EngineSelector_fp_agree {D : DesignCert} {k : Knobs} {b : SelectedEngine
       cases hs : Projection.HwMem.mkMemSimOfW D R with
       | none => simp [hc, hres, hs] at h
       | some sim =>
-        simp only [hc, hres, hs, Except.ok.injEq] at h
-        exact ⟨rfl, _, fpStep_agree hsem haddr hdepth hroot hword hproj hs
-          (by cases k.fpShare <;> simp), h.symm⟩
+        simp only [hc, hres, hs] at h
+        have hsh : (if k.fpShare then Projection.ShareTails.shareSim sim else none)
+              = Projection.ShareTails.shareSim sim ∨
+            (if k.fpShare then Projection.ShareTails.shareSim sim else none) = none := by
+          cases k.fpShare <;> simp
+        refine ⟨rfl, ?_⟩
+        cases hlf : k.fpLoopFull
+        · simp only [hlf, Bool.false_eq_true, ite_false, Except.ok.injEq] at h
+          subst h
+          exact ⟨_, fpEncEngine_agree hsem hdepth hroot hword hproj hs hsh⟩
+        · simp only [hlf, ite_true, Except.ok.injEq] at h
+          subst h
+          exact ⟨_, ofStep_engineAgree (fpStep_agree hsem haddr hdepth hroot hword hproj hs hsh)⟩
 
-/-- **A closed-loop run on the engine `EngineSelector` builds is the reference trace of its ticks**: for
-ir, ref and vc (`runCycles_sound`; vc against its program's `denoteResidual`, which
-`compileOpt_correct` makes `interpretDesign`'s on the lake side) the run's outputs and final state
-are `refTrace`'s; for fp (`runCycles_fp_outputs`) the outputs, and a final state that agrees. -/
+/-- **A closed-loop run on fp's engine, from the engine's load of a state `s0` that fits, prints
+`refTrace`'s outputs from `s0`** and ends in a state that agrees with `refTrace`'s. (For ir, ref
+and vc it is `runCycles_sound` on `EngineSelector_*_sound`; vc against its program's
+`denoteResidual`, which `compileOpt_correct` makes `interpretDesign`'s on the lake side.) -/
 theorem EngineSelector_runCycles_fp {ctx : Ctx} {k : Knobs} {b : SelectedEngine} (hr : k.route = .fp)
-    (h : EngineSelector ctx.D k = .ok b) {n : Nat} {st : LoopState b.σ} {ts : List Tick}
-    {os : List (Array BV)} {st' : LoopState b.σ} {why : Option String}
-    (hfit : Fits ctx.D (b.engine.view st.s)) (hrun : runCycles ctx b.engine n st = .ok (ts, os, st', why)) :
-    (refTrace ctx.D (b.engine.view st.s) ts).steps.map (·.outputs) = os ∧
-    Projection.CkptResume.StateAgree ctx.D (b.engine.view st'.s)
-      (refTrace ctx.D (b.engine.view st.s) ts).finalState := by
-  obtain ⟨hc, step, hs, rfl⟩ := EngineSelector_fp_agree hr h
-  exact runCycles_fp_outputs hs hc hfit hrun
+    (h : EngineSelector ctx.D k = .ok b) {s0 : RuntimeState} (hfit : Fits ctx.D s0) {n : Nat}
+    {host : HostState} {c0 : Nat} {ts : List Tick} {os : List (Array BV)} {st' : LoopState b.σ}
+    {why : Option String}
+    (hrun : runCycles ctx b.engine n ⟨b.engine.load s0, host, c0⟩ = .ok (ts, os, st', why)) :
+    (refTrace ctx.D s0 ts).steps.map (·.outputs) = os ∧
+    Projection.CkptResume.StateAgree ctx.D (b.engine.view st'.s) (refTrace ctx.D s0 ts).finalState := by
+  obtain ⟨hc, Inv, hag⟩ := EngineSelector_fp_agree hr h
+  obtain ⟨hsem, haddr, -, hroot, -⟩ := fpChecks_none hc
+  obtain ⟨hinv, hfit', hag0⟩ := hag.load s0 hfit
+  exact runCycles_agree hag hsem haddr hroot n _ s0 ts os st' why hinv hfit' hag0 hrun
 
 end Run
 end HDLProof

@@ -504,13 +504,17 @@ theorem mkStepper_fp_agree {D : DesignCert} {st : Stepper} {opt : Bool}
 
 /-! ### One cycle and a run, up to agreement -/
 
-/-- An engine that agrees with `interpretDesign` below depth (the `fp` route's form): from a state
-with `Inv` whose runtime state fits, every step gives `interpretDesign`'s outputs and a state with
-`Inv` that agrees with `interpretDesign`'s next state and fits; every peek gives the outputs and a
-state with `Inv` standing for the same runtime state. -/
+/-- An engine that agrees with `interpretDesign` below depth (the `fp` route's form): a loaded or
+reloaded state has `Inv` and stands for a runtime state that fits and agrees with the one given
+(the encoded `fp` engine loads through a checkpoint, which keeps the words below each depth);
+from a state with `Inv` whose runtime state fits, every step gives `interpretDesign`'s outputs and
+a state with `Inv` that agrees with `interpretDesign`'s next state and fits; every peek gives the
+outputs and a state with `Inv` standing for the same runtime state. -/
 structure EngineAgree {σ : Type} (D : DesignCert) (E : Engine σ) (Inv : σ → Prop) : Prop where
-  load   : ∀ s, Fits D s → Inv (E.load s) ∧ E.view (E.load s) = s
-  reload : ∀ q s, Inv q → Fits D s → Inv (E.reload q s) ∧ E.view (E.reload q s) = s
+  load   : ∀ s, Fits D s →
+    Inv (E.load s) ∧ Fits D (E.view (E.load s)) ∧ StateAgree D (E.view (E.load s)) s
+  reload : ∀ q s, Inv q → Fits D s →
+    Inv (E.reload q s) ∧ Fits D (E.view (E.reload q s)) ∧ StateAgree D (E.view (E.reload q s)) s
   step   : ∀ q, Inv q → Fits D (E.view q) → ∀ e i o q', E.step e i q = .ok (o, q') →
     Inv q' ∧ AgreeR D e i (E.view q) { outputs := o, nextState := E.view q' }
   peek   : ∀ pk, E.peek? = some pk → ∀ q, Inv q → Fits D (E.view q) → ∀ e i o q',
@@ -521,8 +525,8 @@ structure EngineAgree {σ : Type} (D : DesignCert) (E : Engine σ) (Inv : σ →
 theorem ofStep_engineAgree {D : DesignCert} {name : String}
     {f : ClockEdges → RuntimeInput → RuntimeState → Except String RuntimeResult}
     (h : StepAgree D f) : EngineAgree D (Engine.ofStep name f) (fun _ => True) where
-  load _ _ := ⟨trivial, rfl⟩
-  reload _ _ _ _ := ⟨trivial, rfl⟩
+  load s hs := ⟨trivial, hs, StateAgree.refl' D s⟩
+  reload _ s _ hs := ⟨trivial, hs, StateAgree.refl' D s⟩
   step q _ hfit e i o q' hs := by
     simp only [Engine.ofStep] at hs
     split at hs

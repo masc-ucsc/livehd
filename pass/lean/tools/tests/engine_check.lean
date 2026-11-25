@@ -6,8 +6,8 @@ Conformance of the engines `EngineSelector` builds (`HDLProof/Run/Engine`).
 
 `EngineSelector_*_sound` and `EngineSelector_fp_agree` PROVE what these runs check. For each certificate,
 every route and knob combination (ir staged and raw; ref; vc optimized or not, each with the
-event-driven step on tables and on functions, the scan step and the full step; fp with and
-without shared tails) runs `<cycles>` cycles of pseudo-random inputs and clock edges (a fixed
+event-driven step on tables and on functions, the scan step and the full step; fp's encoded
+engine with and without shared tails, and its earlier step `loop:full`) runs `<cycles>` cycles of pseudo-random inputs and clock edges (a fixed
 generator, so every engine sees the same ticks) three ways:
 - plain: one step per cycle;
 - twice: each cycle first steps from the state with other inputs, drops that result, then steps
@@ -110,7 +110,8 @@ def combos : List (String × Knobs) :=
      (s!"vc{o} mem:fun", { route := .vc, vcOpt := opt, vcMem := .func }),
      (s!"vc{o} inc:scan", { route := .vc, vcOpt := opt, vcInc := .scan }),
      (s!"vc{o} inc:off", { route := .vc, vcOpt := opt, vcInc := .off })]) ++
-  [("fp", { route := .fp }), ("fp share:off", { route := .fp, fpShare := false })]
+  [("fp", { route := .fp }), ("fp share:off", { route := .fp, fpShare := false }),
+   ("fp loop:full", { route := .fp, fpLoopFull := true })]
 
 def knobKey (k : Knobs) : String :=
   s!"{k.route.name} opt={k.vcOpt} inc={repr k.vcInc} mem={repr k.vcMem} staged={k.irStaged} \
