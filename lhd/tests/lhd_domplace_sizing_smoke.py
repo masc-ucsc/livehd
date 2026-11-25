@@ -166,7 +166,10 @@ sidecar = json.loads((bundle / 'domino_models.json').read_text())
 variants = {v['name']: v for m in sidecar['masters'] for v in m['variants']}
 before = domplace_view.read_def(root / 'plain/out.def')
 after = domplace_view.read_def(root / 'grown/out.def')
-q1 = next(n for n in after.components if domplace_view.leaf(n) == 'q1')
+# Placement disambiguates the instance from the scalar output port q1.
+q1_instances = [n for n in after.components if domplace_view.leaf(n) == 'q1__inst']
+assert len(q1_instances) == 1, after.components
+q1, = q1_instances
 # The two rungs of q1's PG rail template (the one its start row needs).
 template = before.components[q1].macro.rpartition('_t')[2]
 assert before.components[q1].macro == domplace_view.rail_template(before.components[q1].macro,
@@ -196,13 +199,12 @@ assert warm['qor']['place'].get('reused_final_state'), warm['qor']['place']
 assert (root / 'grown_warm/out.def').read_bytes() == (root / 'grown/out.def').read_bytes()
 assert warm['qor']['place']['domino_sizing']['trials'] == report['trials']
 
-# A dense core cannot pack the wider variant anywhere: the rejected trial
-# leaves the placement exactly as an unsized run places it. The core is sized
-# by the density target (the bins are two rows tall, so the hard cap averages
-# over the row pair; a utilization above the target alone does not shrink it);
-# 0.79 sits just under the hard bin cap, where the 13-site domino masters
-# leave no row pair for the wider rung.
-dense = ['--set', 'synth.place.utilization=0.79', '--set', 'synth.place.density=0.79']
+# Fix the dense core at 33 sites by seven rows. The narrow variant fits,
+# but the two-row ECO cannot make room for the wider rung. The rejected
+# trial leaves the same placement as the unsized run.
+dense_box = '0,0,15.18,19.04'  # 33 * 0.46 um by 7 * 2.72 um
+dense = ['--set', f'synth.place.core={dense_box}', '--set', f'synth.place.die={dense_box}',
+         '--set', 'synth.place.utilization=0.79', '--set', 'synth.place.density=0.79']
 tight = run('tight', coefficients + sizing + dense)['qor']['place']['domino_sizing']
 assert [(t['move'], t['outcome']) for t in tight['trials']] == [('up', 'rejected_packing')], tight['trials']
 failure = tight['trials'][0]['failure']  # the two-row ECO's refusal, not the widest-row pre-check
