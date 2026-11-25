@@ -2842,7 +2842,7 @@ struct Router {
     return true;
   }
 
-  void run() {
+  void run(bool resume = false) {
     const auto base_budget = opt.max_expand;
     leftovers              = false;
     const double run_start = cpu_s();
@@ -2957,6 +2957,14 @@ struct Router {
     });
     if (opt.limit >= 0 && int(order.size()) > opt.limit) {
       order.resize(opt.limit);
+    }
+    if (resume) {
+      // Preserve the selected cohort and clock priority. Within each group
+      // give nets deferred by the deadline one search before retrying failures.
+      auto data     = std::find_if(order.begin(), order.end(), [&](int i) { return !nets[i].clock; });
+      auto deferred = [&](int i) { return nets[i].calls == 0 && nets[i].fail_why == "time"; };
+      std::stable_partition(order.begin(), data, deferred);
+      std::stable_partition(data, order.end(), deferred);
     }
     std::vector<bool> selected(nets.size());
     for (int ni : order) {
@@ -3619,8 +3627,21 @@ struct Router {
         std::sort(v.begin(), v.end(), [](const Piece& a, const Piece& b) { return a.lo < b.lo; });
         for (size_t i = 0; i < v.size(); ++i) {
           if (v[i].net > 0 && v[i].hi - v[i].lo < ly.minlen) {
-            ++min_len;
-            on_track("min-length", l, t, v[i].lo, v[i].hi, net_name(v[i].net));
+            // A via landing entirely on an existing macro pin adds no
+            // conductor outside the pin. A pad protruding even one DBU is
+            // still subject to the routed minimum-length rule.
+            const auto pins = edge_pins.find(v[i].net);
+            const int  low = ly.tc[t] - ly.w / 2, high = ly.tc[t] + ly.w / 2;
+            const auto covered = [&](const Loose& p) {
+              const auto& r = p.r;
+              return p.l == int(l) && std::lround(ly.horiz ? r.xl : r.yl) <= v[i].lo
+                     && std::lround(ly.horiz ? r.xh : r.yh) >= v[i].hi && std::lround(ly.horiz ? r.yl : r.xl) <= low
+                     && std::lround(ly.horiz ? r.yh : r.xh) >= high;
+            };
+            if (pins == edge_pins.end() || std::none_of(pins->second.begin(), pins->second.end(), covered)) {
+              ++min_len;
+              on_track("min-length", l, t, v[i].lo, v[i].hi, net_name(v[i].net));
+            }
           }
           for (size_t j = i + 1; j < v.size() && v[j].lo - v[i].hi < ly.e2e; ++j) {
             const auto both = net_name(v[i].net) + " " + net_name(v[j].net);
@@ -4131,8 +4152,9 @@ int main(int argc, char** argv) try {
   double route_wall = now_s() - t1, route_cpu = cpu_s() - c1;
   if (agent) {
     const auto status = [&] {
-      int                routed = 0, pending = 0, listed = 0;
-      std::ostringstream failures;
+      int                     routed = 0, pending = 0, deferred = 0;
+      std::ostringstream      failures;
+      std::vector<const Net*> attempted, unattempted;
       for (const auto& n : r.nets) {
         if (n.skip) {
           continue;
@@ -4142,20 +4164,28 @@ int main(int argc, char** argv) try {
           continue;
         }
         ++pending;
-        if (listed++ < 20) {
-          if (listed > 1) {
-            failures << ',';
-          }
-          failures << "{\"net\":" << std::quoted(n.name) << ",\"reason\":" << std::quoted(n.fail_why);
-          if (n.fail_pin >= 0) {
-            const auto& pin = n.pins[n.fail_pin];
-            failures << ",\"pin\":" << std::quoted(pin.name) << ",\"x\":" << pin.cx << ",\"y\":" << pin.cy;
-          }
-          failures << '}';
+        const bool waiting  = n.calls == 0 && n.fail_why == "time";
+        deferred           += waiting;
+        auto& group         = waiting ? unattempted : attempted;
+        if (group.size() < 20) {
+          group.push_back(&n);
         }
       }
-      std::cout << "{\"routed\":" << routed << ",\"pending\":" << pending << ",\"failures\":[" << failures.str() << "]}"
-                << std::endl;
+      attempted.insert(attempted.end(), unattempted.begin(), unattempted.end());
+      for (size_t i = 0; i < std::min(size_t{20}, attempted.size()); ++i) {
+        const auto& n = *attempted[i];
+        if (i) {
+          failures << ',';
+        }
+        failures << "{\"net\":" << std::quoted(n.name) << ",\"reason\":" << std::quoted(n.fail_why);
+        if (n.fail_pin >= 0) {
+          const auto& pin = n.pins[n.fail_pin];
+          failures << ",\"pin\":" << std::quoted(pin.name) << ",\"x\":" << pin.cx << ",\"y\":" << pin.cy;
+        }
+        failures << '}';
+      }
+      std::cout << "{\"routed\":" << routed << ",\"pending\":" << pending << ",\"deferred\":" << deferred << ",\"failures\":["
+                << failures.str() << "]}" << std::endl;
     };
     status();
     for (std::string line; std::getline(std::cin, line);) {
@@ -4191,7 +4221,7 @@ int main(int argc, char** argv) try {
           n.rips = 0;
         }
         const double before = now_s(), cpu_before = cpu_s();
-        r.run();
+        r.run(true);
         route_wall += now_s() - before;
         route_cpu  += cpu_s() - cpu_before;
       } else if (op != "status" || (cmd >> extra)) {

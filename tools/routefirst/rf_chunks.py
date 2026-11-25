@@ -358,7 +358,13 @@ def main():
     homes.add_argument(
         "--plan", type=Path, help="use the rectangular or stepped regions of a LiveHD fp_chunks.json"
     )
-    homes.add_argument("--grid", type=int, nargs=2, default=(2, 2), metavar=("NX", "NY"))
+    homes.add_argument(
+        "--grid",
+        type=int,
+        nargs=2,
+        metavar=("NX", "NY"),
+        help="override the two- or four-home ASAP7 starting grid",
+    )
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--worker-seconds", type=float, default=120)
     p.add_argument("--finish-seconds", type=float, default=600)
@@ -388,6 +394,15 @@ def main():
     p.add_argument("--crit-frac", type=float, default=0.0)
     p.add_argument("--pd-alpha", type=float, default=0.3)
     args = p.parse_args()
+    if args.grid is None:
+        args.grid = (2, 2)
+        if not args.plan:
+            with args.frame.open() as frame:
+                for line in frame:
+                    if line.startswith("COMPONENTS "):
+                        if int(line.split()[1]) <= 100_000 or args.workers < 4:
+                            args.grid = (2, 1)
+                        break
     args.agent = args.agent or args.agent_socket is not None
     if not 0 <= args.pd_alpha <= 1 or not 0 <= args.crit_frac <= 1 or (args.crit_frac and not args.timing):
         p.error("pd-alpha and crit-frac must be in [0,1], with timing supplied for critical-net priority")

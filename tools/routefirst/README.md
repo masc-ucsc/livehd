@@ -379,3 +379,14 @@ When two nets alternate as the last open, add
 priority pass routes both sets of nets together. On the independently
 placed two-home NVDLA M frame, protecting the preceding round released
 36 of the existing routes and closed the final open in 5.52 seconds wall.
+
+With no placement plan or explicit grid, the ASAP7 starting grid is two
+side-by-side homes through 100,000 placed components and four homes above
+that size when four workers are available. Two homes gave fewer first-pass
+opens on NVDLA M, A and P. On O four homes reduced the first-pass residual
+from 4,811 to 1,651 at the same worker and assembly budgets. The threshold
+lies between the tested design sizes. Set `--grid NX NY` to explore a
+different cut, or `--plan` to keep an existing floorplan's home regions.
+A resident status reply counts deadline-deferred nets separately and lists
+attempted failures first. Within clock and data groups, retry gives nets
+that missed the preceding deadline a first search.

@@ -222,6 +222,22 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(stats.get("edge_pin_stub_wires", 0), 0)
         self.assertEqual({k: v for k, v in stats.items() if k.startswith("verify_") and v}, {})
 
+    def test_on_track_via_inside_macro_pin_and_one_dbu_outside(self):
+        self.with_vias()
+        tech = self.root / "tech.lef"
+        tech.write_text(tech.read_text().replace(
+            "VIA VIA45 DEFAULT\n LAYER M4 ; RECT -0.009 -0.011 0.009 0.011",
+            "VIA VIA45 DEFAULT\n LAYER M4 ; RECT -0.023 -0.012 0.023 0.012"))
+        block = ("MACRO SRAM\n CLASS BLOCK ; ORIGIN 0 0 ; SIZE 0.216 BY 0.270 ;\n"
+                 " PIN P\n DIRECTION INPUT ; PORT LAYER M4 ; RECT 0.036 0.060 0.108 0.084 ; END\n"
+                 " END P\nEND SRAM\n")
+        (self.root / "cells.lef").write_text(CELLS.replace("END LIBRARY", block + "END LIBRARY"))
+        for x, expected in ((301, 0), (302, 1)):
+            frame = self.frame(["- ram SRAM + FIXED ( 216 270 ) N ;"],
+                               [f"- n ( ram P ) + ROUTED M4 ( {x} 342 ) VIA45 ;"])
+            self.run_router(frame, "--verify-report", "found.tsv")
+            self.assertEqual(("min-length", "M4", "n") in self.findings(), bool(expected))
+
     def with_vias(self):
         cuts = "".join(f"LAYER V{k}\n TYPE CUT ;\nEND V{k}\n" for k in range(1, 7))
         vias = ""
@@ -238,6 +254,18 @@ class RouteTest(unittest.TestCase):
     def two_cells(self, wiring=""):
         cells = ["- a BUF + FIXED ( 108 270 ) N ;", "- b BUF + FIXED ( 324 270 ) N ;"]
         return self.frame(cells, [f"- n ( a Z ) ( b A ) {wiring};"])
+
+    def test_retry_after_deadline(self):
+        self.with_vias()
+        (self.root / "in.def").write_text(self.two_cells())
+        run = subprocess.run([ROUTER, "--agent", "--time-limit", "0.000000001", "--verify",
+                              "in.def", "out.def", "tech.lef", "cells.lef"],
+                             cwd=self.root, input="retry 300000 1 1 2\nfinish\n",
+                             capture_output=True, text=True, check=True, timeout=10)
+        initial, resumed, stats = run.stdout.split("\n", 2)
+        self.assertEqual(json.loads(initial)["deferred"], 1)
+        self.assertEqual(json.loads(resumed)["pending"], 0)
+        self.assertEqual(json.loads(stats).get("verify_nets_without_wires", 0), 0)
 
     def test_live_release_and_retry(self):
         self.with_vias()
@@ -268,6 +296,9 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(trial.returncode, 0, trial.stderr)
         self.assertEqual(json.loads(trial.stdout)["retained"], 1)
         self.assertEqual(json.loads(trial.stdout)["violations"], {})
+        automatic = subprocess.run([CHUNKS, "--out", "automatic", "in.def", "tech.lef", "cells.lef"],
+                                   cwd=self.root, capture_output=True, text=True, check=True, timeout=10)
+        self.assertEqual(json.loads(automatic.stdout)["grid"], [2, 1])
         # The agent may release one worker while reusing all of the other packets.
         args[args.index("trial")] = "released"
         reused = subprocess.run([*args, "--reuse", "trial", "--release", "0"], cwd=self.root,
