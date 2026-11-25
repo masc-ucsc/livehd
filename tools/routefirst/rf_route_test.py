@@ -267,6 +267,17 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(json.loads(resumed)["pending"], 0)
         self.assertEqual(json.loads(stats).get("verify_nets_without_wires", 0), 0)
 
+    def test_reserve_named_cell_access_before_route(self):
+        self.with_vias()
+        cells = self.root / "access.txt"
+        cells.write_text("a\na\n")
+        stats = self.run_router(self.two_cells(), "--reserve-cells", str(cells), "--verify")
+        self.assertEqual(stats.get("cells_reserved_up_front"), 1)
+        self.assertEqual(stats["nets_routed"], 1)
+        self.assertEqual({k: v for k, v in stats.items() if k.startswith("verify_") and v}, {})
+        cells.write_text("wrong_frame\n")
+        self.assertIn("unknown pin-access cell", self.run_router(self.two_cells(), "--reserve-cells", str(cells), success=False))
+
     def test_live_release_and_retry(self):
         self.with_vias()
         (self.root / "in.def").write_text(self.two_cells())

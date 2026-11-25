@@ -31,6 +31,7 @@ def localized_seed(frame, failed, radius, output, all_pins=False, findings=(), p
     centers = exact + [((int(r["xl"]) + int(r["xh"])) // 2, (int(r["yl"]) + int(r["yh"])) // 2) for r in findings]
 
     current = ""
+    blocked_cells = set()
     # Copy through the signal-net header verbatim, retaining the last pose,
     # clock tree, special nets and every placement or routing exclusion.
     with frame.open() as src, output.open("w") as dst:
@@ -40,6 +41,8 @@ def localized_seed(frame, failed, radius, output, all_pins=False, findings=(), p
             if current in ("COMPONENTS", "PINS") and line.startswith("- "):
                 name = line.split(None, 2)[1].replace(r"\/", "/")
                 if name in owners:
+                    if current == "COMPONENTS" and name in blocked:
+                        blocked_cells.add(name)
                     m = POSE.search(line)
                     centers.append((int(m[1]), int(m[2])))
             if current == "NETS":
@@ -87,7 +90,7 @@ def localized_seed(frame, failed, radius, output, all_pins=False, findings=(), p
                 break
         for line in src:
             dst.write(line)
-    return released, priority
+    return released, priority, blocked_cells
 
 
 def main():
@@ -95,6 +98,11 @@ def main():
     p.add_argument("--router", type=Path, default=Path(__file__).with_name("rf_route"))
     p.add_argument("--radius", type=int, default=540, help="access window radius in DEF units")
     p.add_argument("--all-pins", action="store_true", help="release access at every endpoint of the failed nets")
+    p.add_argument(
+        "--reserve-first",
+        action="store_true",
+        help="reserve compatible access pads for the blocked cells before routing the priority cohort",
+    )
     p.add_argument(
         "--targets", type=Path, help="repair listed open nets and their released neighbors in this round"
     )
@@ -114,6 +122,7 @@ def main():
     p.add_argument("previous", type=Path, help="directory containing routed.def and feedback.tsv")
     p.add_argument("lefs", nargs="+", type=Path)
     args = p.parse_args()
+    args.pin_neighbors = args.pin_neighbors or args.reserve_first
     if args.radius < 1 or not args.seconds > 0:
         p.error("radius and CPU budget must be positive")
     folder = args.out
@@ -147,7 +156,7 @@ def main():
             for row in csv.DictReader(src, delimiter="\t"):
                 if row["status"] != "routed":
                     prior[row["net"], row["fail_pin"]] = row
-    released, priority = localized_seed(
+    released, priority, blocked_cells = localized_seed(
         args.previous / "routed.def",
         [*prior.values(), *failed],
         args.radius,
@@ -160,6 +169,11 @@ def main():
     first = folder / "priority"
     only = folder / "first.txt"
     selected = []
+    reservations = []
+    if args.reserve_first and blocked_cells:
+        access_list = folder / "blocked-cells.txt"
+        access_list.write_text("".join(name + "\n" for name in sorted(blocked_cells)))
+        reservations = ["--reserve-cells", access_list]
     if args.targets:
         repair_list = folder / "repair.txt"
         cohort = priority.union(name.replace(r"\/", "/") for name in released)
@@ -170,6 +184,7 @@ def main():
     route(
         [
             *opts,
+            *reservations,
             *(["--reserve", "--shift", "3", "--chain", "4", "--flop-reach", "2"] if args.pin_neighbors else []),
             "--only",
             only,

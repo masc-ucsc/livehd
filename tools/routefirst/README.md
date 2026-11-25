@@ -396,3 +396,10 @@ in a file and pass `rf_feedback --targets nets.txt --pin-neighbors`. The
 repair pass reopens nearby routes and works on that cohort. A fresh
 whole-design readback preserves open nets outside the selected region in
 the feedback for subsequent rounds.
+
+`rf_feedback --reserve-first` tries to give the previously blocked cells
+compatible M1 access pads before other priority nets take those sites.
+It also enables the incident-net priority pass. Applied to the same
+four-home NVDLA M checkpoint as the ordinary repair, this removed the
+last open in one round. On two O cohorts it helped one and slightly hurt
+the other, so the default continues to reserve on demand.

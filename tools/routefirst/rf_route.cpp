@@ -190,7 +190,7 @@ struct Options {
   int         limit       = -1;
   int ripup = 0, rip_width = 4, explain = 0, shift = 0, shift_reach = 4, final_passes = 0, flop_reach = 0, shift_cap = 8, chain = 0;
   bool        verbose = false, aim_link = true;
-  std::string trace, timing, clock_nets, verify_report, only;
+  std::string trace, timing, clock_nets, verify_report, only, reserve_cells;
   bool        prelegal = false, tile_move = false, reserve = false, verify = false;
   double      anchor_frac   = 0;
   double      time_limit    = 0;  // CPU seconds for the routing loop; 0 is no limit
@@ -1110,6 +1110,25 @@ struct Router {
       }
       if (upper || !cinfo[c].movable || cinfo[c].clock_sink) {
         stat["cells_settled_up_front"] += settle(int(c));
+      }
+    }
+    if (!opt.reserve_cells.empty()) {
+      std::ifstream cells(opt.reserve_cells);
+      if (!cells) {
+        throw std::runtime_error("cannot open pin-access cell list: " + opt.reserve_cells);
+      }
+      std::set<int> requested;
+      for (std::string name; cells >> name;) {
+        auto it = comp_index.find(name);
+        if (it == comp_index.end()) {
+          throw std::runtime_error("unknown pin-access cell: " + name);
+        }
+        requested.insert(it->second);
+      }
+      for (int c : requested) {
+        if (cinfo[c].settled && reserve_cell(c)) {
+          ++stat["cells_reserved_up_front"];
+        }
       }
     }
     tiles_capacity();
@@ -4093,6 +4112,8 @@ int main(int argc, char** argv) try {
       r.opt.tile_move = true;
     } else if (a == "--reserve") {
       r.opt.reserve = true;
+    } else if (a == "--reserve-cells") {
+      r.opt.reserve_cells = next();
     } else if (a == "--verify-report") {
       r.opt.verify        = true;
       r.opt.verify_report = next();
