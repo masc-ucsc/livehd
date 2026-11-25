@@ -400,7 +400,7 @@ def main():
             with args.frame.open() as frame:
                 for line in frame:
                     if line.startswith("COMPONENTS "):
-                        if int(line.split()[1]) <= 100_000 or args.workers < 4:
+                        if int(line.split()[1]) <= 150_000 or args.workers < 4:
                             args.grid = (2, 1)
                         break
     args.agent = args.agent or args.agent_socket is not None
