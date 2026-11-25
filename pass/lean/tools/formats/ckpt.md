@@ -135,7 +135,7 @@ lhd_ckpt seal      <in.ckpt> <out.ckpt>            recompute the digest of a han
 lhd_ckpt normalize <in.ckpt> <out.ckpt>            sort words, drop words equal to the default, reseal
 lhd_ckpt init      <cert> <out.ckpt> [reset|zero]  the power-on state (default reset) at cycle 0
 lhd_ckpt to-state  <cert> <ckpt> <out>             the same state as an lgraph-sim `--state` file
-lhd_ckpt import-lhd <cert> <ckp dir> <out.ckpt> ...  an `lhd sim` checkpoint, imported (below)
+lhd_ckpt import-lhd <cert> <ckpt dir> <out.ckpt> ...  an `lhd sim` checkpoint, imported (below)
 ```
 
 - `<cert>` is a DCERT4, DCERT3 or DCERT1 file.
@@ -150,33 +150,50 @@ Run `lhd_ckpt normalize` first when you added words out of order or words equal 
 
 ## Importing an `lhd sim` checkpoint
 
-`lhd sim` (the C++ simulator) writes a checkpoint directory every `sim.checkpoint_every`
-cycles: `<workdir>/ckpt/<test>/ckp<N>/` with `regs.json` (registers by name), one
-`<inst>.<memory>.hex` per memory (`$readmemh` words), and `meta.json` (the cycle). The C++
-simulator can fast-forward a long run and a Lean route continue from it:
+`lhd sim` (LiveHD's native simulator) writes a checkpoint every `sim.checkpoint_every` cycles of
+a run longer than `sim.checkpoint_min_secs`, so the C++ simulator can fast-forward a long run and
+a Lean route continue from it:
 
 ```
-lhd_ckpt import-lhd <cert> <ckp dir> <out.ckpt> [inst:<prefix>] [map:<file>] [fill] [emit-map]
+lhd_ckpt import-lhd <cert> <ckpt dir> <out.ckpt> [inst:<name>] [map:<file>] [fill] [emit-map] [sim:<dir>]
 ```
 
-- Names come from the `_io.json` beside the certificate. Flop `n` is the key `<inst>.<n>`.
-  Memory `k` is the file `<inst>.<i>.hex`, `i` being the sidecar's `inst` for it (the cell's
-  instance name, which cgen uses), else its `name`.
-- `<inst>` is the testbench's instance name. It is found from the `<inst>.__in.*` keys unless
-  `inst:` gives it.
-- `map:<file>` overrides names, one line each: `flop <ordinal> <key>` or
-  `mem <ordinal> <file>`. `emit-map` prints the mapping used, in that format.
+It reads both layouts `lhd sim` has written:
+- The current one (LiveHD since 2026-11-21): `<workdir>/ckpt/<test>/c<N>/` with `state.bin` (the
+  DUT state, 64-bit little-endian words), `frame.bin` (the testbench's; not read) and `meta.json`
+  (`cycle`, `words`). Where each value lies comes from `<workdir>/sim/drv.tb.json` (each test's
+  instances: `var`, `stem`, and `base`, the instance's first word) and
+  `<workdir>/sim/<stem>.dut.json` (each field's `name`, `kind` (2 a flop, 3 a memory), `bits`,
+  `word` and `entries`). A value is `bits` bits from bit `(base + word) * 64`, low bits first.
+  Memory entry `e` lies `e * stride` bits further: the stride is the entry's storage width (8,
+  16, 32 bits or whole words), or `bits` for a memory of at most 128 bits whose width is not a
+  storage width (packed). `sim:<dir>` names the `sim` folder when the checkpoint was moved (the
+  folder above the checkpoint must keep the test's name).
+- The earlier one: `<workdir>/ckpt/<test>/ckp<N>/` with `regs.json` (registers by name), one
+  `<inst>.<memory>.hex` per memory (`$readmemh` words), and `meta.json` (the cycle).
+
+- Names come from the `_io.json` beside the certificate. Flop `n` is the key `<inst>.<n>`: the
+  field `n` of instance `<inst>` (earlier layout: the `regs.json` key). Memory `k` is
+  `<inst>.<i>` (the field; earlier layout: the file `<inst>.<i>.hex`), `i` being the sidecar's
+  `inst` for it (the cell's instance name), else its `name`. These are the names
+  `lhd sim --list-signals` prints.
+- `<inst>` is the testbench's instance name (`var`). It is found when the test has one instance
+  (earlier layout: from the `<inst>.__in.*` keys) unless `inst:` gives it.
+- `map:<file>` overrides names, one line each: `flop <ordinal> <key>` or `mem <ordinal> <key>`
+  (earlier layout: a file name). `emit-map` prints the mapping used, in that format.
 - A flop or memory with no match is refused, by name. With `fill` it takes its power-on value,
-  and a note says so. Keys that no flop claims (inputs `__in.*` and clock history
-  `__clkprev*` aside) are listed in a note.
-- Values are hex (`0x...`) or decimal; a negative one is taken modulo `2 ^ width`. A dump word
+  and a note says so. Flop keys that no flop claims are listed in a note (earlier layout: inputs
+  `__in.*` and clock history `__clkprev*` aside). A field whose width is not the certificate's
+  is refused.
+- Values are hex (`0x...`) or decimal; a negative one is taken modulo `2 ^ width`. A memory word
   at or past the memory's depth must be 0.
 - The result is validated like any other checkpoint before it is written.
 
 `lhd sim`'s design hash is not the certificate's, so the match is by names and shapes. This
 version handles a flat design: registers of sub-instances need `map:` lines.
-`tests/lhd_ckpt_import_test.sh` runs a design under both `lhd sim` flows (cgen and LNAST),
-imports every checkpoint, and checks that a Lean run from power-on reaches the first one and
+`tests/lhd_ckpt_import_test.sh` runs a design under `lhd sim`, imports every checkpoint in both
+layouts (the earlier one written from the current one by a converter in the test) to
+byte-identical checkpoints, and checks that a Lean run from power-on reaches the first one and
 that a Lean run of 10 cycles from each reaches the next.
 
 ## Running from a checkpoint
