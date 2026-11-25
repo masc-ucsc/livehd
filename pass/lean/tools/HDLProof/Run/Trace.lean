@@ -24,8 +24,12 @@ arguments and prints `cert_trace`'s lines, so the traces compare line for line:
 `traceRun` is the loop for any state type (`TraceSim`): the legacy model keeps its own record
 and is converted only where a checkpoint is taken or read
 (`Legacy_Fast_Model_Simulator/scripts/make_legacy_sim.py --trace`); `traceMain` is it for a step
-on `RuntimeState`.
+on `RuntimeState`; `TraceSim.ofEngine` is it for any route's engine (`Compiler/Engine`), which is
+how `cert_trace` runs every route `EngineSelector` builds. The loop hands the state from one cycle
+to the next as the argument of a recursive function (`traceLoop`), so each step holds the only
+reference to it and an engine that keeps state (vc's tables and environment) updates it in place.
 -/
+import HDLProof.Run.Engine
 import HDLProof.Run.Stim
 import LeanSemanticPrimitives.Compiler.Ckpt
 import LeanSemanticPrimitives.Compiler.DirectTrace
@@ -60,6 +64,36 @@ structure TraceSim (σ : Type) where
   /-- replace the state by its restored checkpoint (design hash, cycle), when the route keeps
   memories as chains of functions; `none` turns compaction off -/
   compact : Option (Nat → Nat → σ → σ) := none
+  /-- whether automatic compaction applies; `false` for a route that keeps its memories as
+  tables (vc's default engine), where only an explicit `compact:<K>` compacts -/
+  autoCompact : Bool := true
+  /-- run once the start state is set and the checkpoints are checked, just before the first
+  cycle, with the cycle count, the start cycle and the action that writes the checkpoints due at
+  the start; `some code` ends the run with that exit code (a route that refused the design) -/
+  atStart : Nat → Nat → IO Unit → IO (Option UInt32) := fun _ _ _ => pure none
+
+/-- `traceRun`'s cycles `k .. stop - 1` from state `s`: the state goes from one cycle to the next as
+this function's argument (module header). The final state and the number of compactions, or
+`none` after a refused step, which is reported. -/
+partial def traceLoop {σ : Type} (D : DesignCert) (sim : TraceSim σ) (edges : EdgeSpec) (tab : StimTab)
+    (saveAt : Nat → σ → IO Unit) (start stop compactK hash : Nat) (k : Nat) (s : σ)
+    (compactions : Nat) : IO (Option (σ × Nat)) := do
+  if k ≥ stop then return some (s, compactions)
+  saveAt k s
+  let (s, compactions) :=
+    if compactK > 0 && k > start && (k - start) % compactK == 0 then
+      match sim.compact with
+      | some f => (f hash k s, compactions + 1)
+      | none => (s, compactions)
+    else (s, compactions)
+  match sim.step (edgesAt D edges k) (tab.inputAt k) s with
+  | .error e =>
+    (← IO.getStdout).flush
+    IO.eprintln s!"step {k}: refused: {e}"
+    return none
+  | .ok (outs, s') =>
+    IO.println s!"STEP {k} {" ".intercalate (outs.toList.map (fun o => toString (bv_uint o)))}"
+    traceLoop D sim edges tab saveAt start stop compactK hash (k + 1) s' compactions
 
 /-- `cert_trace`'s loop, for a route compiled for `D` (named `route` in messages). -/
 def traceRun {σ : Type} (route : String) (D : DesignCert) (sim : TraceSim σ) (args : List String) :
@@ -137,22 +171,13 @@ def traceRun {σ : Type} (route : String) (D : DesignCert) (sim : TraceSim σ) (
         if j == k then IO.FS.writeBinFile p (Ckpt.render (Ckpt.save D hash k #[] (sim.view st)))
       if k == start + cycles then
         if let some p := ckptOut then IO.FS.writeBinFile p (Ckpt.render (Ckpt.save D hash k #[] (sim.view st)))
-    let mut compactions := 0
-    for k in List.range' start cycles do
-      saveAt k s
-      if compactK > 0 && k > start && (k - start) % compactK == 0 then
-        if let some f := sim.compact then
-          s := f hash k s
-          compactions := compactions + 1
-      match sim.step (edgesAt D edges k) (tab.inputAt k) s with
-      | .error e =>
-        (← IO.getStdout).flush
-        IO.eprintln s!"step {k}: refused: {e}"
-        return 1
-      | .ok (outs, s') =>
-        IO.println s!"STEP {k} {" ".intercalate (outs.toList.map (fun o => toString (bv_uint o)))}"
-        s := s'
-    saveAt (start + cycles) s
+    if let some rc ← sim.atStart cycles start (saveAt start s) then return rc
+    -- automatic compaction does not apply to a route that keeps its memories as tables
+    if compactAuto && !sim.autoCompact then compactK := 0
+    let some (sEnd, compactions) ← traceLoop D sim edges tab saveAt start (start + cycles) compactK hash
+        start s 0
+      | return 1
+    saveAt (start + cycles) sEnd
     if compactK > 0 then
       (← IO.getStdout).flush
       IO.eprintln s!"compactions {compactions} (every {compactK} cycles{if compactAuto then ", automatic" else ""})"
@@ -174,6 +199,21 @@ def traceMain (route : String) (D : DesignCert)
       view := id
       restore := Ckpt.restore
       compact := some fun hash k s => Ckpt.restore (Ckpt.save D hash k #[] s) } args
+
+/-- The trace main's view of a route's engine (`Compiler/Engine`): the start is the engine's
+load of the power-on or all-zero state, a checkpoint is loaded from its restored state, compaction
+reloads the restored checkpoint of the state the engine stands for (an engine keeps what stays
+valid: vc its slot environment), and a refused step drops the state the engine hands back. -/
+def TraceSim.ofEngine {σ : Type} (D : DesignCert) (E : Engine σ) (autoCompact : Bool := true)
+    (atStart : Nat → Nat → IO Unit → IO (Option UInt32) := fun _ _ _ => pure none) : TraceSim σ :=
+  { init := fun z => E.load (if z then Direct.zeroState D else Direct.resetState D)
+    step := fun e i q => match E.step e i q with
+      | .ok r => .ok r
+      | .error (err, _) => .error err
+    view := E.view
+    restore := fun c => E.load (Ckpt.restore c)
+    compact := some fun hash k q => E.reload q (Ckpt.restore (Ckpt.save D hash k #[] (E.view q)))
+    autoCompact, atStart }
 
 end Run
 end HDLProof

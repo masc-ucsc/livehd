@@ -155,6 +155,9 @@ structure SelectedEngine where
   σ      : Type
   engine : Engine σ
   notes  : Array String := #[]
+  /-- whether automatic compaction helps: `false` when the engine keeps its memories as tables
+  (vc's default engine), which grow no chains of functions -/
+  autoCompact : Bool := true
 
 /-- Why `EngineSelector` could not prepare the route for the design: the refusal itself (`detail`:
 a check's rendering, the compiler's error) and the message drivers print (`mkStepper`'s wording). -/
@@ -171,10 +174,10 @@ the full step). -/
 def vcEngineOf (D : DesignCert) (k : Knobs) (R : ResidualProgram) : SelectedEngine :=
   if k.vcInc != .off && ResidualInc.wellOrdered R then
     match k.vcInc, k.vcMem with
-    | .scan, _ => ⟨_, vcScanEngine R, #[]⟩
-    | _, .func => ⟨_, vcEvFunEngine R (ResidualInc.fanout R), #[]⟩
-    | _, .table => ⟨_, vcEngine R (ResidualInc.fanout R) (vcDepth D), #[]⟩
-  else ⟨_, vcFullEngine R, #[]⟩
+    | .scan, _ => ⟨_, vcScanEngine R, #[], true⟩
+    | _, .func => ⟨_, vcEvFunEngine R (ResidualInc.fanout R), #[], true⟩
+    | _, .table => ⟨_, vcEngine R (ResidualInc.fanout R) (vcDepth D), #[], false⟩
+  else ⟨_, vcFullEngine R, #[], true⟩
 
 /-- vc's notes, worded as `cert_trace opt:stats` prints them. -/
 def vcNotes (k : Knobs) (R0 R : ResidualProgram) (accepted : Bool) : Array String :=
@@ -197,8 +200,8 @@ def EngineSelector (D : DesignCert) (k : Knobs) : Except SelectError SelectedEng
     match Direct.checkDesign D with
     | .error e =>
       .error ⟨.ir, e.render, s!"ir: the direct simulator refuses the certificate: {e.render}"⟩
-    | .ok _ => .ok ⟨_, if k.irStaged then irEngine D else irRawEngine D, #[]⟩
-  | .ref => .ok ⟨_, refEngine D, #[]⟩
+    | .ok _ => .ok ⟨_, if k.irStaged then irEngine D else irRawEngine D, #[], true⟩
+  | .ref => .ok ⟨_, refEngine D, #[], true⟩
   | .vc =>
     match compileDesign D with
     | .error e => .error ⟨.vc, s!"{repr e}", s!"vc: compileDesign refused: {repr e}"⟩
@@ -219,8 +222,8 @@ def EngineSelector (D : DesignCert) (k : Knobs) : Except SelectError SelectedEng
           .error ⟨.fp, m, m⟩
         | some sim =>
           let sh := if k.fpShare then Projection.ShareTails.shareSim sim else none
-          if k.fpLoopFull then .ok ⟨_, Engine.ofStep "fp" (fpStep D ⟨sim, sh⟩), #[]⟩
-          else .ok ⟨_, fpEncEngine D sim sh, #[]⟩
+          if k.fpLoopFull then .ok ⟨_, Engine.ofStep "fp" (fpStep D ⟨sim, sh⟩), #[], true⟩
+          else .ok ⟨_, fpEncEngine D sim sh, #[], true⟩
 
 /-- Run `cont` on the engine `knobs` name for `D`; the build's refusal otherwise. -/
 def withSelectedEngine {α : Type} (D : DesignCert) (k : Knobs)
