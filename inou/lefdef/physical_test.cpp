@@ -296,6 +296,28 @@ TEST(Physical, Sky130GeometryAndRc) {
   EXPECT_NEAR(tech.layers.at("li1").pitch_y, 0.34, 1e-9);
   EXPECT_NEAR(tech.layers.at("met1").pitch_y, 0.34, 1e-9);
 }
+TEST(Physical, DefNameWithDividerRoundtrip) {
+  // A flattened netlist names instances with `/`. The writer escapes it (it is the DIVIDERCHAR), and the reader
+  // gives the name back as it was.
+  Floorplan fp;
+  fp.design = "top";
+  fp.die    = {0, 0, 10000, 10000};
+  fp.rows.push_back({"row0", "unithd", 0, 0, 10, 460, Orientation::FS});
+  Ann_place place(460, 0, 1380, 2720);
+  place.status = Status::FIXED;
+  fp.components.push_back({"core/u0.gate[0]", "sky130_fd_sc_hd__inv_1", place});
+  fp.terminals.push_back({"a", "wire/0", "INPUT", 0, 1360, Orientation::N, Status::FIXED, {{"met1", {0, -10, 10, 10}}}});
+  fp.nets.push_back({
+      "wire/0",
+      {{"PIN", "a"}, {"core/u0.gate[0]", "A"}}
+  });
+  const auto path = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "divider.def";
+  write_def(fp, path.string());
+  const auto back = read_def(path.string());
+  EXPECT_NO_THROW(verify_def_roundtrip(fp, back));
+  EXPECT_EQ(back.components[0].name, fp.components[0].name);
+  EXPECT_EQ(back.nets[0].name, fp.nets[0].name);
+}
 TEST(Physical, DefIdentityRoundtrip) {
   Floorplan fp;
   fp.design = "top";

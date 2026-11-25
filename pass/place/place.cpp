@@ -8910,6 +8910,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       component.name = name;
     }
+    for (auto& blockage : imported_frame->blockages) {  // a halo names its macro: follow the component's new spelling
+      if (!blockage.component.empty()) {
+        blockage.component = cells.resolve(blockage.component);
+      }
+    }
     for (auto& terminal : imported_frame->terminals) {
       terminal.name = ports.resolve(terminal.name);
     }

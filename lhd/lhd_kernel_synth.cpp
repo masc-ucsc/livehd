@@ -5273,10 +5273,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         } catch (const livehd::placement::Placement_area_restart&) {
           throw;  // a generated core grows (synth_command)
         } catch (const std::exception& e) {
-          // A fixed core the optimized netlist no longer fits is the design's limit, not an internal error.
           throw Lhd_error{"unsupported",
                           std::string("final legalization failed: ") + e.what(),
-                          "the optimized netlist is too dense for the fixed core; see " + final_log};
+                          "see the final placement diagnostic in " + final_log};
         }
         placed     = std::move(finalized.placed);
         res.recipe_steps.emplace_back("pass.place.final_legalize");

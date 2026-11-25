@@ -562,6 +562,22 @@ int gcell_grid_cb(defrCallbackType_e, defiGcellGrid* grid, defiUserData data) {
   c.fp.gcell_grid.push_back({grid->macro(), grid->x(), grid->xNum(), std::llround(grid->xStep())});
   return 0;
 }
+// The writer escapes a bare `/` inside a name, since `/` is the DIVIDERCHAR. Undo exactly that pair on reading, so a
+// name with `/` (a flattened netlist has them) reads back as it was written. Every other escape is retained.
+std::string plain_divider(const char* text) {
+  std::string out;
+  for (const char* p = text; *p; ++p) {
+    if (p[0] == '\\' && p[1] != 0) {
+      if (p[1] != '/') {
+        out += '\\';
+      }
+      out += *++p;
+      continue;
+    }
+    out += *p;
+  }
+  return out;
+}
 int component_cb(defrCallbackType_e, defiComponent* component, defiUserData data) {
   auto&     c = *static_cast<DefContext*>(data);
   Ann_place p;
@@ -571,14 +587,14 @@ int component_cb(defrCallbackType_e, defiComponent* component, defiUserData data
   p.status      = component->isFixed() || component->isCover() ? Status::FIXED
                   : component->isPlaced()                      ? Status::PLACED
                                                                : Status::UNPLACED;
-  c.fp.components.push_back({component->id(), component->name(), p});
+  c.fp.components.push_back({plain_divider(component->id()), component->name(), p});
   return 0;
 }
 int terminal_cb(defrCallbackType_e, defiPin* pin, defiUserData data) {
   auto&    c = *static_cast<DefContext*>(data);
   Terminal p;
-  p.name = pin->pinName();
-  p.net  = pin->netName();
+  p.name = plain_divider(pin->pinName());
+  p.net  = plain_divider(pin->netName());
   if (pin->hasDirection()) {
     p.direction = pin->direction();
   }
@@ -651,12 +667,12 @@ int nondefault_cb(defrCallbackType_e, defiNonDefault* source, defiUserData data)
 int net_cb(defrCallbackType_e kind, defiNet* net, defiUserData data) {
   auto& c = *static_cast<DefContext*>(data);
   Net   n;
-  n.name = net->name();
+  n.name = plain_divider(net->name());
   if (net->hasUse()) {
     n.use = net->use();
   }
   for (int i = 0; i < net->numConnections(); ++i) {
-    n.connections.push_back({net->instance(i), net->pin(i)});
+    n.connections.push_back({plain_divider(net->instance(i)), plain_divider(net->pin(i))});
   }
   // Never silently drop a route feature: doing so could open a FIXED net or
   // erase a power-grid obstruction while leaving the handoff apparently valid.
@@ -666,7 +682,7 @@ int net_cb(defrCallbackType_e kind, defiNet* net, defiUserData data) {
     return 1;
   }
   if (net->hasNonDefaultRule()) {
-    c.fp.snapshot_ndr.net_rules.emplace(net->name(), net->nonDefaultRule());
+    c.fp.snapshot_ndr.net_rules.emplace(n.name.str(), net->nonDefaultRule());
   }
   for (int i = 0; i < net->numWires(); ++i) {
     auto* input = net->wire(i);
@@ -792,7 +808,7 @@ int blockage_snapshot_cb(defrCallbackType_e, defiBlockage* input, defiUserData d
     b.layer = input->layerName();
   }
   if (input->hasComponent()) {
-    b.component = b.placement ? input->placementComponentName() : input->layerComponentName();
+    b.component = plain_divider(b.placement ? input->placementComponentName() : input->layerComponentName());
   }
   b.soft      = input->hasSoft();
   b.slots     = input->hasSlots();
@@ -838,7 +854,7 @@ int blockage_cb(defrCallbackType_e, defiBlockage* blockage, defiUserData data) {
   Placement_blockage item;
   item.soft = blockage->hasSoft();
   if (blockage->hasComponent()) {
-    item.component = blockage->placementComponentName();
+    item.component = plain_divider(blockage->placementComponentName());
   }
   for (int i = 0; i < blockage->numRectangles(); ++i) {
     const Rect rect{double(blockage->xl(i)), double(blockage->yl(i)), double(blockage->xh(i)), double(blockage->yh(i))};

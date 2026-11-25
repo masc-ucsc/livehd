@@ -431,6 +431,10 @@ Hover a marker for the details; <code>grep -n "todo-check\|fixme" docs/acknowled
 
 <h4>Word-level rewriting and e-graphs</h4>
 <ul class="refs">
+<li>N. Zhang et al. <em>Cedar: Learning to Optimize RTL via Accumulating Verified Rewrite Rules.</em> ICCAD 2026. <a href="https://doi.org/10.1145/3831252.3834087">doi</a> · <a href="https://github.com/cornell-zhang/Cedar">code</a><span class="use">Common-multiplicand factoring in <code>pass/aegraph</code>.</span></li>
+<li>S. Coward, T. Drane, G.A. Constantinides. <em>ROVER: RTL Optimization via Verified E-Graph Rewriting.</em> 2024. <a href="https://arxiv.org/abs/2406.12421">paper</a><span class="use">Moving a zero gate between multiplier inputs and preserving mixed-precision boundaries in datapath rewrites.</span></li>
+<li><a href="https://github.com/Gy-Hu/E-Syn">E-Syn</a> and <a href="https://github.com/Gy-Hu/E-Syn2">E-Syn2</a>.<span class="use">Boolean covering, combining, consensus and factoring rules. The E-Syn2 EQN examples motivated parity and mux recognition in <code>pass/aegraph</code>.</span></li>
+<li>J. Yin et al. <em>HEC: Equivalence Verification Checking for Code Transformation via Equality Saturation.</em> USENIX ATC 2025. <a href="https://arxiv.org/abs/2506.02290">paper</a> · <a href="https://github.com/Yu-Maryland/HEC">code</a><span class="use">Exact-product cancellation, repeated remainder and quotient/remainder reconstruction, adapted to LiveHD's truncating signed division and guarded against zero divisors.</span></li>
 <li>C. Fallin. <em>ægraphs: Acyclic E-graphs for Efficient Optimization in a Production Compiler.</em> EGRAPHS keynote, PLDI 2023. <a href="https://cfallin.org/pubs/egraphs2023_aegraphs_slides.pdf">slides</a><span class="use"><code>pass/aegraph</code>; its rules port Cranelift's ISLE rules.</span></li>
 <li>M. Willsey, C. Nandi, Y.R. Wang, O. Flatt, Z. Tatlock, P. Panchekha. <em>egg: Fast and Extensible Equality Saturation.</em> POPL 2021. <a href="https://doi.org/10.1145/3434304">doi</a><span class="use">E-class analyses and cost extraction in <code>pass/aegraph</code>.</span></li>
 <li>R. Tate, M. Stepp, Z. Tatlock, S. Lerner. <em>Equality Saturation: A New Approach to Optimization.</em> POPL 2009. <a href="https://doi.org/10.1145/1480881.1480915">doi</a></li>
@@ -499,7 +503,7 @@ Hover a marker for the details; <code>grep -n "todo-check\|fixme" docs/acknowled
 <h4>Steiner trees and net topology</h4>
 <ul class="refs">
 <li>C. Chu, Y.-C. Wong. <em>FLUTE: Fast Lookup Table Based Rectilinear Steiner Minimal Tree Algorithm for VLSI Design.</em> IEEE TCAD 27(1), 2008.<span class="use"><code>pass/place/steiner_topology.cpp</code>, signal routing, RSMT-RUDY and the detour reference in <code>tools/routetruth</code>.</span></li>
-<li>C.J. Alpert, T.C. Hu, J.H. Huang, A.B. Kahng, D. Karger. <em>Prim-Dijkstra Tradeoffs for Improved Performance-Driven Routing Tree Design.</em> IEEE TCAD 14(7), 1995.<span class="use">The driver-aware RC tree in <code>pass/place/steiner_topology.hpp</code>.</span></li>
+<li>C.J. Alpert, T.C. Hu, J.H. Huang, A.B. Kahng, D. Karger. <em>Prim-Dijkstra Tradeoffs for Improved Performance-Driven Routing Tree Design.</em> IEEE TCAD 14(7), 1995.<span class="use">The driver-aware RC tree in <code>pass/place/steiner_topology.hpp</code>; the pin order of the experimental <code>tools/routefirst/rf_route</code>.</span></li>
 <li>C.J. Alpert, W.-K. Chow, K. Han, A.B. Kahng, Z. Li, D. Liu, S. Venkatesh. <em>Prim-Dijkstra Revisited: Achieving Superior Timing-driven Routing Trees.</em> ISPD 2018.</li>
 <li>H. Zhou, N. Shenoy, W. Nicholls. <em>Efficient Minimum Spanning Tree Construction without Delaunay Triangulation.</em> Information Processing Letters 81(5), 2002.<span class="use">Close idea: the quadrant visibility graph in <code>steiner_topology.cpp</code>.</span></li>
 </ul>
@@ -515,7 +519,7 @@ Hover a marker for the details; <code>grep -n "todo-check\|fixme" docs/acknowled
 LiveHD exchanges site-aligned strips and gives both workers complementary row exclusions.</span></li>
 <li>M. Pan, C. Chu. <em>FastRoute: A Step to Integrate Global Routing into Placement.</em> ICCAD 2006; Y. Xu, Y. Zhang, C. Chu. <em>FastRoute 4.0.</em> ASP-DAC 2009.<span class="use">L/Z pattern routing adapted in <code>pass/place/fast_route_pattern.cpp</code>.</span></li>
 <li>L. McMurchie, C. Ebeling. <em>PathFinder: A Negotiation-Based Performance-Driven Router for FPGAs.</em> FPGA 1995.<span class="use">Negotiated congestion in legroute and buffering.</span></li>
-<li>C.Y. Lee. <em>An Algorithm for Path Connections and Its Applications.</em> IRE Trans. EC-10(3), 1961.<span class="use">Maze routing (<code>signal_maze.cpp</code>).</span></li>
+<li>C.Y. Lee. <em>An Algorithm for Path Connections and Its Applications.</em> IRE Trans. EC-10(3), 1961.<span class="use">Maze routing (<code>signal_maze.cpp</code>, <code>tools/routefirst/rf_route.cpp</code>).</span></li>
 <li>P.E. Hart, N.J. Nilsson, B. Raphael. <em>A Formal Basis for the Heuristic Determination of Minimum Cost Paths.</em> IEEE Trans. SSC 4(2), 1968; I. Pohl. <em>Heuristic Search Viewed as Path Finding in a Graph.</em> Artificial Intelligence 1, 1970.<span class="use">A* and weighted A* in legroute.</span></li>
 <li>E.W. Dijkstra. <em>A Note on Two Problems in Connexion with Graphs.</em> Numerische Mathematik 1, 1959.</li>
 </ul>

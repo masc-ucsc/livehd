@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3s-postroute — Finishing pass after routing</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">3s-postroute</strong> Finishing pass after routing</h1>
+<p>Once the native router has placed every wire, use the metal it left free to strengthen the power grid and the clock network, and handle filler cells and antenna in the same pass. Proposed by the user on 2026-11-24. Nothing is built.</p>
+<p><span class="status">Proposed 2026-11-24. Not started.</span></p>
+
+<h2>Depends on</h2>
+<ul>
+<li><a href="3r-routefirst.html">3r-routefirst</a> supplies the routed layout, the track occupancy and the rule limits.</li>
+<li><a href="2p-pcrs.html">2p-pcrs</a> owns the clock tree and the power-grid handoff. A change to either is reported there.</li>
+</ul>
+
+<h2>Why there is room</h2>
+<ul>
+<li>On sha3 at utilization 0.72 the native route uses about 13% of the M2 track length and 26% of M3. OpenROAD's route of the same placement uses 34% and 51%. M7 is at 28%.</li>
+<li>About 65% of the extracted wire capacitance of that layout is coupling to neighbouring wires, so what sits on the next track matters for delay.</li>
+<li>Keeping the neighbouring tracks of the long wires of the worst 2% of nets empty raised Fmax by 3 to 6% on minimax, ternip and sha3 at 0.2% more wire (measurement in <code>tools/routefirst/README.md</code>; 28% on eyeriss, see <a href="3r-routefirst.html#todo">3r-routefirst</a>). The finishing pass must not take that spacing away.</li>
+</ul>
+
+<h2>What the pass would do</h2>
+<ul>
+<li><strong>Power.</strong> Add M2 and M3 straps and via stacks between the rails and the M5 and M6 stripes where tracks are free, first where the static drop or the current density is worst. The grid today is the ORFS pattern: M1 and M2 rails, 22 M5 and 22 M6 stripes, 2,354 via stacks on sha3.</li>
+<li><strong>Clock.</strong> Widen or double leaf and trunk wires, or shield them with grounded neighbours, where the tracks beside them are free. The native router gives clock nets the default width and no shield.</li>
+<li><strong>Filler cells.</strong> Fill the free sites after the last cell move. Fillers and decoupling cells bring M1 and well shapes, so they go in before the added metal is checked.</li>
+<li><strong>Antenna.</strong> Check the ratio of gate area to connected metal per layer and repair by a jumper to a higher layer or a diode in a free site. The router does not look at antenna rules today.</li>
+<li>Run the four as one pass because they compete for the same free sites and tracks: a diode needs a site next to the pin, a strap needs the track above it.</li>
+</ul>
+
+<h2>How to judge it</h2>
+<ul>
+<li>Static voltage drop and worst current density before and after, on the same routed layout.</li>
+<li>Clock skew, latency, and setup and hold slack before and after, with extraction that includes the added metal.</li>
+<li>Antenna violations before and after, and the diodes and jumpers used.</li>
+<li>Zero rule violations and unchanged signal connectivity, checked by a tool that did not make the change.</li>
+<li>CPU time of the pass against the router's own time.</li>
+</ul>
+
+<h2>Open questions</h2>
+<ul>
+<li>Which antenna rules the ASAP7 files in use carry, and whether the flow that feeds the router can supply gate areas.</li>
+<li>Whether added M2 straps block pin access for a later engineering change.</li>
+<li>Whether shielding a clock wire is worth more than the spacing it removes from a neighbouring critical data net.</li>
+</ul>
+</main>
+<footer>LiveHD TODO</footer>
+</body>
+</html>

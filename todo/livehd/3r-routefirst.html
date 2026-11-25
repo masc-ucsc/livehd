@@ -3,348 +3,119 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>3r-routefirst — Routing with fixed PCRS and movable logic</title>
+<title>3r-routefirst — Native routing with movable logic</title>
 <link rel="stylesheet" href="../todo.css">
 </head>
 <body>
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
-<h1><strong class="item-id">3r-routefirst</strong> Routing with fixed PCRS and movable logic</h1>
-<p>Can a router close a denser design, or close the same design faster, if it can push combinational cells aside while it connects their pins? Start from a congestion-measured legroute placement, fix the PCRS infrastructure and all flops, and let signal routing move the remaining logic, lower metals first. This is a proposed experiment. Its first deliverable is a decision on whether to build a router. Its second is a list of PCRS problems that only routing shows.</p>
-<p><span class="status">Revised 2026-11-23 after a review against the routed HighTide runs (<a href="#evidence">Evidence</a>) and a question-and-answer session (<a href="#decisions">Decisions</a>). Subtask letters are stable ids. The run order is A, B, F, C, D, E, and G runs with every step. Thresholds, script names and directories are proposals. The design sketch this plan started from is folded into the <a href="#design">Design notes</a>, so the page stands alone.</span></p>
+<h1><strong class="item-id">3r-routefirst</strong> Native routing with movable logic</h1>
+<p>Route and legalize in one loop, guided by routing instead of placement, and be better and faster than single-thread OpenROAD. The router is <code>tools/routefirst/rf_route</code>. It routes every signal net on M2 to M7, moves the cells that block a pin, and with <code>--prelegal</code> gives each cell its site when the first net that needs it is routed.</p>
+<p><span class="status">Rewritten 2026-11-24. The router exists and is measured; this page keeps what is still to do. The method, the rule table and the measurements are in <code>tools/routefirst/README.md</code>. The first plan (PCRS and flops frozen, OpenROAD as data router, subtasks A to G) is finished and superseded; its page is in the git history up to commit 4d31a8b7e. Nothing of <code>rf_route</code> is in the flow yet.</span></p>
 
 <h2>Depends on</h2>
 <ul>
-<li><a class="xref" href="2r-route.html">2r-route</a> supplies the measured placement before terminal legalization. The existing plan rounds suffice for a first test.</li>
-<li><a class="xref" href="2p-pcrs.html">2p-pcrs</a> supplies the installed tree, sink identities and physical power-grid handoff. Use one completed PCRS generation in both arms. Record remaining clock-model uncertainty using the <a href="2p-pcrs-review.html">PCRS review</a>. PCRS has priority over this task (RF1): a problem this experiment traces to PCRS is fixed there.</li>
+<li><a class="xref" href="2r-route.html">2r-route</a> supplies the pose before terminal legalization and the pin slacks (<code>legroute_plan*/input.def</code>, <code>timing.tsv</code>).</li>
+<li><a class="xref" href="2p-pcrs.html">2p-pcrs</a> supplies the clock tree. Its cells are in the DEF; its wires are not (see <a href="#clock">Clock</a>).</li>
+<li><a class="xref" href="2f-scalability.html">2f-scalability</a> supplies the chunks for <a href="#chunks">routing by chunks</a>.</li>
+<li><a class="xref" href="3s-postroute.html">3s-postroute</a> is the finishing pass after this router (free M2 and M3 for power and clock, fillers, antennas). Not started.</li>
 </ul>
 
-<h2 id="decisions">Decisions (2026-11-23)</h2>
-<table>
-<tr><th>#</th><th>Topic</th><th>Decision</th></tr>
-<tr><td>RF1</td><td>PCRS</td><td>PCRS stays fixed in every arm and has the higher priority. The experiment never moves a protected object, swaps the tree or reroutes a protected wire to make routing pass. When routing shows a PCRS problem, it is reported with its evidence and fixed in PCRS (subtask G). Finding such problems is a result of this task in its own right.</td></tr>
-<tr><td>RF2</td><td>First designs</td><td>asap7 minimax, then asap7 sha3, for fast iterations. Other HighTide designs join after a rung passes on both.</td></tr>
-<tr><td>RF3</td><td>Cheapest form first</td><td>Positions only, then the payoff bound with OpenROAD's own wires, then native M1–M3, then the cell-pushing router. Each rung reports a result before the next is built.</td></tr>
-<tr><td>RF4</td><td>Ownership</td><td>Native routing starts with V1, M2, V2 and M3. OpenROAD routes the trunks and every net LiveHD does not finish. No layer is withheld from it.</td></tr>
-<tr><td>RF5</td><td>Gates</td><td>Two gates: reach zero violations at the ordinary utilization in fewer CPU-seconds, or close at a higher utilization. Detailed routing is 70–97% of the backend time today, so the speed gate comes first.</td></tr>
-</table>
-
-<h2>Experimental decision (2026-11-24)</h2>
-<p>Keep OpenROAD as the default data router after PCRS. The sampled SHA3 displacement test passed B, and the blind minimax reconstruction passed C. Pin-access placement helped minimax on the nominal frame, but two nearby target densities reversed that gain. The known-good wire sweep missed F2’s 30% cost gate on minimax, so D remains gated. Whole native wires survived handoff on both designs. They made minimax slower at independent closure and left shorts on SHA3. The experiment demonstrated no higher closing utilization. <a href="#native-pcrs-runs">Measured routing, timing and PCRS findings</a>.</p>
-<h2>Subtasks and advancement criteria</h2>
-<ul class="subtasks">
-<li id="a"><strong>A — Capture a common starting frame and fix PCRS.</strong>
+<h2>Direction (user, 2026-11-24)</h2>
 <ul>
-<li>In the final placement pass with the native tree installed, fork at the restored <code>best_plan</code> pose, before <code>terminal_legalize</code>. Capture the actual cell masters, dimensions, oriented pins, IOs, rows, exclusions, timing and DBU geometry together. Keep the die and core fixed during each trial. The selected-round JSON alone cannot replay this frame. <a href="../../pass/place/place.cpp">Placement owner</a></li>
-<li>Build an explicit ownership list keyed by instance and pin. Site-legalize the fixed subset once if needed, then freeze XY, orientation, master and connectivity of <em>every</em> flop, clock gate, tree driver, PCRS reset-distribution cell and any installed scan infrastructure. Include fixed macros, IOs, taps, rails and stripes. List reset/scan wires by actual ownership, with each net assigned exactly one router. Ordinary data nets landing at D/Q remain signal-routing obligations. Leave the other combinational cells near their measured pose, with x overlap allowed.</li>
-<li>For the fixed-metal trial, obtain connected PCRS wires and vias from a routed reference with the same netlist and frozen poses, or route those nets once on a shared scratch placement. Discard scratch data-cell coordinates and signal wires before forking the two arms. Retain only owned metal, cuts and spacing rules. Verify the protected geometry and endpoints after import. A PCRS clock manifest identifies the tree and routing rules. The backend normally chooses the metal. If the recorded PCRS cannot be reproduced at its legal anchor poses, record a PCRS finding (G) with the frame and fix it there before the trial continues. A clock-budget-only trial can measure sensitivity separately. <a href="../../pass/place/pcrs/README.md">PCRS handoff</a></li>
-<li>Re-probe the resulting frame. Export or regenerate per-net tile edges from <code>Global_routes::trees</code> on this exact pose, including the pins sharing a tile. Use them as revisable guides. Legroute measures H/V demand and per-layer supply. It does not assign signal tracks. Replace the estimated clock charge with actual occupied clock resources where available and account for PG once. Require a complete PG budget. <a href="../../pass/place/legroute_plan.cpp">Plan implementation</a> · <a href="../../pass/place/legroute.hpp">Report contract</a></li>
-<li>Admit a frame on OpenROAD's global route with the platform derating: zero overflow there. Legroute's own overflow is not calibrated against it. The selected round of asap7 minimax keeps 95 overflow tracks that OpenROAD routes with none, and litepci showed 12k–34k (<a href="2r-route.html#stepc">2r-route</a>). Log legroute's unresolved nets, search limits and H/V overflow next to the OpenROAD verdict. For the rungs that leave trunks to OpenROAD, its <code>route.guide</code> is the trunk topology in every arm. Retain mildly overflowing frames as a later stress cohort.</li>
-</ul></li>
-
-<li id="b"><strong>B — Count what movement can reach, then what it fixes.</strong>
-<ul>
-<li><strong>Census.</strong> Route the control of each PCRS frame in OpenROAD and save a DRC report at every iteration (minimax finishes in four). From the log, count first-iteration violations by type and layer. From each saved report, classify every violation by type, layer and its two sources, by the distance to the nearest pin of either net, by the owner of that pin (movable logic, flop, clock gate, tree driver, reset cell) and by the free sites within ±1, ±2 and ±4 sites of that cell. The scripts and the numbers from OpenROAD-CTS frames are in <a href="#evidence">Evidence</a>. The census is an upper bound on what movement can reach.</li>
-<li><strong>Fix rate.</strong> Take a saved mid-route state with exterior wires, boundary connections and PCRS fixed. For each low-metal violation near a movable cell, enumerate legal positions at ±1, ±2 and ±4 sites with compatible access choices, and reroute only the nets of the moved cells. Run the same reroute at zero displacement. Use OpenROAD for the reroute if it can resume from a routed database with a few cells moved (not checked), otherwise <code>Signal_router</code> taps. Count violations cleared only with movement, new conflicts at the boundary, displaced cells, and cases exhausted by the search budget. Verify the best moves with an independent route/check on the affected nets. Include clean controls and row segments cut by fixed flops. Record every sampled window and the first failing stage.</li>
-<li>sha3 is the access-limited case and minimax the clean control. The M9 minimum-step stall of sha3 in the first cohort came from a handoff that skipped the platform layer range, not from placement (<a href="2r-route.html#stepb">2r-route B1</a>). With the range restored its late violations are on M1–M3.</li>
-<li>Set the threshold before the run. Proposal: continue to C–E if movement clears at least 30% of the late M1–M3 violations on sha3 that the zero-displacement reroute leaves. Below it, publish the coverage and stop before C–E. F and G continue either way: F1 targets the first iteration, which this test does not measure.</li>
-</ul></li>
-
-<li id="c"><strong>C — Establish the row solver on a known answer.</strong>
-<ul>
-<li>Plant a clean single-height row with two overlapping movable data cells after jitter, a fixed flop, a two-pin local net and a three-pin net sharing a branch. Save the original legal witness, including pin access, track order, attachment side and legal site class. Jitter only the input x coordinates. Add an impossible sibling with insufficient sites between two fixed bodies, and a case in which a different attachment frees a site. Build these small tests from repository fixtures. <a href="../../pass/place/legroute_test_frame.hpp">Existing synthetic floorplan</a></li>
-<li>For each interval between fixed obstacles, choose row, cell order and mutually compatible pin accesses. Represent x in integer sites. Bound it by row ends, fixed shapes, stub direction and a timing-derived stretch cap. Cell width and gap require <code>x[j] − x[i] ≥ width[i] + gap</code>. Tip spacing gives a second bound after oriented pin offsets. Solve these difference constraints with bounds represented by a reference vertex. A positive cycle identifies the incompatible assumptions. Compare feasibility and weighted wire cost against exhaustive enumeration on the tiny cases.</li>
-<li>Check each candidate via and landing on its actual track phase after movement. Split disjoint legal site sets into discrete alternatives. Only claim exact feasibility for the encoded fixed choices. Cross-row branches, vias and spacing can couple rows. Revalidate the interacting geometry before accepting either row. Start with sliding stubs, and try a direct stacked via only where the pad, cuts and new site all fit. Failure to recover a planted feasible witness blocks the larger experiment.</li>
-<li>Then plant the same test at design scale. Take a clean routed design, keep M2 and above, remove the M1 and via connections, jitter the cells in x and run the row solve alone. Report infeasible rows and recovered wire cost. The instance is feasible by construction, so every failure belongs to the algorithm.</li>
-<li><strong>Line ends inside the solve.</strong> Give every pin piece on a track two endpoint variables. The piece contains its via and has at least the minimum length (37 nm on ASAP7 M2). Consecutive pieces of different nets on a track keep the end-to-end spacing (31 nm). With the order fixed these stay difference constraints. Plant a witness whose only legal answer extends a pad away from its neighbour. The original model left line ends to the detailed router (limit 8 of the <a href="#design">Design notes</a>), and they are the largest class of its first-iteration violations.</li>
-<li><strong>Rigid links.</strong> Two pins joined by a straight vertical segment keep <code>x[i] + o[p] = x[j] + o[q]</code>, which is two difference constraints. The cells then slide together where the original model fixed a cell with mixed attachments. The system now spans rows. Solve each coupled component and plant one witness that needs the joint slide.</li>
-<li><strong>Path to try: a row dynamic program.</strong> Line-end spacing couples only pieces within 68 nm, which is neighbouring cells. A walk along the row whose state is the site and access pattern of the previous cell makes the access choice exact where the fixed-order solve needs discrete repair. Precompute the patterns per master, orientation and track phase (M3 pitch 36 nm against a 54 nm site gives two phases). Compare it with exhaustive enumeration and with the difference constraints plus repair on the tiny cases. Keep it only if it wins. Long stubs that pass over other cells stay in the difference constraints. <a href="../../inou/lefdef/pin_access.hpp">Pin-access oracle</a></li>
-</ul></li>
-
-<li id="d"><strong>D — Route signals and push cells in the same loop.</strong>
-<ul>
-<li>Assign movable logic to compatible row segments by real free sites and displacement. Keep overlap as a measured intermediate state. Generate a tentative connection for a local net directly between its pins, or grow a multi-pin net from its existing tree toward an accessible pin. The first rung owns V1, M2, V2 and M3: whole nets that stay on M2 and M3, and pin escapes if F3 passes (RF4). Nothing is withheld from OpenROAD. It sees the committed metal as fixed and routes trunks and the remaining nets on every layer. Charge local access, PG, clock spacing and vias to one occupancy model. Keep branch tracks, attachment points and Steiner junctions provisional. Charge a shared edge once per net. <a href="../../pass/place/row_occupancy.hpp">Row capacity</a> · <a href="../../inou/lefdef/routing_occupancy.hpp">Metal occupancy</a></li>
-<li>The stack above M3 stays with OpenROAD until this rung passes E. The SAT Local stage stopped on rule detail there: neighbour spacing on M4 and M6, and minimum-area via plates on stacks whose grids do not coincide. Critical nets on the full stack are a later rung (E).</li>
-<li>Reuse <code>Signal_route_request</code> for bounded, non-mutating wire trials. Its anchors let a pin join existing same-net metal, and its prior-via context carries cut history. Reuse the connectivity checker on the whole net after moving a branch. The new work is searching cell poses and tree changes together. Start as an offline replay of A with no production option. <a href="../../pass/place/signal_router.hpp">Signal-routing interface</a> · <a href="../../inou/lefdef/routing_connectivity.hpp">Connectivity checks</a></li>
-<li><strong>Occupancy that can forget.</strong> <code>Routing_occupancy</code> inserts and queries but does not erase, and a push or a revert must remove the pins and obstructions of a moved cell and the metal of a ripped branch. For M2 and M3 keep sorted intervals per track, owned by net or cell, with an undo trail. Check it against the full occupancy on the planted cases of C. <a href="../../inou/lefdef/interval_occupancy.hpp">Interval occupancy</a></li>
-<li>When a via cannot land or a stub runs out of track, use the conflicting pins and shapes to seed the repair. First slide a chain of movable neighbors toward free sites and stretch its stubs. Update all pins and obstructions of each moved cell in the occupancy query. Then try another pin access, a neighbor swap or an adjacent compatible row. If a branch blocks useful motion, detach and rebuild the shared subtree, including its junction and layer. Grow the window toward available whitespace across tile edges. Keep all fixed endpoints, crossing connections and outside loads in the trial. A fixed flop can split a row into two separate site budgets.</li>
-<li>For example, when two data inputs beside a fixed flop compete for one escape track, try pushing the nearer gate one site toward a gap and moving the shared signal junction. Recompute access for both gates and the flop’s data pin, then check every incident net and nearby foreign wire. If the only gap is across the flop, try an adjacent row or a different branch. Record which change made the connection possible.</li>
-<li>Treat movement of a protected object or damage to a protected wire as an invalid trial. Rank batches first by disconnected terminals, then geometry conflicts, overlap area and negotiated overflow, and finally by timing-weighted wirelength and vias. Try compound moves on a private copy so an intermediate overlap can open a path. Accept a batch only when the recorded violation counts improve in a fixed lexicographic order, or a tie improves routed cost within timing bounds. Requeue touched rows and nets. Revert rejected poses, accesses, tree edges, occupancy and costs together. Cap expansions and reroutes per hot region. Report stalled, budget exhausted and model-infeasible separately, with the best checkpoint. Completion requires zero overlap, legal sites and fully connected signals.</li>
-<li><strong>Budget and leftovers.</strong> OpenROAD's detailed router spends 50–555 CPU-ms per cell on these designs. Aim the first pass at 2–5 ms per net on one thread, with rows and disjoint windows in parallel. A net the loop cannot finish goes to OpenROAD unrouted, with the finished nets FIXED. Count those nets in every report.</li>
-</ul></li>
-
-<li id="e"><strong>E — Measure closure and speed against the ordinary flow.</strong>
-<ul>
-<li>Fork three runs from A. The control uses the regular terminal legalizer with the same fixed set, followed by OpenROAD global and detailed routing. A second arm gives OpenROAD the candidate legal positions with its trial signal wires removed. The full arm hands off the positions <em>and</em> routed signals. The second arm measures the placement benefit and how much the native wire choices add. On a small case, first prove that a completed signal net, its vias and PCRS survive export, import and downstream checking. The existing FIXED preroute contract requires firm endpoints and rejects mixed path types. Keep tentative fragments inside the experiment. Do not hand native routes over as guides: in the 2026-11-08 sha3 test LiveHD's guides gave 3% less wire and 15% fewer vias, but detailed routing took 519 s against 133 s. <a href="../../pass/place/preroute_handoff.tcl">Fixed-route contract</a> · <a href="../../pass/place/preroute_validate.tcl">OpenDB geometry checks</a></li>
-<li>Start with minimax, then sha3 (RF2). On OpenROAD-CTS frames minimax is the clean control: 2,876 cells, four router iterations and 224 CPU-seconds. sha3 at utilization 0.73 is the access-limited case: 20,813 cells, 33 iterations and 8,482–11,555 CPU-seconds. For screening, stop the router after iteration 3 (9–18 minutes on sha3) and compare first-iteration violations and CPU-seconds. Run to the end only for candidates. Then sweep fixed core sizes through the control's closure limit. Handoff tests of 2026-11-09 without a clock tree put it near 0.75–0.80 on sha3 and 0.70–0.75 on minimax.</li>
-<li>Use identical inputs, clock geometry, platform layer derating, corner/SDC, seeds, threads and time budgets per pair. Disable netlist changes in the isolation run. Repeat promising pairs with the same downstream timing-repair policy and site allowance in both arms. Recheck frozen instances and wires after each stage. Run each pair at least five times with the density jittered by ±0.0002: that change alone moved minimax between 17 and 65 final markers (<a href="2r-route.html#stepb">2r-route B8</a>). Compare CPU-seconds. Wall time on the shared machine varies with load. Run HighTide campaigns externally and keep Bazel fixtures self-contained.</li>
-<li>Record highest closing utilization, per-layer wirelength, occupied tracks at hot edges, vias, displacement and maximum overlap per round. Measure first-iteration violations by type and layer, router CPU-seconds to 1% of that count and to zero, actual detailed-route connectivity, shorts, DRC markers by type/layer/net, iterations, extracted setup and hold WNS/TNS, clock skew, time by stage and peak memory. Include native search, retries, failed runs and downstream finishing in total time. Also count moved Steiner junctions, reattachments and retained native wirelength after detail. Compare the same clock domains and timing endpoint coverage. Report QoR at equal area and area at equal QoR.</li>
-<li>Advance on either gate (RF5). Speed: a paired run reaches zero violations at the same utilization in fewer total CPU-seconds than the control, native time included, beyond repeat variation. Density: a paired run closes at a higher tested utilization. Both need legal placement, connected nets, zero final DRC and no reproducible extracted timing loss. Repeat the winning pair and preserve closure on the clean control. If only the positions-only arm wins, pursue the placement improvement. If wins require giving up the native routes, moving PCRS, reserving whole layers for detail or growing the core within a pair, stop the router experiment. Store inputs, frozen-object digests, route deltas and the failing-stage table under <code>repros/3r-routefirst/</code>.</li>
-<li><strong>Later rung for QoR.</strong> Route the most critical 5–10% of nets natively first, on the full stack, and resize on their extracted RC before the rows are final. A width change or an inserted hold buffer changes constants and one variable of a row, so the row solve decides the new row exactly. Compare with OpenROAD's post-route repair on the same frame.</li>
-</ul></li>
-
-<li id="f"><strong>F — Cheap arms before the router.</strong>
-<ul>
-<li><strong>F1 — Positions only.</strong> After terminal legalization, <code>tile_spread</code> shares the free sites of a stretch evenly. Place that whitespace instead where neighbouring pins of different nets cannot both escape, counted with the pin-access oracle at each spacing. Keep the cell order and every PCRS pose. OpenROAD routes everything. Measure first-iteration violations and router CPU-seconds against the even sharing. This is the positions-only arm of E without native wires. <a href="../../pass/place/tile_spread.hpp">Tile spread</a></li>
-<li><strong>F2 — Payoff bound with OpenROAD's own wires.</strong> Take the control's clean routed result. Mark the nets that stay on M2 and M3 as FIXED, rip up the rest and route again. Then sweep the fixed share. The run gives the router time a perfect native router for those nets would save, and shows whether OpenROAD stalls against fixed neighbours. The <a href="https://github.com/masc-ucsc/HighTide/blob/2383e20/tools/vslivehd/stitch_chunk_routes.py">HighTide assembly command</a> already imports fixed nets this way.</li>
-<li><strong>F3 — Partial-net probe.</strong> Check whether OpenROAD finishes a net whose pin escapes (via and M2 piece) are FIXED and whose trunk is free. Try one net, then one row. If it does not, native ownership is whole nets only.</li>
-<li>Build D only if F2 shows a saving worth it. Proposal: at least 30% of the control's router CPU-seconds with the local nets fixed, on both designs.</li>
-</ul></li>
-
-<li id="g"><strong>G — Report what routing shows about PCRS.</strong>
-<ul>
-<li>Attribute every census row, failing window, infeasible row and rejected frame: does it involve a protected object (a flop, clock gate, tree driver, reset or scan cell, a clock or reset wire, a rail, strap or PG via landing)? A positive cycle of the row solve that contains a protected object names the pose that makes the row infeasible.</li>
-<li>Reference: with OpenROAD's tree, a flop or clock cell is the nearest cell in 0–4% of the late M1–M3 violations (<a href="#evidence">Evidence</a>). A higher share on the PCRS frame of the same design is a finding.</li>
-<li>What to look for first:
-  <ul>
-  <li>Leaf groups pulled so close that the D and Q escapes of neighbouring flops collide. PCRS lists this as its pin-density risk.</li>
-  <li>Clock leaf wires or their vias over data pins or on the only escape track of a neighbour.</li>
-  <li>Row segments between fixed flops that are too short for the logic assigned to them.</li>
-  <li>Tree buffers that moved in legalization (limit L9 of the PCRS review).</li>
-  <li>PG via landings missing from the routing capacity (L10).</li>
-  <li>PCRS wires that cannot be reproduced at legal anchor poses (A).</li>
-  </ul></li>
-<li>The fix is a PCRS change: a centroid layout or pitch, the leaf pull, a leaf wire track rule, a driver site or a via landing. File it in <a class="xref" href="2p-pcrs.html">2p-pcrs</a> with the frame digest and the window, regenerate the frame and rerun the pair. Report whether the fix also moves the PCRS acceptance numbers.</li>
-<li>Keep one findings table per design under <code>repros/3r-routefirst/</code>: the object, the evidence, the PCRS item and the result after the fix.</li>
-</ul></li>
+<li>The flow must not call OpenROAD. OpenROAD is the referee only: design rules, extraction and timing of a finished result.</li>
+<li>Flops may move during routing, with their clock leaves rerouted or the movement of clock cells limited.</li>
+<li>The most critical or most complex nets choose first. Cells that do not fit move inside their tile, then to a nearby tile with the lowest demand.</li>
+<li>Long, very critical nets may get extra spacing. The spare M2 and M3 go to the finishing pass.</li>
 </ul>
 
-<h2>Implemented experimental tools</h2>
-<p>The native frame-tree dump, pin-access placement trials, full-net conductor check and fixed-choice row solver are available in <a href="../../tools/routefirst/README.md">tools/routefirst</a>. The design-scale results below use separate HighTide runs.</p>
-
-<h2 id="native-pcrs-runs">Measurements on native PCRS frames</h2>
-<p>On 2026-11-23, minimax and sha3 were synthesized and placed with the native PCRS clock tree on ASAP7.
-Each pair shares a frozen clock/reset route and the native power grid.
-An independent geometric check connected all 108 protected nets on minimax and all 278 on sha3.
-OpenROAD global routing had zero overflow on both the ordinary and access-guided placements at the platform's 0.25 layer adjustment.</p>
-<table>
-<thead><tr><th>Design</th><th>Cells moved by F1</th><th>F1 search CPU-s</th><th>Iteration 0 markers, ordinary</th><th>Iteration 0 markers, F1</th></tr></thead>
-<tbody><tr><td>minimax</td><td>1,392</td><td>102.83</td><td>4,394</td><td>4,331</td></tr>
-<tr><td>sha3</td><td>806</td><td>103.77</td><td>13,104</td><td>12,847</td></tr></tbody></table>
-<p><strong>F3 requires whole-net ownership on this OpenROAD build.</strong> A completed minimax signal provided an M1-to-M2 via and a horizontal escape for a partial FIXED handoff.
-OpenROAD left the escape unchanged and reported a routed design with zero markers. The geometric check found two disconnected components.
-In the row test all 37 nets with a fixed escape remained disconnected. In the paired test OpenROAD connected all 37 when they entered unrouted.
-The frozen PCRS nets remained connected throughout.</p>
-<p><strong>Independent checks change the minimax verdict.</strong> Both ordinary and F1 detail runs reported zero markers.
-Checking the routed ODB independently found 80 and 61 markers respectively. Repeating that check on the exported DEF gave the same counts.
-Both layouts connected all 15,317 signal and protected nets. The ordinary layout had three short markers between clock leaf <code>net_112</code> and data net <code>net_497</code>.
-A local repair reduced the counts to 19 and 16 on its first pass with the exterior wires fixed. Sign-off closure remains unproven.</p>
-<p>In a separate whole-net test the native router completed one signal on each F1 placement. On minimax the 0.281 &micro;m M2 segment and both V1 vias survived full routing, with all signal conductors connected. That run took 2,412.67 detail CPU-seconds and had 76 independent markers. The ordinary and F1 comparisons took 2,404.71 and 2,151.80 detail CPU-seconds respectively, excluding the F1 search. This single-seed handoff test did not meet the speed or density gate.</p>
-<p><strong>Matched minimax closure after revising one PCRS leaf.</strong> Reserving the M2 access region of <code>register_file.g6033</code> during the scratch route of <code>net_112</code> restored two access options on the affected pins. The other 107 protected wires and all anchor poses were identical. The revised control and F1 both passed independent full-layout DRC and conductor checks on 15,317 nets. The clock target was 900 ps, the row area was 3,135.76 &micro;m&sup2; and cell occupancy was 66.08% in both arms.</p>
-<table><thead><tr><th>Same revised minimax frame, seed 1</th><th>Extracted Fmax (MHz)</th><th>Setup WNS / TNS (ps)</th><th>Hold WNS (ps)</th><th>Wire length (&micro;m)</th><th>Routing, search and marker scans (CPU-s)</th></tr></thead>
-<tbody><tr><td>OpenROAD</td><td>1,060.23</td><td>&minus;43.19 / &minus;1,239.50</td><td>+36.96</td><td>77,809.44</td><td>4,346.18</td></tr>
-<tr><td>F1 and OpenROAD</td><td>1,073.04</td><td>&minus;31.93 / &minus;682.05</td><td>+37.20</td><td>77,995.95</td><td>2,876.18</td></tr></tbody></table>
-<p>Each arm reopened nets implicated by the independent scan until the layout checked clean. CPU includes the initial global and detailed routing, native placement search, each local router attempt in the shared policy through first closure, and the scans used to identify the remaining markers. Extraction and final verification are outside that subtotal. Most of the single-seed saving came from fewer finishing attempts. F1 used 1,286.23 first-pass detail CPU-seconds to the control's 1,321.19. A second seed reproduced both extracted frequencies. At target density 0.6998 the clean result reversed. Ordinary placement reached 1,099.97 MHz and used 3,553.13 CPU-seconds including marker scans, versus 1,096.30 MHz and 4,655.36 CPU-seconds with F1. The upstream 14,413-cell netlist was identical before placement. Physical optimization gave the two density settings different PCRS input netlists, identical within each pair. At 0.7002, correcting the isolated keepout violations on one clock wire admitted the common frame. Both runs closed. The control reached 1,084.44 MHz in 4,714.75 CPU-seconds, and F1 reached 1,073.93 MHz in 5,053.38 CPU-seconds. At 0.7001 the control closed at 1,126.98 MHz and F1 retained five markers. At 0.6999 the cold runs were interrupted. Resuming both saved iteration-five layouts through the same repair policy left six control violations and two with F1. Both remained connected. The interrupted pair has no comparable total CPU. These five density settings establish a placement benefit only at 0.7000.</p>
-<p><strong>F2, reusing clean OpenROAD wires.</strong> On the same frame, 12,070 complete data nets stayed within the lower routing stack. Retaining 25%, 50%, 75% and 100% of those nets took 1,279.50, 1,264.27, 1,202.14 and 1,180.31 first-pass detail CPU-seconds. Every retained wire survived. The independent checks found 54, 44, 54 and 47 markers before local repair. The largest first-pass saving was 10.7%. The 25% arm reached independent closure with 3,205.30 routing CPU-seconds and 3,593.07 CPU-seconds including the scans used by finishing, against 3,868.66 and 4,346.18 respectively on the control. Extracted Fmax was 1,051.99 MHz. The 75% arm eventually closed by reopening two mutable neighbors around a single M2 corner, while preserving all 9,052 reused data nets. Extracted Fmax was 1,003.10 MHz. Its measured routing, search and required marker scans took 8,810.91 CPU-seconds including the unsuccessful finishing attempts. The 50% and 100% arms exceeded 5,200 measured routing CPU-seconds apiece during finishing while still above zero independent DRC. Even omitting later work and marker-scan costs, neither could meet the 30% CPU gate against the 3,868.66 CPU-second cold control. These minimax results stop the proposed dense cell-pushing implementation at D.</p>
-<p><strong>Whole native routes on the revised frames.</strong> The existing native signal router attempted 64 spatially separated same-row two-pin nets per design using the F1 placement and protected PCRS wiring. It completed 61 of 64 on minimax and 64 of 64 on sha3. Each native route passed connectivity and DRC in the shared frame before handoff. The paired control fixes exactly the same endpoint cells.</p>
-<table><thead><tr><th>Design and stopping point</th><th>Handoff</th><th>Native wire CPU-s</th><th>First detail CPU-s</th><th>Independent DRC</th><th>Shorts</th><th>Open nets</th></tr></thead><tbody>
-<tr><td>minimax, router finished</td><td>OpenROAD</td><td>0</td><td>1,621.96</td><td>43</td><td>0</td><td>0</td></tr>
-<tr><td>minimax, router finished</td><td>61 native wires</td><td>187.67</td><td>1,728.52</td><td>83</td><td>0</td><td>0</td></tr>
-<tr><td>sha3, reset revision, iteration 5</td><td>OpenROAD</td><td>0</td><td>3,171.76</td><td>179</td><td>64</td><td>0</td></tr>
-<tr><td>sha3, reset revision, iteration 5</td><td>64 native wires</td><td>218.77</td><td>3,328.08</td><td>172</td><td>62</td><td>0</td></tr>
-<tr><td>sha3, revised corridors, iteration 5</td><td>OpenROAD</td><td>0</td><td>3,219.57</td><td>95</td><td>5</td><td>0</td></tr>
-<tr><td>sha3, revised corridors, iteration 5</td><td>63 native wires</td><td>283.38</td><td>3,196.75</td><td>99</td><td>5</td><td>0</td></tr>
-</tbody></table>
-<p>The all-layer check found identical metal and cut rectangles before and after OpenROAD import and detailed routing. On minimax, 27.153 &micro;m of native M2 and 122 V1 cuts remained exact after independent closure. With the 61 native nets, Fmax was 1,071.66 MHz and the routing, search and marker-scan subtotal was 4,420.76 CPU-seconds. The matched firm-endpoint control reached 1,073.04 MHz in 3,574.77 CPU-seconds. The native pre-handoff scan added 53.79 CPU-seconds. Even removing all 187.67 CPU-seconds of native wire search leaves 4,233.09 CPU-seconds, 18.4% above the matched control. On sha3, 25.174 &micro;m of M2 and 128 cuts remained exact at the five-iteration screen. Independent polygon connectivity covered all 15,317 minimax nets and 18,668 sha3 nets. At the sha3 screen, provisional Fmax was 1,199.33 MHz for the control and 1,152.63 MHz for the native handoff. Both still had shorts and negative hold slack.</p>
-<p>In the revised SHA3 corridors, OpenROAD preserved 24.877 &micro;m of native M2 and every one of its 126 V1 cuts. At iteration three the control had 133 independent markers and the native arm had 171. At iteration five their provisional frequencies were 1,184.42 and 1,221.57 MHz, with hold slacks of &minus;81.62 and &minus;81.38 ps. Both connected all 18,668 nets. Continuing the saved databases with the same 64-iteration limit left 86 independent violations and two shorts in the control, and 90 violations and three shorts in the native arm. Through that checkpoint, placement search, native wire search, global routing, both detailed routes and checkpoint preparation totaled 6,129.06 and 8,278.00 CPU-seconds respectively. Subsequent local finishing is outside these subtotals. The 22.82 CPU-seconds saved by the detailed router covered only part of the 283.38 CPU-seconds spent generating the native routes. Both SHA3 revisions produced the same 123 nm M2 short between retained signal <code>net_3253</code> and mutable <code>net_6345</code>. Their ordinary controls were clean in that window. Keeping the native segment reduced the neighboring A pin of the XNOR from six enumerated escapes to five. Reopening only the other signal, with and without explicit M2 blockages over the retained geometry, moved the short to the same 46 nm overlap in both trials. Returning only the conflicting native signal to OpenROAD removed the short, kept all other wires exact (including 62 native signals), connected every net and introduced zero new markers. The whole-layout count fell from 99 to 98. After the common local repair policy on the original five-iteration outputs, the firm-endpoint control had three shorts, 1,184.51 MHz and 10,336.79 CPU-seconds. The strict native handoff had four shorts, 1,136.53 MHz and 14,383.55 CPU-seconds, plus 70.96 CPU-seconds for its pre-handoff scan. Applying the same finishing policy to the continued detail runs left two and three shorts, respectively. The corresponding provisional Fmax values were 1,184.53 and 969.42 MHz, after 11,891.91 and 15,655.60 CPU-seconds. All 18,668 nets connected in each result. Fresh extraction found identical setup and hold endpoint sets in both arms, covering 1,953 endpoints on SHA3 and 2,343 on minimax. The same five SHA3 and six minimax drivers lacked parasitic annotation in their paired runs. On the original unrevised frame, each of the three arms exceeded 1,100 independent markers by iteration 18.</p>
-<p><strong>B, moving the cell inside a routed window.</strong> On sha3, 115 of 187 nonoverlapping sampled windows retained their target violation after a zero-displacement reroute. A legal move of up to four sites cleared the target in 95 of those 115, preserved conductor connectivity and introduced no new tracked boundary conflict. Four of four sampled wins reproduced when each gate was rerouted in isolation. Two clean control windows, including one beside a fixed flop, introduced no new related conflicts. The 187 windows are a sample of 913 iteration-5 markers.</p>
-<p><strong>C, planted recovery.</strong> The fixed-choice solver passed the row fixtures and matched exhaustive feasibility and cost on 400 small problems.
-On an independently clean minimax layout, removing 52,946 signal V1 paths and jittering 12,865 cells gave a different result.
-The retained-M2 experiment found no candidate site for 4,774 cells, and no complete solution in any of 207 rows.
-Reinstating the recorded accesses recovered all 207 rows, all conductor geometry and zero independent markers.
-The standalone pin-access model rejected 5,593 pin contacts at their known-good poses. Of those, 3,894 had a lower via landing extending beyond the M1 port union, 1,299 reappeared when other routed signal metal was removed, 361 were outside the enumerated X coordinates and 39 were mixed-layer ports.</p>
-<p>A separate reconstruction used the jittered input, cell LEFs and merged retained M2 strips to choose sites and V1 contacts without the original positions or removed-via ledger. It placed every row and connected all 15,317 nets. Scoring candidate landings against M1 pin and obstruction spacing reduced independent markers from 1,401 to 151. Three rounds of independently checked local alternatives reduced the count to 63, 14, and zero. The final 15,317-net connectivity check passed. A polygon-union comparison confirmed exactly the same M2 conductor footprint. Every other retained path, frozen anchor, IO and the power grid survived. The reference wire length of 77,995.95 &micro;m was preserved. The recovered layout uses different sites for 572 cells and different coordinates for 6,432 of its 52,946 V1 contacts. Extracted Fmax was 1,072.91 MHz, compared with 1,073.04 MHz on the matched reference. The 24 independent trial and acceptance scans consumed 1,867 CPU-seconds. A separate replay from packaged inputs reproduced all three refinement counts, final connectivity and exact retained geometry. A cold replay of the direct 61-net native handoff also reproduced zero independent violations, all 15,317 connected nets and 1,071.66 MHz. This passes the planted recovery gate with a geometry checker in the refinement loop. The F2 routing-CPU gate still applies independently.</p>
-<p><strong>sha3 reference for F2.</strong> An OpenROAD scratch reroute changed 44 of 278 protected paths before both arms forked. Independently finishing the ordinary scratch layout produced zero DRC and zero opens on 18,668 nets. At a 929 ps clock period, extracted Fmax was 1,180.86 MHz, setup WNS +82.16 ps and hold WNS &minus;81.91 ps. This clean geometry supplies 12,679 eligible low-metal data nets for the SHA3 payoff sweep. The cold control reached zero independent DRC and all 18,668 nets connected at 1,030.79 MHz, setup slack &minus;41.13 ps and hold slack &minus;81.70 ps, using 7,110.26 CPU-seconds through repair and marker scans. At 0%, 25%, 50%, 75% and 100% retained, first-pass detailed routing took 3,533.37, 3,704.99, 3,716.05, 3,299.00 and 3,174.84 CPU-seconds. The fresh DRC counts were 95, 101, 73, 99 and 74 even though the detailed router reported zero in every arm. The maximum first-pass saving was 10.1%. Independently reassembling the clean witness on the maximally retained input gave zero DRC and zero opens. All four nested shares are geometrically feasible. At independent closure, the 50% arm preserved 6,340 data signals and reached 1,060.55 MHz in 7,069.96 CPU-seconds through repair and scans. Against the ordinary cold control that saved 0.6% and gained 29.76 MHz. Hold slack remained &minus;81.82 ps. The 25%, 75% and 100% shares finished the same repair policy with one, two and three independent violations respectively.</p>
-<p>A separate three-iteration sweep used the newly closed cold control’s own wires. It supplied 12,711 eligible signals. Only 3,208 had identical routes in the warm and cold controls. At 0%, 25%, 50%, 75% and 100% retained, the independent marker counts were 149, 166, 126, 142 and 169. CPU across logged detailed-routing iterations 0 through 3 was 3,059, 2,864, 2,325, 2,290 and 2,609 seconds. Every arm connected all 18,668 nets. The best early saving was 25.1%. These are screening measurements.</p>
-<p>Replay inputs, tile trees, routed checkpoints, per-wire checks and the measured comparison are kept under <code>repros/3r-routefirst/</code>.</p>
-
-<h2 id="evidence">Evidence from existing runs (2026-11-23)</h2>
-<p>Read from the logs and saved DRC reports of the routed LiveHD → ORFS runs in <code>~/projs/HighTide/artifacts/lhd_route/runs</code>. Nothing was rerun. These frames carry OpenROAD's clock tree on a LiveHD placement. They are the reference the PCRS frames are compared with, not PCRS results. The scripts are <code>repros/3r-routefirst/drt_iterations.py</code> and <code>repros/3r-routefirst/marker_census.py</code> (local).</p>
-<table>
-<tr><th>Design (tag)</th><th>Cells</th><th>ORFS utilization</th><th>Detailed route CPU-s</th><th>Share of backend wall time</th><th>Iterations</th><th>First-iteration violations (per cell)</th><th>On M1–M3</th></tr>
-<tr><td>minimax (q1)</td><td>2,876</td><td>0.56</td><td>224</td><td>73%</td><td>4</td><td>706 (0.25)</td><td>93%</td></tr>
-<tr><td>sha3 (q1)</td><td>20,813</td><td>0.73</td><td>8,482</td><td>97%</td><td>33</td><td>23,703 (1.14)</td><td>72%</td></tr>
-<tr><td>sha3 (r1)</td><td>20,822</td><td>0.73</td><td>11,555</td><td>95%</td><td>33</td><td>34,731 (1.67)</td><td>69%</td></tr>
-<tr><td>NVDLA/partition_m (r1)</td><td>21,604</td><td>0.57</td><td>1,078</td><td>70%</td><td>5</td><td>3,562 (0.16)</td><td>91%</td></tr>
-<tr><td>litedram (r2)</td><td>24,902</td><td>0.48</td><td>1,387</td><td>74%</td><td>7</td><td>6,062 (0.24)</td><td>90%</td></tr>
-<tr><td>NVDLA/partition_a (q1b)</td><td>25,303</td><td>0.62</td><td>2,761</td><td>81%</td><td>6</td><td>8,615 (0.34)</td><td>84%</td></tr>
-<tr><td>liteeth (r1)</td><td>45,636</td><td>0.28</td><td>2,800</td><td>74%</td><td>7</td><td>7,584 (0.17)</td><td>79%</td></tr>
-<tr><td>ternip (q1)</td><td>57,492</td><td>0.73</td><td>4,450</td><td>72%</td><td>7</td><td>19,576 (0.34)</td><td>89%</td></tr>
-<tr><td>NVDLA/partition_p (q1)</td><td>108,756</td><td>0.48</td><td>12,804</td><td>81%</td><td>9</td><td>47,006 (0.43)</td><td>82%</td></tr>
-<tr><td>litepci (l6)</td><td>116,500</td><td>0.66</td><td>16,645</td><td>83%</td><td>17</td><td>59,650 (0.51)</td><td>73%</td></tr>
-<tr><td>gemmini (r1)</td><td>562,044</td><td>0.46</td><td>45,128</td><td>73%</td><td>8</td><td>175,670 (0.31)</td><td>76%</td></tr>
-</table>
+<h2 id="status">Where it stands</h2>
 <ul>
-<li><strong>Detailed routing is where the time goes:</strong> 70–97% of the backend wall time on every routed design, at 50–555 CPU-ms per cell.</li>
-<li><strong>The first-iteration violations look the same everywhere.</strong> <code>eolKeepOut</code> is the largest type (33–46%) and M2 the largest layer (40–67%).</li>
-<li><strong>The row solve targets the largest class.</strong> The ASAP7 tech LEF gives M2 a 37 nm minimum piece, 31 nm end to end, and an end-of-line keep-out whose side extension (12.5 nm) does not reach the next track. Two pieces of different nets on one track therefore need 68 nm centre to centre, and a site is 54 nm. This is the tip-spacing constraint of the <a href="#design">row formulation</a>. It is read from the rule and the counts. The geometry of the violations was not inspected.</li>
-<li><strong>Two time profiles.</strong> Seven designs spend 93–100% of the router time in iterations 0–3, and litepci 86%. sha3 spends 20–22% there, and 53–61% after the count falls below 1% of the first iteration.</li>
-<li><strong>Violations are wire against wire.</strong> At least 98% of the sources in the saved reports are nets, not cell pins. Movement helps only by moving the stubs that end on a cell.</li>
+<li><strong>Small designs</strong> (minimax, sha3, ternip; 15k to 21k nets). Every net routed, no rule or connectivity finding, 34 to 80 CPU-seconds against 1,247 to 2,179 for single-thread OpenROAD, and 9 to 28% higher Fmax. Route-first from the pose before legalization uses 3 to 11% less wire than routing the legalized placement.</li>
+<li><strong>Density.</strong> No advantage: <code>rf_route</code> closes what OpenROAD closes up to the placer's limit on sha3 and ternip, and OpenROAD closes one minimax point (0.88) where route-first leaves 9 nets.</li>
+<li><strong>Eyeriss</strong> (1,419 µm die, 1,040 macros, 294k to 438k nets). Fully routed on the LiveHD frame and on the ORFS-placement frame, 15 to 51 times less CPU than OpenROAD. The ORFS netlist placed by LiveHD stops with 52 of 433,445 nets left.</li>
 </ul>
-<p>Census of the violations still open at iteration 5 or later, against the final DEF. "Near" means within two sites of a pin of either net, in the same row band.</p>
-<table>
-<tr><th>Run, iteration</th><th>M1–M3 violations</th><th>Near a pin of movable logic</th><th>Near a flop or clock cell</th><th>With a free site beside that cell</th><th>V3 and above, near a pin</th></tr>
-<tr><td>sha3 q1, 5</td><td>603</td><td>408 (68%)</td><td>10 (2%)</td><td>361 (60%)</td><td>37 of 284 (13%)</td></tr>
-<tr><td>sha3 q1, 10</td><td>148</td><td>103 (70%)</td><td>2 (1%)</td><td>102 (69%)</td><td>10 of 118 (8%)</td></tr>
-<tr><td>sha3 q1, 15</td><td>54</td><td>33 (61%)</td><td>2 (4%)</td><td>32 (59%)</td><td>6 of 22 (27%)</td></tr>
-<tr><td>sha3 q1, 20</td><td>19</td><td>12 (63%)</td><td>0</td><td>11 (58%)</td><td>1 of 2</td></tr>
-<tr><td>litepci l6, 5</td><td>239</td><td>129 (54%)</td><td>6 (3%)</td><td>not counted</td><td>45 of 100 (45%)</td></tr>
-<tr><td>NVDLA/partition_p q1, 5</td><td>24</td><td>16 (67%)</td><td>0</td><td>not counted</td><td>0 of 2</td></tr>
-</table>
-<p>The census is an upper bound, not a fix rate. minimax saved no report because it finished before iteration 5. Freezing flops looks cheap on these frames: a flop or clock cell is rarely the nearest cell. That has to be checked again on PCRS frames (G).</p>
 
-<h2 id="design">Design notes: route-first legalization</h2>
-<p>This is the model the experiment tests, folded in from the sketch “Route-First Legalization: Committing Wires Before Cell Positions” (Jose Renau, 2026-11-23). The stretchable stub, the fixed-order row solve and the planted-witness test come from it. Where the plan above departs from it, the note says so.</p>
-
-<h3>The idea</h3>
-<p>The conventional flow fixes cell positions before any wire exists at track level. Legalization minimizes displacement from the global placement, which is only a proxy for routability. The detailed router then cannot move cells, so at high routing density it rips up and reroutes for many iterations, or fails. Route-first legalization commits the lower-metal routing topology first: each wire gets a track and an order on that track, and its length stays free. Legal cell coordinates then come from an exact solve per row, and discrete changes are confined to small windows. Two observations motivate it:</p>
+<h3 id="compare">LiveHD clock tree and route against OpenROAD clock tree and route (eyeriss)</h3>
+<p>Clock tree plus routing, measured the same way for every row: OpenROAD extraction and timing of the routed DEF at the 2.5 ns constraint. <code>rf_route</code> runs on one thread, OpenROAD on 32. OpenROAD's routing time is global plus detailed routing. PCRS runs inside the 16-thread LiveHD flow, and only its wall time is recorded.</p>
+<div style="overflow-x:auto"><table>
+<tr><th>Netlist and placement</th><th>Clock tree</th><th>Router</th><th>Nets routed</th><th>Fmax (MHz)</th><th>Wire (mm)</th><th>Clock tree CPU-s, wall s</th><th>Route CPU-s</th><th>Route wall s</th></tr>
+<tr><td rowspan="4">LiveHD netlist, LiveHD placement (282k cells)</td><td rowspan="4">PCRS</td><td>rf_route, legalized</td><td>all 293,938</td><td>161.4</td><td>4,604</td><td rowspan="4">not recorded, 72</td><td>1,567</td><td>1,654</td></tr>
+<tr><td>rf_route, route-first</td><td>all</td><td>160.9</td><td>4,462</td><td>1,681</td><td>1,763</td></tr>
+<tr><td>rf_route, route-first, spacing 2% and alpha 0.6</td><td>all but 1</td><td>309.6</td><td>4,605</td><td>2,257</td><td>2,335</td></tr>
+<tr><td>OpenROAD</td><td>all</td><td>174.9</td><td>4,456</td><td>79,471</td><td>4,381</td></tr>
+<tr><td rowspan="2">ORFS netlist and macros, LiveHD placement (415k cells)</td><td rowspan="2">PCRS</td><td>rf_route, legalized</td><td>all but 52</td><td>(175.1)</td><td>9,391</td><td rowspan="2">not recorded, 91</td><td>6,092</td><td>6,178</td></tr>
+<tr><td>OpenROAD</td><td>all</td><td>192.2</td><td>9,211</td><td>94,413</td><td>5,591</td></tr>
+<tr><td rowspan="2">ORFS netlist, ORFS placement (421k cells)</td><td rowspan="2">OpenROAD CTS</td><td>OpenROAD</td><td>all</td><td>159.0</td><td>10,927</td><td rowspan="2">216, 60</td><td>84,809</td><td>4,008</td></tr>
+<tr><td>rf_route, legalized</td><td>all 437,773</td><td>237.2</td><td>11,106</td><td>4,195</td><td>4,285</td></tr>
+</table></div>
 <ul>
-<li><strong>Legalization moves are small.</strong> A cell typically moves a few sites. That rarely changes the global topology of its nets. It changes the last hop to each pin.</li>
-<li><strong>A wire on a fixed track has one free dimension.</strong> If only its length may change, cell positions and wire lengths can be solved together as a one-dimensional problem per row.</li>
+<li><strong>The two native flows.</strong> LiveHD with PCRS and <code>rf_route</code> (first row): 161 MHz, 4.6 m of wire, 28 minutes on one thread. ORFS with OpenROAD CTS and routing (seventh row): 159 MHz, 10.9 m of wire, 67 minutes on 32 threads and 85,000 CPU-seconds. The netlists differ (LiveHD's is two thirds the size), so this compares flows, not routers.</li>
+<li><strong>Same netlist, same macros.</strong> ORFS netlist placed by LiveHD with PCRS and routed by <code>rf_route</code>: 14% less wire than the ORFS flow and 14 times less CPU, but 52 nets are left, so its 175 MHz is not a result yet. OpenROAD routes that LiveHD placement completely at 192 MHz, against 159 MHz for the ORFS placement.</li>
+<li><strong>Same placement, router against router.</strong> On the ORFS placement <code>rf_route</code> gives 237 MHz against 159 with 1.6% more wire. On the LiveHD placement it gives 161 against 175 with the measured setting, because of a few unbuffered nets of 2 to 3.6 mm, and 310 with spacing and a path-oriented tree order.</li>
+<li><strong>Wall time.</strong> One thread of <code>rf_route</code> is 2.6 times faster in wall time than 32 threads of OpenROAD on the LiveHD frame and about equal on the two larger ones. Its time grows faster than the net count: the last few hundred nets take as long as the first 300,000.</li>
+<li><strong>Clock quality.</strong> Hold slack after routing on the PCRS tree: −451 ps with <code>rf_route</code>, −954 ps with OpenROAD's route. On the OpenROAD tree, which was built without hold repair: −1,899 ps with <code>rf_route</code>, −3,060 ps with OpenROAD's route. Skew itself was not compared.</li>
 </ul>
-<p>The claim is that this replaces displacement-driven legalization plus rip-up-heavy detailed routing with a solve whose objective is real wire, and which reports infeasibility exactly. The claim is untested. The main risk is routing the lower metals in over-dense regions before the cells have spread.</p>
 
-<h3>Model</h3>
-<p>The lower metals are unidirectional: M1 pins, M2 horizontal, M3 vertical. ASAP7 matches this, with a 36 nm pitch on M1–M3, a 54 nm contacted poly pitch and 270 nm rows.</p>
-<table>
-<tr><th>Element</th><th>Rule</th></tr>
-<tr><td>Wire</td><td>A segment on a fixed track. Only its endpoints move. No track changes during the solve.</td></tr>
-<tr><td>Trunk</td><td>Any segment on M3 or above that is not a pin attachment. Frozen once assigned. In the first rung the trunks are OpenROAD's (RF4), known to LiveHD only as its guide.</td></tr>
-<tr><td>M2 stub</td><td>A horizontal M2 segment from a pin's via to a fixed point of its net, usually an M3 segment. Its pin end moves with the cell.</td></tr>
-<tr><td>M3-direct</td><td>A stacked via from the pin through a minimum-length M2 pad to a vertical M3 segment. It needs free M2 above the pin and an M3 track over the pin.</td></tr>
-<tr><td>Access point</td><td>An M2 track that a pin's M1 shape can reach. Each cell uses one mutually compatible set, one per pin.</td></tr>
-<tr><td>Row</td><td>Every cell has a row before routing. M2 power rails separate rows, so stubs do not cross rows.</td></tr>
-</table>
-<p>A cell's freedom follows from how its pins are attached. With every pin on an M2 stub the cell slides in x along its row. With every pin M3-direct it may change rows at a fixed x. The original model fixed a cell that has both kinds, and subtask C replaces that with rigid links. A stub keeps the side of its fixed end on which it was routed. That keeps the order of stubs on each track constant, and the formulation relies on it.</p>
+<h3 id="clock">Clock</h3>
+<p>PCRS builds and places the clock tree, and the DEF LiveHD writes after final legalization carries its 4,170 clock nets (eyeriss) tagged as clock but without wires. <code>rf_route</code> routes them itself, all of them before the first data net, with the ordinary rules. The frames of the first experiment were different: there the clock and reset wires came fixed with the frame and the router only saw data nets.</p>
 
-<h3>Row formulation</h3>
-<p>With rows, cell order and stub order fixed, legalizing one row is a linear program over difference constraints. For cells 1..n in left-to-right order, <code>x[i]</code> is the position of cell i:</p>
-<pre>minimize    sum over attachments p of  lambda[p] * len[p](x)
-subject to  x[j] - x[i] &gt;= d[i][j]    for every constraint (i, j)
-            L[i] &lt;= x[i] &lt;= U[i]</pre>
-<p>The length of attachment p is linear in x because each stub keeps its side. A stub of cell i with a fixed end at <code>a[p]</code> has length <code>s[p] * (x[i] + o[p] − a[p])</code>, where <code>o[p]</code> is the pin offset in the cell and <code>s[p]</code> = ±1 is the routed side. A same-row segment between two cells has length <code>(x[j] + o[q]) − (x[i] + o[p])</code>. The weight <code>lambda[p]</code> carries net criticality and the resistance of M2.</p>
-<table>
-<tr><th>Source of a constraint or bound</th><th>Form</th></tr>
-<tr><td>Cell non-overlap and edge spacing</td><td><code>x[i+1] − x[i] ≥ w[i] + gap</code></td></tr>
-<tr><td>Two stubs on one track with moving ends facing</td><td><code>(x[j] + o[q]) − (x[i] + o[p]) ≥ tip spacing</code></td></tr>
-<tr><td>Row ends, fixed M2 shapes (trunks, pads, blockages), stub side, stretch cap per net</td><td><code>L[i] ≤ x[i] ≤ U[i]</code></td></tr>
-</table>
-<ul>
-<li><strong>Exact feasibility.</strong> The constraints form a graph. The row is feasible if and only if the graph has no positive cycle, which a longest-path pass decides.</li>
-<li><strong>Exact optimum.</strong> The dual is a min-cost flow. With spacing constants rounded up to the site grid, the optimum is integral.</li>
-<li><strong>A certificate on failure.</strong> A positive cycle names the cells and stubs that cannot coexist. The repair uses it to choose where to act, and subtask G uses it to name a protected object.</li>
-</ul>
-<p>With only neighbour constraints this is fixed-order single-row placement, which has near-linear algorithms. Subtask C adds the two endpoints of each pin piece as variables and the equalities of aligned pins. Both keep the same form.</p>
-
-<h3>Algorithm</h3>
-<p>Six phases. Only phase 5 searches, and it is bounded.</p>
+<h2 id="todo">Still to do</h2>
 <ol>
-<li><strong>Row assignment.</strong> Snap each cell to a row, minimizing y displacement subject to the capacity of each row segment. Overlaps in x remain. This is the only step that moves whitespace across rows at long range.</li>
-<li><strong>Mobility planning.</strong> Choose one attachment mode per cell. The default is M2 stubs. M3-direct is used where M2 demand exceeds the track budget and the cell is not expected to move.</li>
-<li><strong>Trunk track assignment.</strong> Assign tracks to the global routes on M3 and above, then freeze them. The first rung leaves this phase to OpenROAD (RF4).</li>
-<li><strong>Order-committed stub routing.</strong> For each pin, pick an access point and connect it to the nearest point of its net's trunk tree. Commit the track and the order of stubs on that track, not coordinates. Leaf Steiner points are chosen here, per pin.</li>
-<li><strong>Row solve and bounded repair.</strong> Solve every row exactly, in parallel. For each infeasible or over-cost row, try discrete moves inside a small window around the certificate, and solve again only the touched row segments.</li>
-<li><strong>Hand-off.</strong> Emit coordinates and final stub lengths. The detailed router completes the remaining connections and rule checks with all cells fixed.</li>
-</ol>
-<p>The repair moves of phase 5, in increasing cost:</p>
-<ul>
-<li><strong>Swap</strong> two neighbouring cells in a row, allowed when their stubs sit on different tracks.</li>
-<li><strong>Row change</strong> of an M3-direct cell by one or two rows, with a landing check for its M2 pads.</li>
-<li><strong>Re-attach</strong> a cell: rip its stubs and route them again with another access pattern or mode. This is the only move that reroutes.</li>
-</ul>
-<pre>RFL(GP, global_routes):
-  rows  &lt;- AssignRows(GP)                       # capacity-aware; x overlaps remain
-  mode  &lt;- PlanMobility(rows, global_routes)    # per cell: M2 stubs | M3-direct
-  T     &lt;- AssignTrunkTracks(global_routes)     # M3 and above, then frozen
-  S     &lt;- RouteStubsByOrder(rows, mode, T)     # track + order per stub; lengths free
-
-  for each row r in parallel:
-      (x[r], cert[r]) &lt;- SolveRow(r, S, T)      # exact; cert = positive cycle or none
-
-  Q &lt;- rows that are infeasible or above the cost threshold
-  while Q is not empty:
-      r &lt;- pop(Q)
-      W &lt;- window around cert[r]                # bounded: k cells, +/- 2 rows
-      best &lt;- none
-      for each move m in Moves(W):              # swap, row change, re-attach
-          apply m on the trail
-          solve the touched row segments again
-          if total cost Phi decreased more than best: best &lt;- m
-          roll back
-      if best exists:
-          commit best; push touched rows that are still infeasible
-      else:
-          mark r for fallback                   # local trunk rip-up or spread again
-  return x, T, S</pre>
-<p>Every trial is a transaction on an undo trail: each change logs its old value, and a rollback pops to the checkpoint. Occupancy is stored as sorted intervals per track and per row, owned by nets and cells, so removing a wire never requires a search.</p>
-
-<h3>Cost and termination</h3>
-<ul>
-<li><strong>Row solve.</strong> A row with n cells has O(n + stubs) constraints. The neighbour-only case is near-linear and the general case is a min-cost flow on a sparse graph. Rows share no variables, so they solve in parallel. The rigid links of subtask C join rows into components, and those solve in parallel instead.</li>
-<li><strong>Incremental solve.</strong> A repair trial solves again only the row segment between the nearest fixed cells on each side of the window.</li>
-<li><strong>Repair.</strong> A window with k movable cells and r choices each has at most r<sup>k</sup> combinations. With k ≤ 5 and r ≤ 3 this is a constant, so repair is linear in the number of failing windows.</li>
-<li><strong>Termination.</strong> Let Φ be the total weighted wire length plus a large penalty times the total constraint violation. Every committed move strictly lowers Φ and the state space is finite, so the loop stops at a local optimum.</li>
-</ul>
-<p>The guarantee is local. The full two-dimensional problem is NP-hard and this does not solve it globally. A row imbalance wider than the repair window cannot be fixed by phase 5, so phase 1 must balance row capacity up front.</p>
-
-<h3>Limits and open risks</h3>
-<p>The exact solve covers one dimension with the order fixed. Everything hard moved into phases 1, 2 and 4, and none of those is proven.</p>
-<ol>
-<li><strong>Routing over overlapping cells.</strong> In an over-dense spot there are more pins than M2 capacity until the cells spread. Committing order instead of coordinates is the proposed answer. Whether a good order can be found there is the central open question.</li>
-<li><strong>M2 budget.</strong> A rough estimate gives a mean stub of 3–4 sites before the tracks of a row saturate. Typical displacement fits. Cells that must move tens of sites need the re-attach move.</li>
-<li><strong>One axis per cell, chosen early.</strong> Mobility is fixed in phase 2, before the solve shows which axis a cell needs. The 3:2 ratio of poly pitch to M3 pitch likely limits M3-direct to about half the sites. This is an inference from the pitches, to check against the LEF.</li>
-<li><strong>Short local nets.</strong> Most nets have no trunk. They add terms between two moving cells and compete for M2 exactly where pin access is hardest.</li>
-<li><strong>Trunk validity.</strong> Trunks are assigned against approximate pin positions. A cell that moves more than about a routing tile invalidates them.</li>
-<li><strong>Timing.</strong> Stretch on M2 is resistive. The weights and stretch caps must come from slack, with a periodic full timing refresh. A worst-slack gate alone lets non-critical paths degrade.</li>
-<li><strong>Whitespace across rows.</strong> The repair window reaches one or two rows. Larger imbalances must be removed by row assignment or by spreading again in global placement.</li>
-<li><strong>“Legal” is partial.</strong> The original solve guarantees no overlap and spacing on tracks, and leaves via spacing, minimum area and M1 rules to the detailed router, which can still fail. Subtask C moves line ends and minimum length inside the solve. Cut spacing stays a check after it.</li>
+<li><strong>Into the flow.</strong> <code>rf_route</code> is a separate program that reads DEF and LEF and has the ASAP7 rule limits compiled in. The flow still ends at placement. Move it into <code>pass/place</code> on ids, without name-keyed copies of what the graph holds, with the rules taken from the technology (widths, vias, the four measured limits per layer), the slacks from the fast timer and the tile demand from <code>Global_routes</code>. A second technology (sky130) is the test that nothing is ASAP7 by accident.</li>
+<li><strong>Who routes the clock.</strong> Decide between PCRS wires that the router must respect and <code>rf_route</code> routing the tree as it does now. If the router keeps it: a length cap or balance for leaf nets, spacing for trunks, and skew measured after routing and after a flop moved. Today flops move at most 2 sites and 0 to 7 of them do per small design, so that freedom is neither a measured gain nor a measured risk.</li>
+<li><strong>The tail.</strong> On the ORFS-netlist eyeriss frame 25 nets fail at a pin walled in by other nets after the rip-ups allowed, and 27 more are not reached in 6,000 s. Failed calls are 14% of the routing time on that frame (1% on the LiveHD frame, 7% on the ORFS placement). Rip-up puts the same wires back; the walled pin needs its landing kept, as macro pins now have, or the blockers need a cost for coming back.</li>
+<li><strong>Tree order and spacing per net.</strong> One setting does not fit: alpha 0.3 is best on the small designs, 0.6 gives 39% on the LiveHD eyeriss frame and nothing on the ORFS one, 0 and 1.0 are bad. Choose by the span of the net and the strength of its driver. Spacing the worst 2% gives 3 to 28%, but leaves 1 to 4 nets unrouted on eyeriss, which has to be fixed before it becomes a default.</li>
+<li><strong>A share of the longest nets first</strong> (user, 2026-11-24). All longest first is not faster and leaves more nets. A share ahead of the rest (<code>--long-frac</code>) was measured on the LiveHD eyeriss frame: with the longest 5% first the run took 1,349 CPU-seconds against 1,567, with the same wire (4,604 mm), every net routed and 157.9 MHz against 161.4. So it saves 14% of the CPU and costs 2% of the frequency; the setting is neutral on timing and is not a default. The same runs on the other two frames were stopped before they finished.</li>
+<li><strong>Search cost.</strong> The search advances one track stop per expansion, so a connection of a millimetre costs 28,000 expansions at best and a clock leaf net 2,800 per pin. Advance by runs of free track, and use the tile routes as corridors. The hash tables that made eyeriss fit cost about 15% on the small designs.</li>
+<li><strong>Fresh slacks.</strong> Order, anchors and spacing use the placer's slacks from before routing. Their rank agrees with the routed slacks on minimax and ternip (0.98, 0.99) and less on sha3 (0.88). Refresh after a batch of nets, or only the cones of changed branches.</li>
+<li><strong>A raw global placement as input.</strong> The pose used so far is nearly legal (148 to 280 overlapping pairs). Route-first legalization from an overlapping placement is untested, and so is the claim that it could close a denser core.</li>
+<li><strong>Rules not served.</strong> Nondefault widths, shields with a power connection, and wide wires. Only the default width with double spacing is served.</li>
+<li><strong>Long nets without buffers.</strong> LiveHD leaves nets of 2 to 3.6 mm behind one buffer on eyeriss, and they set its frequency. That belongs to placement (<a class="xref" href="2w-wlresynth.html">2w-wlresynth</a> and the virtual buffer trees); the router can only limit the damage.</li>
+<li><strong>Checks in the repository.</strong> The rule limits were measured with OpenROAD on two-wire layouts by local scripts. Fixtures that pin each limit of the table, and the two-wire oracle itself, are not in the repository.</li>
 </ol>
 
-<h3>Tests of the sketch and where they are now</h3>
+<h2 id="chunks">Routing by chunks</h2>
+<p>Asked by the user on 2026-11-24. Placement already runs in chunks with a coordinator that owns the boundary slots (<a class="xref" href="2f-scalability.html">2f-scalability</a>). An experimental grid worker now runs independently on a shared LiveHD post-PCRS placement. In theory a design can be cut into many small chunks, each with its own routing: eyeriss has five or six today, and the number can be pushed up until it stops paying. What is unclear is the long wires, which cross chunks and often more than one. The slot-based methods below remain experiments to compare against the working grid implementation.</p>
+
+<p><strong>Native grid experiment.</strong> <code>rf_chunks</code> routes tile interiors in separate processes, reserves 128 DBU at seams and gives crossing nets and spills to the coordinator. It can also route the crossing nets first. The resident router reports failed pins to the agent. <code>rf_feedback</code> releases nearby wires, routes the failed nets first, and verifies the assembly. Four interior workers on ASAP7 NVDLA M retained 18,545 routes. The first assembly had nine opens. A 540 DBU repair released 231 nets and left one open; a 1,400 DBU repair released 95 and closed it. Extraction at the 1,500 ps constraint gave 1,141.81 MHz, versus 1,148.21 MHz flat and 1,108.20 MHz for four-thread OpenROAD on the same PCRS placement. M2–M7 routing, extraction and timing used identical LEFs and constraints. The workers currently load the whole input frame. Boundary-slot half nets and memory-bounded routing packets remain open.</p>
+<h3>What chunks would buy</h3>
 <ul>
-<li>The oracle study before building is subtask B.</li>
-<li>The planted one-dimensional test is subtask C, on fixtures first and then at design scale.</li>
-<li>The end-to-end comparison from one global placement and the utilization sweep are subtask E.</li>
-<li>Ablations to run with E: a displacement-only cost (isolates the objective), no repair, and no M3-direct.</li>
+<li><strong>Wall time.</strong> <code>rf_route</code> is one thread. Eyeriss takes 26 to 100 minutes; chunks route in parallel.</li>
+<li><strong>The tail.</strong> Time grows faster than the net count because late nets search a full chip. A chunk bounds every search and every rip-up.</li>
+<li><strong>Memory</strong> per worker, and <strong>incremental work</strong>: a change inside a chunk reroutes that chunk if its boundary stays as it was.</li>
 </ul>
 
-<h2>Assumptions under test</h2>
-<table>
-<thead><tr><th>Assumption to test</th><th>LiveHD consequence</th></tr></thead>
-<tbody>
-<tr><td>Early commitment saves rip-up.</td><td>The former Plan → Final → Detail pipeline chose upper-level Steiner connections with cell locations unresolved and withheld two layers for local completion. That reduced the routes available at both stages and hurt routing density and performance. Native routing never completed on SHA3, minimax or ternip. Commit fixed infrastructure first. Let each signal repair jointly change placement, access, layer and shared junction before declaring the connection done. Compare enabled versus locked junction repair on the same multi-pin windows. <a href="2r-route.html#stepc">Removal of SAT Final and Local</a></td></tr>
-<tr><td>A row has about six usable M2 tracks.</td><td>The ASAP7 profile has seven distinct M2 Y offsets per row and an explicit M3 track origin. Count accessible tracks after local rails, straps, foreign pins and cuts, for each master, orientation and site phase. Independently legal accesses for each pin can still conflict on the same cell. <a href="../../inou/lefdef/tech_profile.cpp">Platform grid</a> · <a href="../../inou/lefdef/pin_access.hpp">Pin-access oracle</a></td></tr>
-<tr><td>Small displacement preserves the tree.</td><td>Measure the displacement and access change at each failed attachment. Compare wire-weighted and displacement-only row solves, then disable cell pushes or branch changes one at a time. A positive cycle explains one fixed-order instance. Only an independently checked final layout establishes closure.</td></tr>
-<tr><td>Route M2 and above before positions.</td><td>Own V1 to M3 first and leave the trunks to OpenROAD (RF4). Almost all of the leverage of cell movement is there, and the rule detail above M3 stopped the SAT stages.</td></tr>
-<tr><td>The detailed router finishes line ends, via spacing and minimum area.</td><td>Line-end conflicts on M2 are the largest class of first-iteration violations. Pin pieces are intervals inside the row solve (C).</td></tr>
-<tr><td>A cell with mixed attachments is fixed.</td><td>Aligned pins are rigid links, and the linked cells slide together (C).</td></tr>
-</tbody>
-</table>
+<h3>What a boundary is for a track router</h3>
+<p>Wires run on tracks in one direction per layer. A wire can cross a vertical chunk edge only on a horizontal layer (M2, M4, M6) and a horizontal edge only on M3, M5 or M7. A boundary pin is therefore a slot: an edge, a layer and a track. If the chunks tile the die, the two sides of an edge share the slot and there is no top-level wire at all: a net that crosses is two half nets that end on the same slot. A net that passes through a chunk without a pin in it is a feedthrough, a two-slot net of that chunk like any other. Supply is not the limit: a vertical edge has about 26 M2, 21 M4 and 16 M6 tracks per micron.</p>
+<p>The chunks must also agree on the rules at the edge, because the limits reach across it: 31 to 48 nm end to end on one track, facing ends on the next track, 34 nm between cuts. Either a contract (no wire end and no cut within a margin of the edge except at a slot) or an order (neighbours route one after the other and see each other's edge wires) is needed. The contract keeps chunks independent. The order needs four colours of chunks and makes a reroute depend on the neighbours.</p>
 
-<h2>Prior art</h2>
-<p>The ingredients are known. A short search found no work that legalizes cells against track-committed wires, which is weak evidence of novelty and needs a full prior-art pass. Descriptions come from abstracts and search summaries, not full readings. The last three rows of the table are from memory and unverified.</p>
-<table>
-<tr><th>Work</th><th>What it does</th><th>How route-first legalization differs</th></tr>
-<tr><td>Routing with cell movement: <a href="https://doi.org/10.1145/3400302.3415738">ICCAD 2020 contest</a>, <a href="https://wfz0755.github.io/CV/archive/2021-ICCAD-Starfish.pdf">Starfish</a>, <a href="https://scholars.hkbu.edu.hk/en/publications/atlas-a-two-level-layer-aware-scheme-for-routing-with-cell-moveme/">ATLAS</a></td><td>Moves a capped number of cells between routing tiles of a legal, globally routed design</td><td>Starts from overlapping cells and works at track level</td></tr>
-<tr><td><a href="https://past.date-conference.com/proceedings-archive/2022/html/0201.html">CR&amp;P</a></td><td>Iterates re-placement and rerouting between global and detailed routing</td><td>Placement is not primary, and the inner step is exact, not iterative</td></tr>
-<tr><td><a href="https://home.engineering.iastate.edu/cnchu/pubs/c46.pdf">IPR</a>, <a href="https://web.eecs.umich.edu/~imarkov/pubs/conf/iccad09-crisp.pdf">CRISP</a>, <a href="https://magic3007.github.io/data/publications/PLACE_DAC2025_Chen/PLACE_DAC2025_Chen.pdf">RUPlace</a></td><td>Couple global placement with global-routing congestion</td><td>Upstream of this step and complementary to it</td></tr>
-<tr><td>Routability-aware legalizers such as <a href="https://www.cse.cuhk.edu.hk/~byu/papers/C72-DAC2018-RippleLG.pdf">RippleLG</a></td><td>Minimize displacement under pin-access and spacing constraints</td><td>The objective is wire attached to committed tracks, not displacement</td></tr>
-<tr><td>Pin-access analysis in <a href="https://vlsicad.ucsd.edu/Publications/Conferences/377/c377.pdf">TritonRoute</a></td><td>Precomputes compatible access points per cell instance</td><td>Reused as the access-point model</td></tr>
-<tr><td>Fixed-topology Steiner embedding (<a href="https://arxiv.org/pdf/1412.5010">Maßberg</a>)</td><td>Places Steiner points for a given tree topology</td><td>Supports committing topology first and geometry later</td></tr>
-<tr><td>Symbolic layout compaction (1980s)</td><td>Solves constraint graphs to place shapes inside a cell</td><td>Same mathematics, applied between cells with routed stubs, to make space</td></tr>
-<tr><td>Fixed-order single-row placement (Kahng et al. 1999; Brenner and Vygen 2000)</td><td>Optimal positions in one row for a fixed order</td><td>The neighbour-only special case of the row solve</td></tr>
-<tr><td>Window legalization (MLL; Chow et al., DAC 2016)</td><td>Inserts a cell by shifting neighbours in a window</td><td>A similar repair operator, without wires</td></tr>
-</table>
-<p>Added by the review of 2026-11-23:</p>
+<h3>Three ways to handle the long wires</h3>
+<ol>
+<li><strong>Long wires first.</strong> Route every net that crosses a chunk edge on the whole chip, freeze it, and hand each chunk those wires as fixed metal. The long nets get straight tracks and the best layers, and they are the critical ones: on eyeriss the worst paths are nets of millimetres. But this part is serial and sees the whole chip, a crossing net still ends at cell pins inside chunks, and a change to one such net touches several chunks. It is the "longest first" order under another name, and the flat test of that order (item 5 above) is its first data point.</li>
+<li><strong>Slots first, chunks independent.</strong> The coordinator gives every crossing net its slots from the tile estimate, then each chunk routes alone and respects them. This scales, runs in parallel and keeps a reroute local. The cost is that a slot is chosen before any wire exists: the route that the flat router would take may want another track, another layer or another place along the edge, and the detour is paid on both sides.</li>
+<li><strong>Slots that move.</strong> Start as in 2. Each chunk reports, for each slot, what moving it would save: tracks along the edge, or a layer. The coordinator moves a slot when the two sides together gain, and only the two half nets are rerouted. A net that failed in a chunk for lack of a way to its slot asks first. One or two rounds, critical nets first, which is the route-first idea applied to slots instead of sites.</li>
+</ol>
+<p>My expectation: 2 is the base because it is the only one that scales, 3 recovers most of what 2 loses, and 1 stays for the few nets where a slot is the wrong abstraction: the clock trunks and the handful of unbuffered nets that cross the die. A mixed rule (the worst share by slack and span goes first on the upper layers, the rest gets slots) costs little serial time if the share is a few percent.</p>
+
+<h3>What needs care</h3>
 <ul>
-<li><a href="https://vlsicad.ucsd.edu/Publications/Conferences/385/c385.pdf">CoRe-ECO</a> solves detailed placement, detailed routing and cell replacement together with SMT in windows of a routed layout. It is the closest work to B and D. Its follow-on <a href="https://isqed.org/English/Archives/2024/Technical_Sessions/87.html">SLO-ECO</a> reports 45% fewer violations at 15.6 hours average on 11K–70K instances, so an exact joint search per window is the slow path.</li>
-<li><a href="https://vlsicad.ucsd.edu/Publications/Journals/j135.pdf">Kahng, Kuang, Liu and Xu</a> refine the placement inside routing, driven by pin access, and report fewer initial violations and less routing time afterwards. It is the closest work to F1.</li>
-<li><a href="https://limbo018.github.io/publications/papers/DFMR_DAC2017_Xu.pdf">Xu, Lin, Livramento and Pan</a> (DAC 2017) treat pin access under unidirectional routing as weighted interval assignment on tracks. That is phase 4 of the algorithm with the cells fixed. Here the cell position is a variable too.</li>
-<li><a href="https://home.engineering.iastate.edu/cnchu/pubs/c91.pdf">Ding, Chu and Mak</a> (ISPD 2017) refine a detailed placement by flipping, swapping and shifting for pin access, with about a third fewer unroutable nets.</li>
-<li>Making the same algorithm faster gives about 2×: <a href="https://past.date-conference.com/proceedings-archive/2026/DATA/72.pdf">RouterAcc</a> reports 2.1–2.3× over TritonRoute on an FPGA, and <a href="https://arxiv.org/pdf/2512.03594">offline reinforcement learning of its cost weights</a> 1.56× on average. The search found no GPU detailed router that reports a gain over TritonRoute.</li>
-<li>What stays new: cell positions and stub intervals solved together and exactly per row, starting from an overlapping placement, as the legalization step.</li>
+<li><strong>One tree per net.</strong> The coordinator fixes which edges a net crosses, as a tree over the chunks. Each chunk then joins its own pins and slots of that net. Two crossings of one net between the same two chunks would make a loop, and a chunk that connects its slots but not to each other would leave the net open, so the tree must say which slots of a chunk belong together.</li>
+<li><strong>Timing across chunks.</strong> A crossing net has one slack and several pieces. The tree order from the driver (alpha) is a property of the whole net, so the coordinator decides the order of the chunks along the path and each chunk routes its piece from the upstream slot. Spacing is a property of a slot too: the next track at the edge stays empty.</li>
+<li><strong>Cells near the edge.</strong> Route-first moves cells. A cell stays in its chunk, so the rows of a chunk end at the edge and a slide or a push stops there. A cell whose best site is across the edge is the placement coordinator's business, not the router's.</li>
+<li><strong>Clock, power, macros.</strong> Clock leaf nets are local; trunks cross and go with the long wires. The power grid is fixed metal for every chunk. A macro inside a chunk is as today; a chunk edge along a macro edge wastes the channel, so edges should run in channels or through logic.</li>
+<li><strong>How small.</strong> The share of nets that cross grows as chunks shrink, and each crossing net costs coordinator work and a fixed slot. Somewhere the gain in parallel work is eaten by slots. That point is the number to find.</li>
 </ul>
+
+<h3>Experiments, cheapest first</h3>
+<ol>
+<li><strong>Count on what exists.</strong> Cut the routed eyeriss results by the five placement chunks and by grids from 2×2 to 32×32. Per cut: nets that cross, their share of wire and of the worst slack, feedthroughs, crossings per net, and crossings per edge and layer against the track supply. No code in the router. This says how small a chunk can be before most nets are long.</li>
+<li><strong>Oracle slots.</strong> Split the placed DEF into chunk DEFs with a port at every place the flat route crosses an edge. <code>rf_route</code> already takes a port with metal on a track as a terminal, so each chunk routes with the existing binary, in parallel. Stitch, check and time the result. This is the best case of way 2: slots as good as a flat route would pick. Compare wire, Fmax, CPU and wall time with the flat run, and count the edge findings to size the contract.</li>
+<li><strong>Estimated slots.</strong> The same with slots from the tile estimate instead of the flat route. The difference to experiment 2 is the price of choosing slots early, and the size of what way 3 has to recover.</li>
+<li><strong>Long wires first, emulated.</strong> Route the crossing nets alone on the whole chip (<code>--only</code>), feed the result back as fixed wires, and route the chunks. A net with wires in the input is already treated as fixed metal. Compare with experiments 2 and 3 on the critical nets.</li>
+<li><strong>Moving slots</strong>, only if experiment 3 loses clearly against experiment 2: one round of slot moves on the nets with the largest detour.</li>
+</ol>
+<p>Stop rule: if oracle slots (experiment 2) already lose more than a few percent of Fmax or wire against the flat route at the chunk count that gives the wall time wanted, slots are the wrong cut for these designs and the long wires go first.</p>
 </main>
-<footer>LiveHD TODO</footer>
 </body>
 </html>

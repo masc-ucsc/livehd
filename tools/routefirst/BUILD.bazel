@@ -1,9 +1,17 @@
-load("//tools:regression.bzl", "cc_test")
+load("//tools:regression.bzl", "cc_test", "py_test")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library")
 
 cc_binary(
     name = "pin_options",
     srcs = ["pin_options.cpp"],
+    tags = ["manual"],
+    deps = ["//inou/lefdef:inou_lefdef"],
+)
+
+cc_binary(
+    name = "rf_route",
+    srcs = ["rf_route.cpp"],
     tags = ["manual"],
     deps = ["//inou/lefdef:inou_lefdef"],
 )
@@ -55,4 +63,32 @@ cc_binary(
     srcs = ["retained_metal.cpp"],
     tags = ["manual"],
     deps = ["//inou/lefdef:inou_lefdef"],
+)
+
+py_test(
+    name = "rf_route_test",
+    size = "small",
+    srcs = ["rf_route_test.py"],
+    args = ["$(location :rf_route)", "$(location :rf_chunks)", "$(location :rf_feedback)"],
+    data = [":rf_route", ":rf_chunks", ":rf_feedback"],
+    legacy_create_init = 0,
+)
+
+py_library(
+    name = "rf_chunks_lib",
+    srcs = ["rf_chunks.py"],
+    imports = ["."],
+)
+
+py_binary(
+    name = "rf_chunks",
+    srcs = ["rf_chunks.py"],
+    data = [":rf_route"],
+)
+
+py_binary(
+    name = "rf_feedback",
+    srcs = ["rf_feedback.py"],
+    data = [":rf_route"],
+    deps = [":rf_chunks_lib"],
 )
