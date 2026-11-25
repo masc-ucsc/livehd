@@ -265,9 +265,10 @@ has 'CLASS: STUTTER\? \(maxstall 1' "a missing hold is classed STUTTER?"
 judge "NO MATCH"    r_same    random:40,4 classify:0
 ! grep -q 'CLASS:' "$OUT/judge_$N.log" || { echo "FAIL: classify:0 still classifies"; exit 1; }
 echo "ok:   classify:0 turns the classification off"
-# timing lints
+# timing lints (the judge prints its own as `  warning: ...`; a run interpreted from source also
+# shows Lean's `<file>:<line>:<col>: warning:` lines about the tool's code, which are not lints)
 judge "MATCH FOUND" r_late    random:4,1
-! grep -q 'warning:' "$OUT/judge_$N.log" || { grep warning "$OUT/judge_$N.log"; echo "FAIL: a lint on a consistent contract"; exit 1; }
+! grep -q '^  warning:' "$OUT/judge_$N.log" || { grep '^  warning:' "$OUT/judge_$N.log"; echo "FAIL: a lint on a consistent contract"; exit 1; }
 judge "NO MATCH"    r_lint    random:20,2
 has 'warning: observed word out:y@next\?out:v.0 reads its payload at cycle n\+1 and its guard at cycle n' "lint: payload and guard at different cycles"
 judge "MATCH FOUND" r_lint2   random:20,2
