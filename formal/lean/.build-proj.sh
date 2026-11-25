@@ -38,6 +38,9 @@ ROOTS=(
   LeanSemanticPrimitives.Compiler.DirectSim
   # translation validation's reifier (a meta-program; the per-design TV drivers use it)
   LeanSemanticPrimitives.Compiler.ReifyGen
+  # the legacy models' fast operators (the per-design legacy drivers import it; interpreted runs
+  # read it from .olean-dev)
+  LeanSemanticPrimitives.Translation.LegacyFast
   # fp: the memory route's variants, residual IO and the drivers' shared runner support
   LeanSemanticPrimitives.Projection.MemVariantSim
   LeanSemanticPrimitives.Projection.ResidualIO
