@@ -208,7 +208,7 @@ r_map r_quiet   rD  v,yg,req "$LATE" 'xfer out:v@next' 'drive vin 0 0 0'
 drv() { # <driver> args...
   local d=$1; shift
   if [[ -n "$SYM_NAT" ]]; then "$SYM_NAT/$d" "$@"
-  else (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/drivers/$d.lean" "$@"); fi
+  else (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/proof/$d.lean" "$@"); fi
 }
 N=0
 judge() { # <expect> <refmap> args...

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Refinement-map self-test (pass/lean/tools/drivers/sym_refmap.lean).
+# Refinement-map self-test (pass/lean/tools/proof/sym_refmap.lean).
 #
 # Small RTL fixtures, each through the real flow (yosys-slang -> LGraph ->
 # DCERT2), then:
@@ -213,7 +213,7 @@ run1() { # <mode> <expect> <refmap> args...
   if [[ -n "$SYM_NAT" ]]; then
     "$SYM_NAT/sym_refmap" "$mode" "$OUT/$rm.refmap" "$@" "work:$OUT/work_$N" > "$log" 2>&1 || true
   else
-    (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/drivers/sym_refmap.lean" \
+    (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/proof/sym_refmap.lean" \
       "$mode" "$OUT/$rm.refmap" "$@" "work:$OUT/work_$N") > "$log" 2>&1 || true
   fi
   local got

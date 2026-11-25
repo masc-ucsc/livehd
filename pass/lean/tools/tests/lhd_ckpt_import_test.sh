@@ -83,7 +83,7 @@ drv() { # <native name> <source> args... -> RC, LOG
     (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$src" "$@") > "$LOG" 2>&1 && RC=0 || RC=$?
   fi
 }
-ck() { drv lhd_ckpt "$ROOT/pass/lean/tools/drivers/lhd_ckpt.lean" "$@"; }
+ck() { drv lhd_ckpt "$ROOT/pass/lean/tools/sim/lhd_ckpt.lean" "$@"; }
 ct() { drv cert_trace "$ROOT/formal/lean/Futamura_Projection_Scripts/cert_trace.lean" "$@"; }
 expect() { # <exit code> <text> <fn> args...
   local want=$1 text=$2 fn=$3; shift 3

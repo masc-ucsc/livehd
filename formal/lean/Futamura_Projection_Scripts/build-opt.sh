@@ -4,7 +4,8 @@
 # binaries of in-flight experiments -- is touched.
 #
 #   OPT=-O2 ROOT=/abs/path bash Futamura_Projection_Scripts/build-opt.sh Futamura_Projection_Scripts/total_probe.lean [more.lean ...]
-#   (the proof-tool drivers: ../../pass/lean/tools/drivers/sym_verify.lean sym_refmap.lean)
+#   (the proof tools: ../../pass/lean/tools/proof/sym_verify.lean sym_refmap.lean ...;
+#    the simulation drivers: ../../pass/lean/tools/sim/cert_run.lean lhd_ckpt.lean)
 # OPT may carry several flags, e.g. OPT="-O2 -g -fno-omit-frame-pointer"
 # for a profiling build that keeps -O2 but can be unwound.
 #
@@ -128,7 +129,7 @@ echo "modules: $REBUILT rebuilt, $KEPT up to date ($((SECONDS - T0)) s)"
 for PROBE in "$@"; do
   pb=$(basename "$PROBE" .lean)
   # the probe's own directory is its root, so a driver outside formal/lean
-  # (pass/lean/tools/drivers) compiles too
+  # (pass/lean/tools/proof, pass/lean/tools/sim) compiles too
   root="$(cd "$(dirname "$PROBE")" && pwd)"
   slot
   (

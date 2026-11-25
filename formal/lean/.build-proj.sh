@@ -66,8 +66,9 @@ ROOTS=(
   # the tools' audit: fails the build on a non-standard axiom
   HDLProof.Check.Audit
 )
-# The drivers and the tools' tests run interpreted against .olean-dev: their imports are roots.
-ROOT_FILES=(../../pass/lean/tools/drivers/*.lean Futamura_Projection_Scripts/cert_trace.lean
+# The proof tools (pass/lean/tools/proof), the simulation drivers (pass/lean/tools/sim) and the
+# tools' tests run interpreted against .olean-dev: their imports are roots.
+ROOT_FILES=(../../pass/lean/tools/proof/*.lean ../../pass/lean/tools/sim/*.lean Futamura_Projection_Scripts/cert_trace.lean
   Futamura_Projection_Scripts/dcert2_memroute.lean ../../pass/lean/tools/tests/*.lean)
 GEN=$(python3 Futamura_Projection_Scripts/lean_modules.py "${ROOTS[@]}" "${ROOT_FILES[@]}") \
   || { echo "the module list could not be made (above)" >&2; exit 1; }

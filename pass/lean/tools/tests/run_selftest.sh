@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Self-test of `cert_run` (pass/lean/tools/drivers/cert_run.lean, HDLProof/Run/*): running a
+# Self-test of `cert_run` (pass/lean/tools/sim/cert_run.lean, HDLProof/Run/*): running a
 # program on a design. Formats: pass/lean/tools/formats/run.md and bind.md.
 #
 # Fixtures, through the real flow (slang reader -> LGraph -> DCERT4):
@@ -176,7 +176,7 @@ drv() { # <native name> <source> args... -> RC, LOG
     (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$src" "$@") > "$LOG" 2>&1 && RC=0 || RC=$?
   fi
 }
-run() { drv cert_run "$ROOT/pass/lean/tools/drivers/cert_run.lean" "$@"; }
+run() { drv cert_run "$ROOT/pass/lean/tools/sim/cert_run.lean" "$@"; }
 ct() { drv cert_trace "$ROOT/formal/lean/Futamura_Projection_Scripts/cert_trace.lean" "$@"; }
 expect() { # <exit code> <status> args... (cert_run)
   local want=$1 st=$2; shift 2

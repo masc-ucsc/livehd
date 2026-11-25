@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Self-test of the reachability checker `ckpt_reach check` (pass/lean/tools/drivers/ckpt_reach.lean,
+# Self-test of the reachability checker `ckpt_reach check` (pass/lean/tools/proof/ckpt_reach.lean,
 # HDLProof/Reach/Defs.lean: checkReach_sound).
 #
 # Fixtures, through the real flow (slang reader -> LGraph -> DCERT4):
@@ -87,10 +87,10 @@ drv() { # <native name> <source> args... -> RC, LOG
     (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$src" "$@") > "$LOG" 2>&1 && RC=0 || RC=$?
   fi
 }
-reach() { drv ckpt_reach "$ROOT/pass/lean/tools/drivers/ckpt_reach.lean" "$@"; }
-ck() { drv lhd_ckpt "$ROOT/pass/lean/tools/drivers/lhd_ckpt.lean" "$@"; }
+reach() { drv ckpt_reach "$ROOT/pass/lean/tools/proof/ckpt_reach.lean" "$@"; }
+ck() { drv lhd_ckpt "$ROOT/pass/lean/tools/sim/lhd_ckpt.lean" "$@"; }
 ct() { drv cert_trace "$ROOT/formal/lean/Futamura_Projection_Scripts/cert_trace.lean" "$@"; }
-sv() { drv sym_verify "$ROOT/pass/lean/tools/drivers/sym_verify.lean" "$@"; }
+sv() { drv sym_verify "$ROOT/pass/lean/tools/proof/sym_verify.lean" "$@"; }
 expect() { # <exit code> <text> <driver fn> args...
   local want=$1 text=$2 fn=$3; shift 3
   "$fn" "$@"

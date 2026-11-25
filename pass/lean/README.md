@@ -793,8 +793,8 @@ The pipeline of one run:
 # lhd (see Build above); the native drivers, into a project-local root:
 cd formal/lean
 ROOT=$PWD/../../generated/sym/nat_root
-OPT=-O2 ROOT=$ROOT bash Futamura_Projection_Scripts/build-opt.sh ../../pass/lean/tools/drivers/sym_verify.lean \
-    ../../pass/lean/tools/drivers/sym_refmap.lean
+OPT=-O2 ROOT=$ROOT bash Futamura_Projection_Scripts/build-opt.sh ../../pass/lean/tools/proof/sym_verify.lean \
+    ../../pass/lean/tools/proof/sym_refmap.lean
 # the solver: cadical ships with the Lean toolchain; link it next to the drivers
 # (or pass solver:<path>)
 ln -s "$(dirname "$(elan which lean)")/cadical" $ROOT/nat/cadical   # still in formal/lean

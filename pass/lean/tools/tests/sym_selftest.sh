@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # M3 self-test: unbounded invariants, proved by sym_verify
-# (pass/lean/tools/drivers/sym_verify.lean). Refinement with stuttering is
+# (pass/lean/tools/proof/sym_verify.lean). Refinement with stuttering is
 # tested by refmap_selftest.sh (sym_refmap).
 #
 # Small RTL fixtures, each through the real flow (yosys-slang -> LGraph ->
@@ -294,7 +294,7 @@ run1() { # <driver> <expect> args...
   if [[ -n "$SYM_NAT" ]]; then
     "$SYM_NAT/$drv" "$@" "work:$OUT/work" > "$log" 2>&1 || true
   else
-    (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/drivers/$drv.lean" "$@" "work:$OUT/work") \
+    (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/proof/$drv.lean" "$@" "work:$OUT/work") \
       > "$log" 2>&1 || true
   fi
   local got

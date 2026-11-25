@@ -6,7 +6,7 @@ bytes for the same state, and each route can continue from a checkpoint that any
 
 The format, `save`, `restore` and every load-time check are in
 `formal/lean/LeanSemanticPrimitives/Compiler/Ckpt.lean`. The driver is
-`pass/lean/tools/drivers/lhd_ckpt.lean`.
+`pass/lean/tools/sim/lhd_ckpt.lean`.
 
 ## The file
 

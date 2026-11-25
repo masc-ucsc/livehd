@@ -10,7 +10,7 @@ Lean proofs.
 Lean: `pass/lean/tools/HDLProof/Sym/` (the proof tools, namespace
 `HDLProof.Sym`; Mathlib-free, built by `formal/lean/.build-proj.sh` as a second
 source root, every theorem under the failing axiom gate in
-`HDLProof/Check/Audit.lean`). Drivers: `pass/lean/tools/drivers/sym_verify.lean` (refinement with
+`HDLProof/Check/Audit.lean`). Drivers: `pass/lean/tools/proof/sym_verify.lean` (refinement with
 stuttering is now `sym_refmap.lean`, see below). Scripts: `pass/lean/tools/tests/sym_selftest.sh` (small
 fixtures only), `pass/lean/tools/scripts/sym_observe.py`.
 
@@ -155,7 +155,7 @@ fp's alone. A run naming `closed`, `emit:` or `route:` and no `sim:` uses fp.
 - **Naming ports.** Ports are named through the `<top>_io.json` next to the
   certificate.
 - **Native builds.**
-  `OPT=-O2 ROOT=<dir> bash formal/lean/Futamura_Projection_Scripts/build-opt.sh ../../pass/lean/tools/drivers/sym_verify.lean ../../pass/lean/tools/drivers/sym_refmap.lean`.
+  `OPT=-O2 ROOT=<dir> bash formal/lean/Futamura_Projection_Scripts/build-opt.sh ../../pass/lean/tools/proof/sym_verify.lean ../../pass/lean/tools/proof/sym_refmap.lean`.
   Pass `solver:` explicitly, or link the toolchain's cadical
   (`$(dirname $(elan which lean))/cadical`, run from `formal/lean`) into the
   build directory.

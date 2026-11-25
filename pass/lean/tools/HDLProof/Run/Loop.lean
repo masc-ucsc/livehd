@@ -2,7 +2,7 @@
 # One cycle of a closed-loop run
 
 `cycleStep ctx E` is one cycle on engine `E` (`Compiler/Engine`: a route's step on a state of
-its own kind), as a pure function. The driver (`drivers/cert_run.lean`) iterates it and does the
+its own kind), as a pure function. The driver (`sim/cert_run.lean`) iterates it and does the
 I/O (traces, VCD, checkpoints, lockstep).
 
 1. The inputs: the stimulus's for this cycle (or all zero), then the bind file's constants and
