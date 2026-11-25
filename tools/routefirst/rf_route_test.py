@@ -205,6 +205,15 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(stats["nets_routed"], 1)
         self.assertEqual({k: v for k, v in stats.items() if k.startswith("verify_") and v}, {})
 
+    def test_m1_access_at_pin_edge_avoids_a_blocked_cut(self):
+        self.with_vias()
+        cells = CELLS.replace("RECT 0.009 0.105 0.045 0.155", "RECT 0.009 0.105 0.043 0.155")
+        (self.root / "cells.lef").write_text(cells)
+        frame = self.two_cells().replace("NETS 1", "BLOCKAGES 1 ;\n- LAYER V1 RECT ( 82 398 ) ( 107 423 ) ;\nEND BLOCKAGES\nNETS 1")
+        stats = self.run_router(frame, "--verify")
+        self.assertEqual((stats["nets_routed"], stats["pin_access_retries"]), (1, 1))
+        self.assertEqual({k: v for k, v in stats.items() if k.startswith("verify_") and v}, {})
+
     def test_macro_edge_pin_is_reached_through_a_stub(self):
         # The pin is an off-track M3 bar at the bottom edge, under a blockage that covers the macro on M1 to M3.
         self.with_vias()

@@ -159,7 +159,7 @@ struct Pin {
   int               cx = 0, cy = 0;
   std::vector<Cand> cands;
   int               used = -1;  // chosen candidate once connected
-  bool              conn = false;
+  bool              conn = false, extra_access = false;
 };
 struct Via_rec {
   int cl, x, y;
@@ -2028,6 +2028,17 @@ struct Router {
           }
         }
       }
+      if (p.extra_access) {
+        // Try additional covered V1 positions when a pin's usual landing is occupied.
+        for (const auto& r : rs) {
+          for (int x : {int(std::ceil(r.xl)) + 9, int(std::floor((r.xl + r.xh) / 2)), int(std::floor(r.xh)) - 9}) {
+            const ph::Rect pad{double(x - 9), double(*t0 - 11), double(x + 9), double(*t0 + 11)};
+            if (std::find(xs.begin(), xs.end(), x) == xs.end() && ph::rect_union_covers(pad, rs)) {
+              xs.push_back(x);
+            }
+          }
+        }
+      }
       for (const int x : xs) {
         auto hi = std::lower_bound(m2.stops.begin(), m2.stops.end(), x);
         for (auto st : {hi, hi == m2.stops.begin() ? hi : hi - 1}) {
@@ -3104,6 +3115,24 @@ struct Router {
         net.failed = true;
         if (pin < 0) {
           continue;
+        }
+        auto& failed_pin = net.pins[pin];
+        if (!failed_pin.extra_access && failed_pin.comp >= 0 && !cinfo[failed_pin.comp].reserved
+            && (net.fail_why == "no-candidates" || net.fail_why == "source-blocked" || net.fail_why == "root-blocked")) {
+          const auto& m      = tech.macros.at(fp.components[failed_pin.comp].macro.str());
+          const auto& shapes = m.pins.at(failed_pin.lef).shapes;
+          if (!ph::hard_macro(m) && !shapes.empty()
+              && std::all_of(shapes.begin(), shapes.end(), [](const auto& s) { return s.layer == "M1"; })) {
+            const auto old          = failed_pin.cands.size();
+            failed_pin.extra_access = true;
+            pin_access(failed_pin, failed_pin.lef);
+            if (failed_pin.cands.size() > old
+                && std::any_of(failed_pin.cands.begin(), failed_pin.cands.end(), [&](const Cand& cd) { return cand_ok(ni, cd); })) {
+              ++stat["pin_access_retries"];
+              queue.push_front(ni);
+              continue;
+            }
+          }
         }
         if (opt.shift > 0 && (net.fail_why == "source-blocked" || net.fail_why == "root-blocked" || net.fail_why == "no-path")) {
           const auto again = shift_repair(ni, net.pins[pin]);
