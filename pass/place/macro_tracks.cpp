@@ -792,9 +792,9 @@ struct Origin_domain {
   }
 };
 
-// A proxy pin uses tracks on one axis. A periodic phase determines which
+// A separable macro pin uses tracks on one axis. A periodic phase determines which
 // patterns can serve it. Their finite extents then bound the valid origins.
-Origin_domain proxy_origins(const Profile& p, int axis, int64_t low, int64_t high) {
+Origin_domain track_origins(const Profile& p, int axis, int64_t low, int64_t high) {
   const auto    period = p.period[axis];
   Origin_domain domain{period, {}};
   for (const auto& phase : p.phases[axis]) {
@@ -843,17 +843,12 @@ Origin_domain proxy_origins(const Profile& p, int axis, int64_t low, int64_t hig
   return domain;
 }
 
-bool place_proxy_on_tracks(const ph::Technology& tech, const ph::Floorplan& layout, const Box& core, const Clearance& k,
-                           const Profile& p, const std::vector<ph::Component>& placed, ph::Component& proxy) {
-  // Generated memory ports have one escape direction each, so X and Y
-  // accessibility can be solved independently.
-  if (std::ranges::any_of(p.pins, &Pin::mixed)) {
-    return false;
-  }
-  const auto width = proxy.place.width, height = proxy.place.height;
+bool place_macro_on_tracks(const ph::Technology& tech, const ph::Floorplan& layout, const Box& core, const Clearance& k,
+                           const Profile& p, const std::vector<ph::Component>& placed, ph::Component& macro) {
+  const auto width = macro.place.width, height = macro.place.height;
   const auto xmin = core.xl + k.hx, ymin = core.yl + k.hy;
-  const auto xs = proxy_origins(p, 0, xmin, core.xh - k.hx - width);
-  const auto ys = proxy_origins(p, 1, ymin, core.yh - k.hy - height);
+  const auto xs = track_origins(p, 0, xmin, core.xh - k.hx - width);
+  const auto ys = track_origins(p, 1, ymin, core.yh - k.hy - height);
   if (xs.spans.empty() || ys.spans.empty()) {
     return false;
   }
@@ -864,7 +859,7 @@ bool place_proxy_on_tracks(const ph::Technology& tech, const ph::Floorplan& layo
     if (other.place.status != ph::Status::FIXED && other.place.status != ph::Status::LOCKED && !is_macro(tech, other)) {
       continue;
     }
-    const auto [sx, sy] = spacing(tech, proxy, other, k);
+    const auto [sx, sy] = spacing(tech, macro, other, k);
     const auto& q       = other.place;
     blocked.push_back({q.x - sx - width + 1, q.y - sy - height + 1, q.x + q.width + sx, q.y + q.height + sy});
   }
@@ -906,28 +901,40 @@ bool place_proxy_on_tracks(const ph::Technology& tech, const ph::Floorplan& layo
       }
     }
     if (x && !inaccessible(p, *x, *y)) {
-      proxy.place.x = *x;
-      proxy.place.y = *y;
+      macro.place.x = *x;
+      macro.place.y = *y;
       return true;
     }
   }
   return false;
 }
 
-bool repack_memory_proxies(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
-                           const Clearance& k) {
+bool repack_track_aligned_macros(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
+                                 const Clearance& k, bool proxies_only) {
+  std::map<std::pair<std::string, ph::Orientation>, Profile> profiles;
+  const auto profile_of = [&](const ph::Component& macro) -> const Profile& {
+    const auto key = std::pair{macro.macro, macro.place.orientation};
+    if (!profiles.contains(key)) {
+      profiles.emplace(key, profile(tech, layout, macro));
+    }
+    return profiles.at(key);
+  };
   std::vector<ph::Component> placed;
   std::vector<size_t>        movable, retained;
+  bool                       has_hard_macro = false;
   for (size_t i = 0; i < cells.size(); ++i) {
-    const auto& c = cells[i];
-    if (tech.macros.at(c.macro).virtual_proxy && c.place.status != ph::Status::FIXED && c.place.status != ph::Status::LOCKED) {
+    const auto& c      = cells[i];
+    const auto& master = tech.macros.at(c.macro);
+    if ((master.virtual_proxy || (!proxies_only && ph::hard_macro(master))) && c.place.status != ph::Status::FIXED
+        && c.place.status != ph::Status::LOCKED && !std::ranges::any_of(profile_of(c).pins, &Pin::mixed)) {
       movable.push_back(i);
+      has_hard_macro |= !master.virtual_proxy;
     } else {
       retained.push_back(i);
       placed.push_back(c);
     }
   }
-  if (movable.empty()) {
+  if (movable.empty() || (!proxies_only && !has_hard_macro)) {
     return false;
   }
   try {
@@ -945,18 +952,13 @@ bool repack_memory_proxies(const ph::Technology& tech, const ph::Floorplan& layo
     }
     return p.name < q.name;
   });
-  const auto                                                 core = row_core(tech, layout);
-  std::map<std::pair<std::string, ph::Orientation>, Profile> profiles;
+  const auto core = row_core(tech, layout);
   for (const auto i : movable) {
-    auto       c   = cells[i];
-    const auto key = std::pair{c.macro, c.place.orientation};
-    if (!profiles.contains(key)) {
-      profiles.emplace(key, profile(tech, layout, c));
-    }
-    if (!place_proxy_on_tracks(tech, layout, core, k, profiles.at(key), placed, c)) {
+    auto macro = cells[i];
+    if (!place_macro_on_tracks(tech, layout, core, k, profile_of(macro), placed, macro)) {
       return false;
     }
-    placed.push_back(std::move(c));
+    placed.push_back(std::move(macro));
   }
   retained.insert(retained.end(), movable.begin(), movable.end());
   for (size_t i = 0; i < placed.size(); ++i) {
@@ -1001,7 +1003,8 @@ void legalize_macro_tracks_with(const ph::Technology& tech, const ph::Floorplan&
       legalize_macro_tracks_impl(tech, layout, cells, k, move_macros, true, pdn, members);
     } catch (const Macro_placement_no_space&) {
       cells = original;
-      if (!pdn && repack_memory_proxies(tech, layout, cells, k)) {
+      if (!pdn && (repack_track_aligned_macros(tech, layout, cells, k, true)
+                   || repack_track_aligned_macros(tech, layout, cells, k, false))) {
         return;
       }
       throw;

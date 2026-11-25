@@ -16,13 +16,16 @@ base = ['lhd/lhd', 'synth', str(source), '--top', 'dut',
         '--set', f'synth.lef={lib}/sky130hd.tlef,{lib}/sky130hd.lef',
         '--set', 'synth.place.grid.density=8', '--set', 'synth.place.timing_rounds=1', '-q']
 
-def run(name, extra, success=True, expect=None, iterations=30, bins=8, period=10):
+def run(name, extra, success=True, expect=None, iterations=30, bins=8, period=10, error_class='usage', infer_top=False):
     report = root / (name + '.json')
     sdc = root / (name + '.sdc')
     sdc.write_text(f'create_clock -name virtual -period {period}\n'
                    'set_input_delay -clock virtual 0 [all_inputs]\n'
                    'set_output_delay -clock virtual 0 [all_outputs]\n')
     invocation = base + ['--set', f'synth.sdc={sdc}']
+    if infer_top:
+        i = invocation.index('--top')
+        del invocation[i:i + 2]
     invocation[invocation.index('synth.place.grid.density=8')] = f'synth.place.grid.density={bins}'
     p = subprocess.run(invocation + ['--set', f'synth.place.iterations={iterations}'] + extra + ['--workdir', str(root/name), '--result-json', str(report)],
                        capture_output=True, text=True, timeout=10)
@@ -31,7 +34,7 @@ def run(name, extra, success=True, expect=None, iterations=30, bins=8, period=10
     assert (p.returncode == 0) == success, (name, data, p.stdout, p.stderr)
     if not success:
         error = data['error']
-        assert error['class'] == 'usage', (name, error)
+        assert error['class'] == error_class, (name, error)
         assert expect in error['message'], (name, expect, error)
     return data
 
@@ -46,6 +49,18 @@ gp_ranking = [json.loads(line) for line in
 assert gp_ranking and all(p['ranking_only'] and p['delay'] is None for p in gp_ranking), gp_ranking
 assert native['qor']['place']['physical_timing']['ranking_evaluations'] > 0, native
 assert native['qor']['place']['physical_timing']['detailed_evaluations'] > 0, native
+
+weights_path = root / 'timing_weights.json'
+weights_record = {'class': 'livehd.placement.timing_weights', 'design': 'dut',
+                  'id': 'timing-weights', 'margin': 0, 'max_weight': 4}
+weights_path.write_text(json.dumps([weights_record, dict(weights_record, design='other', max_weight=5)]))
+metadata_flags = [str(weights_path), '--set', 'synth.place=true']
+metadata_weights = run('metadata_weights', metadata_flags, infer_top=True)['qor']['place']['timing_driven']
+assert metadata_weights['timing_margin'] == 0 and metadata_weights['timing_max_weight'] == 4, metadata_weights
+override_weights = run('override_weights', metadata_flags + ['--set', 'synth.place.timing_max_weight=3'])['qor']['place']['timing_driven']
+assert override_weights['timing_margin'] == 0 and override_weights['timing_max_weight'] == 3, override_weights
+weights_path.write_text(json.dumps([dict(weights_record, margin='0')]))
+run('bad_metadata_weight', metadata_flags, success=False, expect='must be numeric', error_class='config')
 
 run('timing_warmup', ['--set', 'synth.place=true',
                       '--set', 'synth.place.min_iterations=260'], iterations=260)

@@ -424,9 +424,10 @@ TEST(Placement, VirtualMemoryTrackAlignmentPreservesExplicitFixedOrigins) {
   EXPECT_NO_THROW(legalize_macro_tracks(tech, fp, cells, 0, 0, false));
 }
 
-TEST(Placement, VirtualMemoryFindsDistantTrackAlignedSpaceWithClearance) {
+namespace {
+void check_distant_track_aligned_space(bool virtual_proxy) {
   auto [tech, fp]                     = track_fixture();
-  tech.macros.at("ram").virtual_proxy = true;
+  tech.macros.at("ram").virtual_proxy = virtual_proxy;
   fp.die                             = {0, 0, 1200, 1200};
   fp.rows.clear();
   for (int y = 0; y < 1200; y += 10) {
@@ -479,6 +480,15 @@ TEST(Placement, VirtualMemoryFindsDistantTrackAlignedSpaceWithClearance) {
   const auto saved = cells;
   EXPECT_THROW(legalize_macro_tracks(tech, fp, cells, 2, 2, true, 12, 12), Macro_placement_no_space);
   EXPECT_EQ(cells, saved);
+}
+}
+
+TEST(Placement, VirtualMemoryFindsDistantTrackAlignedSpaceWithClearance) {
+  check_distant_track_aligned_space(true);
+}
+
+TEST(Placement, HardMacroFindsDistantTrackAlignedSpaceWithClearance) {
+  check_distant_track_aligned_space(false);
 }
 
 TEST(Placement, RigidMacroTrackAlignmentUsesOneTranslationAcrossMastersAndOrientations) {

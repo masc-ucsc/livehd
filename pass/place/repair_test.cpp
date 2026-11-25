@@ -335,6 +335,75 @@ TEST_F(Buffer_repair, WirelengthMovesOrCopiesOneRootOnAPrivatePlacement) {
     }
   }
 }
+
+TEST_F(Buffer_repair, WirelengthRejectsConeWithRenamedUpstreamCell) {
+  const std::string scoped_name = "__flat___scope.upstream";
+  const auto        input       = graph->get_input_pin("a");
+  const auto        upstream    = gate("sky130_fd_sc_hd__inv_1", "upstream", input);
+  const auto        root        = gate("sky130_fd_sc_hd__inv_1", "root", upstream);
+  const auto        side        = gate("sky130_fd_sc_hd__buf_1", "side", input);
+  graph->get_output_pin("y").connect_driver(side);
+  for (unsigned index = 0; index < 5; ++index) {
+    const auto name = std::format("out{}", index);
+    graph->get_io()->add_output(name, index + 1);
+    graph->get_io()->set_bits(name, 1);
+    const auto pin = index == 4 ? side
+                               : gate("sky130_fd_sc_hd__buf_1", std::format("load{}", index), root);
+    graph->get_output_pin(name).connect_driver(pin);
+  }
+  auto trees                   = std::make_shared<std::map<std::string, Options::Virtual_buffer>>();
+  (*trees)["root:Y"]           = {"sky130_fd_sc_hd__buf_1", 4, 1};
+  options.virtual_buffer_trees = trees;
+  hhds::GraphLibrary owner;
+  auto               initial = place(*graph, owner, options);
+  for (auto node : initial.graph->body().nodes()) {
+    if (node.get_name() == "upstream") {
+      node.set_name(scoped_name);
+    }
+  }
+  for (auto& component : initial.floorplan.components) {
+    if (component.name == "upstream") {
+      component.name = scoped_name;
+    }
+  }
+  for (const auto& port : {"A", "Y"}) {
+    auto position = initial.pin_locations.extract(std::string("upstream:") + port);
+    ASSERT_FALSE(position.empty());
+    position.key() = scoped_name + ":" + port;
+    initial.pin_locations.insert(std::move(position));
+  }
+  const auto scope_pin = [&](Pin_label& label) {
+    if (label.starts_with("upstream:")) {
+      label = scoped_name + label.substr(label.rfind(':'));
+    }
+  };
+  for (auto& net : initial.parasitics->nets) {
+    scope_pin(net.driver);
+    for (auto& node : net.nodes) {
+      scope_pin(node.pin);
+    }
+  }
+  for (auto& [pin, xy] : initial.pin_locations) {
+    const std::string name = pin;
+    const bool far = name.starts_with("side:") || name.starts_with("out") || name.starts_with("load2:")
+                     || name.starts_with("load3:");
+    xy = {far ? 100000. : 0., 0.};
+  }
+  const auto evaluate = [](const Result& placed) {
+    Timing_feedback timing;
+    timing.wns = 100;
+    timing.tns = 0;
+    for (const auto& [pin, xy] : placed.pin_locations) {
+      timing.pins[std::string(pin)].slack = 100;
+    }
+    return timing;
+  };
+  Virtual_expansion stats;
+  const auto        result = wirelength_resynthesize(initial, options, evaluate, evaluate, stats);
+  EXPECT_EQ(result.report, "accepted=0.attempts=1");
+  EXPECT_EQ(count(result.placed, "__wl_copy_"), 0U);
+}
+
 TEST_F(Buffer_repair, WireRegisterProofFoldsOnlyTheSameStateAfterReset) {
   auto lib_text = [](const std::string& path) {
     std::ifstream f(path);
@@ -1269,6 +1338,32 @@ TEST(SteinerRepair, SpatialClustersIsolateDistantSinkCapacitance) {
   ASSERT_EQ(plan.root.size(), 1U);
   EXPECT_TRUE(plan.root.front().buffer);
   EXPECT_EQ(plan.root.front().index, 2U);
+}
+TEST(SteinerRepair, LinearFanoutUsesShallowSpatialBackbone) {
+  const Buffer_drive buffer{.1, 4.1, 1000000, 4, 20, 10, 1};
+  const Buffer_drive source{.1, .5, 1000000, 1, 0, 10, 1};
+  std::vector<Point> loads;
+  for (unsigned cluster = 0; cluster < 32; ++cluster) {
+    loads.insert(loads.end(), 4, Point{100.0 * cluster, 0});
+  }
+  const std::vector<double> caps(loads.size(), 1), required(loads.size(), 1000);
+  const auto plan = plan_buffer_choices({0, 0}, loads, caps, required, {buffer}, source, .001, 0);
+  ASSERT_EQ(plan.root.size(), 1U);
+  std::vector<unsigned> visits(loads.size());
+  const auto walk = [&](auto&& self, const std::vector<Buffer_tree::Load>& children, size_t level, size_t parent) -> void {
+    EXPECT_LE(children.size(), buffer.max_fanout);
+    for (const auto child : children) {
+      if (child.buffer) {
+        ASSERT_LT(child.index, parent);
+        self(self, plan.buffers[child.index].loads, level + 1, child.index);
+      } else {
+        EXPECT_LE(level, 4U);
+        ++visits.at(child.index);
+      }
+    }
+  };
+  walk(walk, plan.root, 0, plan.buffers.size());
+  EXPECT_EQ(visits, std::vector<unsigned>(loads.size(), 1));
 }
 TEST(SteinerRepair, SpatialClustersDoNotDuplicateTheNetBoundingBox) {
   const Buffer_drive buffer{.1, 8.1, 1000000, 8, 1, 10, 1};
