@@ -701,6 +701,16 @@ livehd::placement::Options placement_options(const Options& opts) {
   terminal.remainder_wire_weight  = number("place.legalize.remainder_wire_weight", "4");
   terminal.padding_max_extra_rows = integer("place.legalize.padding_max_extra_rows", "0");
   terminal.critical_padding_sites = integer("place.legalize.critical_padding_sites", "0");
+  terminal.pin_density            = number("place.legalize.pin_density", "0");
+  terminal.pin_padding_max        = integer("place.legalize.pin_padding_max", "3");
+  terminal.pin_padding_rows       = integer("place.legalize.pin_padding_rows", "4");
+  terminal.pin_footprint          = number("place.legalize.pin_footprint", "0");
+  terminal.pin_padding_critical   = truthy(synth_set(opts, "place.legalize.pin_padding_critical", "false"));
+  if (!(terminal.pin_density >= 0) || !(terminal.pin_footprint >= 0) || terminal.pin_padding_max > 16) {
+    throw Lhd_error{"usage",
+                    "invalid synth.place.legalize.pin_density, pin_footprint or pin_padding_max",
+                    "expected pins per um2 >= 0 and at most 16 sites"};
+  }
   terminal.critical_fanin_depth   = integer("place.legalize.critical_fanin_depth", "0");
   terminal.joint_minimize_total   = truthy(synth_set(opts, "place.legalize.joint_minimize_total", "true"));
   terminal.candidates             = integer("place.legalize.candidates", "12");
@@ -2708,6 +2718,9 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   bool       run_timing_place = !isolated && truthy(synth_set(opts, "place.timing_driven", run_place && place_options.full ? "true" : "false"));
   const bool macro_plan_only  = run_place && place_options.full && !place_options.final_cells;
   const bool build_pcrs_clock = run_place && place_options.full && place_options.clock_tree && !macro_plan_only;
+  // The first tree switches the timers to a propagated clock for the steps before the final rebuild. Without it those
+  // steps time an ideal clock, and the tree is built once, from the optimized positions.
+  const bool initial_pcrs_clock = build_pcrs_clock && truthy(synth_set(opts, "place.pcrs.initial", "true"));
   // The provisional domino profile (pass.usyn.physical=domino_provisional,
   // pass/domplace) is opt-in, and every consumer it does not support is an
   // explicit usage error here: no default moves for it.
@@ -5003,7 +5016,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         set_crash_context(phase_step, phase_log);
         try {
           Stdout_to_log redirect(phase_log);
-          if (build_pcrs_clock) {
+          if (initial_pcrs_clock) {
             build_clock(false);
             if (physical_clock_ready) {
               // Size and repair against the legalized physical clock and its routed-net estimates.

@@ -155,6 +155,14 @@ run('clock_balanced', ['--set', 'synth.place.pcrs.clock=true'], default_balance=
 decision = json.loads((root / 'clock_balanced/synth/place/pcrs_clock.json').read_text())['useful_skew']['balance_decision']
 assert decision in ('accepted', 'accepted_unverified', 'clock_offset', 'timing_regression', 'lower_ranked', 'no_timing_gain'), decision
 assert (root / 'clock/synth/place/pcrs_clock.json').read_bytes() == (root / 'clock_repeat/synth/place/pcrs_clock.json').read_bytes()
+# synth.place.pcrs.initial=false: no first tree, so the steps before the final rebuild time an ideal clock; the one tree
+# built from the optimized positions is still there and exported.
+run('clock_late', clock_opts + ['--set', 'synth.place.pcrs.initial=false'])
+assert (root / 'clock/synth/place/clock_initial').is_dir()
+assert not (root / 'clock_late/synth/place/clock_initial').exists()
+late = json.loads((root / 'clock_late/synth/place/pcrs_clock.json').read_text())
+assert late['mode'] == 'tree' and late['networks'], late
+assert (root / 'clock_late/synth/place/pcrs_clock.sdc').is_file()
 structure = json.loads((root / 'clock/synth/pcrs_clock_structure.json').read_text())
 assert [(d['root'], d['flop_clock_pins']) for d in structure['domains']] == [('clk', 48)], structure
 assert structure['unresolved_clock_pins'] == 0 and structure['items'] == [], structure

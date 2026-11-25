@@ -5,11 +5,16 @@
 // See lhd.hpp and the LiveHD docs.
 
 #include <spawn.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 #include <sys/wait.h>
+#include <unistd.h>
 extern char** environ;
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
@@ -60,6 +65,14 @@ std::filesystem::path executable_path(const char* argv0) {
 
 int main(int argc, char** argv) {
   if (argc >= 2 && std::string_view(argv[1]) == "--route-worker") {
+    // A route worker belongs to its coordinator: it stops when the coordinator goes away, also when that is killed.
+#ifdef __linux__
+    const pid_t coordinator = ::getppid();
+    ::prctl(PR_SET_PDEATHSIG, SIGTERM);
+    if (::getppid() != coordinator) {
+      return 1;
+    }
+#endif
     (void)livehd::cost::install_memory_backstop();
     return livehd::routing::worker(argc - 1, argv + 1);
   }

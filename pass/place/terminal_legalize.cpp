@@ -56,6 +56,7 @@ struct Model {
   std::vector<std::vector<size_t>>      bin_rows;
   std::vector<Ann_place>                original, preferred;
   std::vector<bool>                     movable, installed, critical, compact;
+  std::vector<uint8_t>                  pin_pad;  // extra padding sites per side of a cell in a pin-dense spot
   std::vector<std::optional<double>>    slacks;
   std::vector<unsigned>                 stages;
   std::vector<size_t>                   obstacles;
@@ -275,6 +276,7 @@ struct Model {
       std::sort(list.begin(), list.end());
       list.erase(std::unique(list.begin(), list.end()), list.end());
     }
+    pin_padding();
     double       total_area     = 0;
     const double total_capacity = grid.total_capacity();
     for (size_t i = 0; i < count; ++i) {
@@ -310,7 +312,77 @@ struct Model {
            && ph::orientation_allowed(m, fp.rows[r.source].orientation);
   }
   unsigned padding(size_t cell) const {
-    return critical[cell] ? options.critical_padding_sites : (compact[cell] ? 0 : options.padding_sites);
+    if (critical[cell]) {
+      return options.critical_padding_sites + (options.pin_padding_critical ? pin_pad[cell] : 0);
+    }
+    return compact[cell] ? 0 : options.padding_sites + pin_pad[cell];
+  }
+  // Signal pins per um2 of the input pose, in bins of four standard rows; cells in bins over the limit are padded.
+  void pin_padding() {
+    pin_pad.assign(fp.components.size(), 0);
+    if (options.pin_padding_max == 0) {
+      return;
+    }
+    const unsigned pad_limit   = std::min(options.pin_padding_max, 255U);  // pin_pad holds a byte
+    const auto     signal_pins = [&](const ph::Macro& m) {
+      return std::count_if(m.pins.begin(), m.pins.end(), [](const auto& pin) {
+        return pin.second.use != "POWER" && pin.second.use != "GROUND";
+      });
+    };
+    const auto padded = [&](size_t i, const ph::Macro& m) {
+      return movable[i] && m.klass.starts_with("CORE") && !fixed_physical_cell(fp.components[i], m);
+    };
+    if (options.pin_footprint > 0) {
+      for (size_t i = 0; i < fp.components.size(); ++i) {
+        const auto& m = tech.macros.at(fp.components[i].macro);
+        if (!padded(i, m)) {
+          continue;
+        }
+        const double site_um = tech.sites.at(m.site).width, row_um = double(original[i].height) / fp.dbu;
+        const double need = signal_pins(m) / (options.pin_footprint * site_um * row_um);  // sites
+        const double have = std::ceil(original[i].width / (site_um * fp.dbu)) + 2 * options.padding_sites;
+        if (need > have) {
+          pin_pad[i] = uint8_t(std::min<double>(pad_limit, std::ceil((need - have) / 2)));
+        }
+      }
+    }
+    if (options.pin_density <= 0) {
+      return;
+    }
+    int64_t row_height = 0;
+    for (const auto& r : rows) {
+      row_height = row_height ? std::min<int64_t>(row_height, r.height) : int64_t(r.height);
+    }
+    const int64_t bin = std::max<int64_t>(1, 4 * row_height);
+    const auto    key = [&](const Ann_place& p) {
+      return std::pair<int64_t, int64_t>(int64_t(std::floor((p.x + p.width / 2.0) / bin)),
+                                         int64_t(std::floor((p.y + p.height / 2.0) / bin)));
+    };
+    std::map<std::pair<int64_t, int64_t>, int64_t> pins;
+    for (size_t i = 0; i < fp.components.size(); ++i) {
+      const auto& m = tech.macros.at(fp.components[i].macro);
+      if (m.klass.starts_with("CORE") && !fixed_physical_cell(fp.components[i], m)) {
+        pins[key(original[i])] += signal_pins(m);
+      }
+    }
+    const double area_um2 = double(bin) / fp.dbu * double(bin) / fp.dbu;
+    for (const auto& [where, count] : pins) {
+      report.pin_dense_bins += count / area_um2 > options.pin_density;
+    }
+    for (size_t i = 0; i < fp.components.size(); ++i) {
+      const auto& m = tech.macros.at(fp.components[i].macro);
+      if (!padded(i, m)) {
+        continue;
+      }
+      const double excess = pins.at(key(original[i])) / area_um2 / options.pin_density - 1;
+      if (excess <= 0) {
+        continue;
+      }
+      const double  step  = tech.sites.at(m.site).width * fp.dbu;
+      const double  sites = std::ceil(original[i].width / step) + 2 * options.padding_sites;
+      const uint8_t extra = uint8_t(std::min<double>(pad_limit, std::ceil(sites * excess / 2)));
+      pin_pad[i]          = std::max(pin_pad[i], extra);
+    }
   }
   const ph::Rect* origin_bounds(size_t cell) const {
     return !options.domains.empty() && options.domains[cell].origins ? &*options.domains[cell].origins : nullptr;
@@ -584,6 +656,24 @@ struct Model {
       return choices;
     };
     auto         choices = nearest();
+    // The pin-density padding is a preference: a cell that finds no site with it, or only one far away, places
+    // without it.
+    // A cell out of a clump moves far with or without it, so the test is what the padding adds to the move.
+    const double pin_budget = double(options.pin_padding_rows) * original[cell].height;
+    if (pin_pad[cell] && (!critical[cell] || options.pin_padding_critical)
+        && (choices.empty() || distance(choices.front().place, original[cell]) > pin_budget)) {
+      const auto extra = pin_pad[cell];
+      pin_pad[cell]    = 0;
+      auto plain       = nearest();
+      if (!plain.empty()
+          && (choices.empty()
+              || distance(choices.front().place, original[cell]) > distance(plain.front().place, original[cell]) + pin_budget)) {
+        choices = std::move(plain);
+        ++report.pin_padding_dropped;
+      } else {
+        pin_pad[cell] = extra;
+      }
+    }
     // Whitespace is useful only if its displacement cost is acceptable. This
     // optional stage-5 relaxation never changes critical/local-pair locks or
     // the hard density cap. Already reserved neighbors retain their padding.
@@ -1719,6 +1809,7 @@ struct Model {
       report.max_displacement_dbu    = std::max(report.max_displacement_dbu, moved);
       report.total_displacement_dbu += moved;
       report.relaxed_padding_cells  += compact[i];
+      report.pin_padded_cells        += pin_pad[i] && !compact[i] && (!critical[i] || options.pin_padding_critical);
       report.wire_changed_cells     += wire_changed[i];
       report.cells.push_back(
           {i, original[i], p, stages[i], hops, critical[i], slacks[i].value_or(0), slacks[i].has_value(), padding(i)});
@@ -1843,6 +1934,9 @@ void write_terminal_legalize_report(const Terminal_legalize_report& r, const phy
   };
   count("schema", 1);
   count("held_cells", r.held_cells);
+  count("pin_dense_bins", r.pin_dense_bins);
+  count("pin_padded_cells", r.pin_padded_cells);
+  count("pin_padding_dropped", r.pin_padding_dropped);
   count("bounded_cells", r.bounded_cells);
   count("bins_x", r.bins_x);
   count("bins_y", r.bins_y);

@@ -113,6 +113,7 @@ tool runs plain shortest-first routing with no repair.
 | `--order short\|long\|pins\|fewpins` | net order; clock nets always go first |
 | `--timing F`, `--crit-frac X` | pin slacks from the placer (`"inst:pin" slack_ps`); the worst fraction X of the nets goes first by slack, the rest by `--order` |
 | `--long-frac X` | the longest fraction X of the data nets (by pin box) goes ahead of the rest, longest first |
+| `--pin-cost K`, `--pin-tile N` | M2 and M3 wire costs `1 + K * (pins / N - 1)` times more over a 32-track tile with more than N pins (default 27, 20 pins per um2 on ASAP7), so wires that only pass a pin-dense tile go over it on M4 and above; off at K = 0 |
 | `--prelegal` | movable cells float at their input pose and take the nearest free legal site when a net first needs them; give the pose before legalization |
 | `--clock-nets F` | clock nets, one per line, for a pose written before they were tagged `USE CLOCK`: a net name, or an endpoint `cell/pin` (or a port) that keeps its name when nets are renamed |
 | `--space-frac X`, `--space-min-len N`, `--space-min-layer L` | the worst fraction X of the nets by slack whose pins span at least N nm keep the tracks next to their wires empty where still free, from layer index L up (0 is M2; default 5000 nm, M3) |

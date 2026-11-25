@@ -479,6 +479,18 @@ class RouteTest(unittest.TestCase):
         for option, value in [("--space-frac", "1.2"), ("--long-frac", "nan"), ("--pd-alpha", "-1")]:
             self.assertIn("between", self.run_router(self.two_cells(), option, value, success=False))
 
+    def test_pin_dense_tile_moves_wires_up(self):
+        self.with_vias()
+        plain = self.run_router(self.two_cells())
+        dense = self.run_router(self.two_cells(), "--pin-cost", "5", "--pin-tile", "1")
+        self.assertEqual((plain["nets_routed"], dense["nets_routed"], dense["pin_dense_tiles"]), (1, 1, 1))
+        self.assertNotIn("pin_dense_tiles", plain)
+        self.assertLess(dense["wl_M3"], plain["wl_M3"])
+        self.assertGreater(dense["wl_M4"] + dense.get("wl_M5", 0), plain["wl_M4"] + plain.get("wl_M5", 0))
+        self.assertLess(dense["wl_M2"], plain["wl_M2"])
+        self.assertIn("pin-tile", self.run_router(self.two_cells(), "--pin-tile", "0", success=False))
+        self.assertIn("costs", self.run_router(self.two_cells(), "--pin-cost", "-1", success=False))
+
     def test_complete_net_verifies_clean(self):
         self.with_vias()
         stats = self.run_router(self.two_cells(), "--verify-report", "found.tsv")

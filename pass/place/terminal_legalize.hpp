@@ -38,6 +38,20 @@ struct Terminal_legalize_options {
   bool                                  joint_minimize_total   = true;
   unsigned                              critical_padding_sites = 0, critical_fanin_depth = 0;
   unsigned                              padding_max_extra_rows = 0;  // zero keeps mandatory per-cell padding
+  // Pin-density spreading: a movable cell whose input pose lies where the signal pins exceed pin_density per um2
+  // (bins of four standard rows) takes extra sites on each side, in proportion to the excess and at most
+  // pin_padding_max. Every pin needs its own way up through M2 and M3, so such spots are where the detailed router
+  // runs out of M3. The extra is given up for a cell that would move more than pin_padding_rows rows for it. Zero
+  // disables.
+  double                                pin_density            = 0;
+  unsigned                              pin_padding_max = 3, pin_padding_rows = 4;
+  // Pin footprint: a movable cell is at least as wide, with its padding, as its signal pins need at this many pins per
+  // um2 of its own rows. It depends on the cell alone, so it holds wherever the cell goes and the same number can
+  // size the cell in global placement. Zero disables. The same two limits apply.
+  double                                pin_footprint        = 0;
+  // The most critical cells are placed first with critical_padding_sites and keep out of both rules above unless this
+  // is set (NVDLA O: 33,277 of 230,262 cells are critical, pack with no padding and keep the pin-dense spots).
+  bool                                  pin_padding_critical = false;
   unsigned       padding_sites = 1, candidates = 12, pair_move_sites = 4, pair_move_rows = 1;
   unsigned       sat_conflicts = 10000000, sat_milliseconds = 1000;
   std::string    backend          = "cadical";
@@ -60,6 +74,8 @@ struct Terminal_legalize_cell {
 };
 struct Terminal_legalize_report {
   size_t                              held_cells = 0, bounded_cells = 0;
+  // Cells that kept extra padding for their pins, and cells that gave it up for a nearer site.
+  size_t                              pin_dense_bins = 0, pin_padded_cells = 0, pin_padding_dropped = 0;
   unsigned                            bins_x = 0, bins_y = 0;
   bool                                joint_feasible = false, joint_max_optimized = false, joint_total_optimized = false;
   // Accepted alignments across critical/local stages, classified by whether

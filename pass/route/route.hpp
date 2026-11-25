@@ -27,6 +27,8 @@ struct Settings {
   double      space_frac    = 0;  // worst-slack share of the nets whose long wires keep the next tracks empty
   int         space_min_len = 5000, space_min_layer = 1;
   double      crit_frac = 0;
+  double      pin_cost  = 0;   // extra M2/M3 wire cost over pin-dense tiles: factor 1 + pin_cost * (pins / pin_tile - 1)
+  int         pin_tile  = 27;  // pins in a 32-track tile above which the extra cost starts (20 pins per um2 on ASAP7)
 };
 
 struct Frame {

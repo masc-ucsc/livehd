@@ -260,6 +260,44 @@ void route_command(Options& opts, Result& res) {
       add_setting(args, std::string_view(key).substr(6), value, mode);
     }
   }
+  if (mode == Route_mode::flat) {
+    // A bare `lhd route` uses the measured setting. The router's own defaults are a plain pass with no repair.
+    static constexpr std::pair<std::string_view, std::string_view> measured[] = {
+        {     "hweight",   "1.05"},
+        {    "via_cost",    "120"},
+        {    "pd_alpha",    "0.3"},
+        {      "budget", "300000"},
+        {       "shift",      "3"},
+        { "shift_reach",      "6"},
+        {       "chain",      "4"},
+        {  "flop_reach",      "2"},
+        {       "ripup",      "3"},
+        {   "rip_width",      "6"},
+        {"final_passes",      "6"},
+        {   "tile_move",   "true"},
+        {     "reserve",   "true"}
+    };
+    const bool timed = std::any_of(opts.ins.begin(), opts.ins.end(), [](const auto& in) { return in.kind == "timing"; });
+    const auto unset = [&](std::string_view name) {
+      const auto key = "route." + std::string(name);
+      return std::none_of(opts.sets.begin(), opts.sets.end(), [&](const auto& set) { return set.first == key; });
+    };
+    for (const auto& [name, value] : measured) {
+      if (unset(name)) {
+        add_setting(args, name, std::string(value), mode);
+      }
+    }
+    if (timed) {  // slack order and anchoring need the placer's pin slacks
+      for (const auto& [name, value] : {
+               std::pair<std::string_view, std::string_view>{  "crit_frac",   "1"},
+               {"anchor_frac", "0.1"}
+      }) {
+        if (unset(name)) {
+          add_setting(args, name, std::string(value), mode);
+        }
+      }
+    }
+  }
   fs::path              frame, previous, bundle;
   std::vector<Lef_view> views;
   std::set<std::string> seen;
@@ -354,9 +392,19 @@ void route_command(Options& opts, Result& res) {
     args.insert(args.end(), {"--report", (root / "feedback.tsv").string(), "--verify-report", (root / "findings.tsv").string()});
     request.input_def   = frame.string();
     request.output_def  = routed.string();
-    const auto settings = livehd::routing::parse_settings(args);
-    auto       result   = mode == Route_mode::verify ? livehd::routing::verify_frame(request, settings)
-                                                     : livehd::routing::route_frame(request, settings);
+    // A bad setting or a frame the router does not serve is the caller's input, not an internal fault.
+    livehd::routing::Outcome result;
+    try {
+      const auto settings = livehd::routing::parse_settings(args);
+      result              = mode == Route_mode::verify ? livehd::routing::verify_frame(request, settings)
+                                                       : livehd::routing::route_frame(request, settings);
+    } catch (const std::system_error&) {
+      throw;
+    } catch (const std::invalid_argument& e) {
+      throw Lhd_error{"usage", e.what(), "see lhd describe route"};
+    } catch (const std::runtime_error& e) {
+      throw Lhd_error{"unsupported", e.what(), ""};
+    }
     if (mode == Route_mode::flat) {
       store(root / "stats.json", result.stats);
     }
@@ -420,7 +468,7 @@ void route_command(Options& opts, Result& res) {
           copy_export_file(bundle / n, dest / n);
         }
         res.outputs.push_back((dest / n).string());
-      } else {
+      } else if (!bundle.empty()) {  // a bundle without this file must not leave a stale one; other inputs own nothing here
         fs::remove(dest / n);
       }
     }

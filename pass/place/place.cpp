@@ -809,6 +809,15 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (!o.optimization_pending) {
     const auto& t = o.terminal_legalize_options;
+    if (t.pin_density > 0 || t.pin_footprint > 0) {
+      h = hash_text(std::format("terminal-pin-density:{}:{}:{}:{}:{}",
+                                t.pin_density,
+                                t.pin_padding_max,
+                                t.pin_padding_rows,
+                                t.pin_footprint,
+                                t.pin_padding_critical),
+                    h);
+    }
     h = hash_text(std::format("terminal-legalize:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                               t.max_density,
                               t.critical_fraction,

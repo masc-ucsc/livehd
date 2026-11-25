@@ -6,6 +6,7 @@ from bisect import bisect_left, bisect_right
 import csv
 import heapq
 import json
+import os
 import math
 import re
 from pathlib import Path
@@ -38,7 +39,13 @@ def localized_seed(
                 for inst, pin in CONN.findall(head.partition(" + ")[0]):
                     owners.add((pin if inst == "PIN" else inst).replace(r"\/", "/"))
     issue_nets = {name for r in findings for name in r["nets"].partition(" (")[0].split() if name != "fixed"}
-    centers = exact + [((int(r["xl"]) + int(r["xh"])) // 2, (int(r["yl"]) + int(r["yh"])) // 2) for r in findings]
+    # An open net is reported without a place (an all-zero box). Its net is released by name below; the origin is
+    # not a release centre.
+    centers = exact + [
+        ((int(r["xl"]) + int(r["xh"])) // 2, (int(r["yl"]) + int(r["yh"])) // 2)
+        for r in findings
+        if any(int(r[k]) for k in ("xl", "yl", "xh", "yh"))
+    ]
 
     current = ""
     blocked_cells = set()
@@ -206,7 +213,22 @@ def timing_eco(args):
     print(json.dumps(result))
 
 
+def die_with_parent():
+    """Stop when the lhd that started this coordinator is killed, so that no worker is left running."""
+    try:
+        import ctypes
+        import signal
+
+        parent = os.getppid()
+        ctypes.CDLL(None).prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
+        if os.getppid() != parent:
+            raise SystemExit(1)
+    except (OSError, AttributeError):
+        pass
+
+
 def main():
+    die_with_parent()
     p = argparse.ArgumentParser(description=__doc__)
     worker_options(p)
     p.add_argument("--radius", type=int, default=540, help="access window radius in DEF units")
@@ -301,7 +323,24 @@ def main():
                 and (not args.targets or targets.intersection(r["nets"].partition(" (")[0].split()))
             ]
     if not failed and not findings:
-        p.error("previous report has no signal routing failures or geometry findings")
+        # Nothing to repair is a result, not an error: publish the previous checkpoint again, so that a
+        # repair-until-complete loop ends cleanly.
+        kinds = {}
+        if report.is_file():
+            with report.open() as src:
+                for r in csv.DictReader(src, delimiter="\t"):
+                    if r["kind"] != "no-wires":
+                        kinds[r["kind"]] = kinds.get(r["kind"], 0) + 1
+        for name in ("routed.def", "feedback.tsv", "findings.tsv", "stats.json"):
+            if (args.previous / name).is_file():
+                try:
+                    os.link(args.previous / name, folder / name)
+                except OSError:
+                    (folder / name).write_bytes((args.previous / name).read_bytes())
+        (folder / "feedback.json").write_text(
+            json.dumps({"unrouted": 0, "violations": kinds, "released": 0, "note": "nothing to repair"}, indent=2)
+        )
+        return
     seed = folder / "seed.def"
     prior = {}
     for report in args.protect_failures:

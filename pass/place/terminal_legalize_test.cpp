@@ -114,6 +114,73 @@ TEST(TerminalLegalize, PaddedCellsUseWholeRowWithoutFragmentingRemainingCapacity
   EXPECT_EQ(positions, (std::set<int64_t>{100, 400, 700}));
 }
 
+TEST(TerminalLegalize, PinDenseSpotsSpreadAndGiveUpPaddingThatDoesNotFit) {
+  // Six two-pin cells on one spot: 12 pins in a bin of four rows (16 um2).
+  struct Outcome {
+    int64_t                  min_gap = INT64_MAX;
+    Terminal_legalize_report report;
+  };
+  const auto run = [](double pin_density, int width) {
+    Fixture f(width, 4);
+    f.options.bins_x = f.options.bins_y = 1;
+    f.options.pin_density               = pin_density;
+    f.options.pin_padding_rows          = 20;  // the fixture's sites are as wide as its rows are tall
+    for (int i = 0; i < 6; ++i) {
+      f.cell(width / 2, 1);
+    }
+    Outcome out;
+    out.report = terminal_legalize(f.tech, f.fp, f.timing, f.options);
+    for (size_t i = 0; i < f.fp.components.size(); ++i) {
+      for (size_t j = 0; j < i; ++j) {
+        const auto& a = f.fp.components[i].place;
+        const auto& b = f.fp.components[j].place;
+        if (a.y == b.y) {
+          out.min_gap = std::min<int64_t>(out.min_gap, std::abs(a.x - b.x) - 100);
+        }
+      }
+    }
+    return out;
+  };
+  const auto plain = run(0, 40);
+  EXPECT_EQ(plain.min_gap, 200);  // one padding site on each side
+  EXPECT_EQ(plain.report.pin_padded_cells, 0u);
+  // 0.75 pins per um2 against a limit of 0.25: three extra sites per side, the default maximum.
+  const auto spread = run(.25, 40);
+  EXPECT_EQ(spread.report.pin_dense_bins, 1u);
+  EXPECT_EQ(spread.report.pin_padded_cells, 6u);
+  EXPECT_EQ(spread.report.pin_padding_dropped, 0u);
+  EXPECT_GE(spread.min_gap, 800);
+  // Four rows of twelve sites cannot hold six cells of nine sites: some give the extra up, none loses its base padding.
+  const auto tight = run(.25, 12);
+  EXPECT_GT(tight.report.pin_padding_dropped, 0u);
+  EXPECT_GE(tight.min_gap, 200);
+}
+
+TEST(TerminalLegalize, PinFootprintPadsEachCellByItsOwnPins) {
+  // A one-site cell with two signal pins at 0.4 pins per um2 needs five sites: its site, one padding site per side
+  // and one more per side. It needs nothing at 1 pin per um2, where three sites already hold it.
+  for (const auto& [limit, gap, cells] : {
+           std::tuple{.4, 400, 3u},
+           std::tuple{1., 200, 0u}
+  }) {
+    Fixture f(40, 1);
+    f.options.bins_x = f.options.bins_y = 1;
+    f.options.pin_footprint             = limit;
+    f.options.pin_padding_rows          = 40;
+    for (int i = 0; i < 3; ++i) {
+      f.cell(20, 0);
+    }
+    const auto        report = terminal_legalize(f.tech, f.fp, f.timing, f.options);
+    std::set<int64_t> xs;
+    for (const auto& c : f.fp.components) {
+      xs.insert(c.place.x);
+    }
+    ASSERT_EQ(xs.size(), 3u);
+    EXPECT_EQ(*std::next(xs.begin()) - *xs.begin() - 100, gap) << limit;
+    EXPECT_EQ(report.pin_padded_cells, cells) << limit;
+  }
+}
+
 TEST(TerminalLegalize, NeighborhoodBoundsHoldOutsideCellsAndConstrainOriginNotFootprint) {
   Fixture f(12, 2);
   f.options.padding_sites = 0;

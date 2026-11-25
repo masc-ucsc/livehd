@@ -7,6 +7,7 @@ import csv
 import hashlib
 from http.server import BaseHTTPRequestHandler
 import json
+import os
 from pathlib import Path
 import re
 from socketserver import UnixStreamServer
@@ -369,7 +370,22 @@ def feedback(folder, homes=()):
     }
 
 
+def die_with_parent():
+    """Stop when the lhd that started this coordinator is killed, so that no worker is left running."""
+    try:
+        import ctypes
+        import signal
+
+        parent = os.getppid()
+        ctypes.CDLL(None).prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
+        if os.getppid() != parent:
+            raise SystemExit(1)
+    except (OSError, AttributeError):
+        pass
+
+
 def main():
+    die_with_parent()
     p = argparse.ArgumentParser(description=__doc__)
     worker_options(p)
     homes = p.add_mutually_exclusive_group()
@@ -424,6 +440,24 @@ def main():
                             args.grid = (2, 1)
                         break
     args.agent = args.agent or args.agent_socket is not None
+    if args.agent_socket is not None:
+        # Find out now, not after every worker has run, that the socket cannot be served.
+        import socket
+
+        if len(os.fsencode(str(args.agent_socket))) > 107:
+            p.error(f"agent socket path is longer than a Unix socket address allows: {args.agent_socket}")
+        if args.agent_socket.exists():
+            probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                probe.connect(str(args.agent_socket))
+            except ConnectionRefusedError:
+                args.agent_socket.unlink()  # left by a coordinator that was killed
+            except OSError as exc:
+                p.error(f"cannot use agent socket {args.agent_socket}: {exc}")
+            else:
+                p.error(f"a resident router already serves {args.agent_socket}")
+            finally:
+                probe.close()
     if not 0 <= args.pd_alpha <= 1 or not 0 <= args.crit_frac <= 1 or (args.crit_frac and not args.timing):
         p.error("pd-alpha and crit-frac must be in [0,1], with timing supplied for critical-net priority")
     args.costs = list(ROUTE)

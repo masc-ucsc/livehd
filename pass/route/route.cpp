@@ -1472,6 +1472,26 @@ struct Router {
       }
     }
   }
+  // Every pin needs a way up through M2 and M3, so a tile with many pins has little of both to spare. Wires that only
+  // pass pay more for M2 and M3 there and go over it on M4 and above (NVDLA O: over a cell with unroutable pins every
+  // M3 track was taken, most by wires one to two microns long). The factor is at least one, so the heuristic stays a
+  // lower bound. It is read once, before routing: cell moves later change the counts only a little.
+  std::vector<float> tile_cost;
+  void               tile_costs_init() {
+    tile_cost.clear();
+    if (opt.pin_cost <= 0) {
+      return;
+    }
+    tile_cost.assign(tile_pins.size(), 1.0f);
+    int64_t dense = 0;
+    for (size_t i = 0; i < tile_pins.size(); ++i) {
+      if (tile_pins[i] > opt.pin_tile) {
+        tile_cost[i] = float(1.0 + opt.pin_cost * (double(tile_pins[i]) / opt.pin_tile - 1.0));
+        ++dense;
+      }
+    }
+    stat["pin_dense_tiles"] = dense;
+  }
   void tiles_report(const std::string& tag) {
     int    over  = 0;
     double worst = 0, access = 0;
@@ -2301,7 +2321,11 @@ struct Router {
           if (x2 < w.xl || x2 > w.xh || y2 < w.yl || y2 > w.yh) {
             continue;
           }
-          push(run_key(sid(l, t, s2), a2 - n.entry), g + float(std::abs(a2 - a) * ly.cost), id, x2, y2, n.entry, n.fl, n.fh);
+          float step = float(std::abs(a2 - a) * ly.cost);
+          if (l <= 1 && !tile_cost.empty()) {
+            step *= tile_cost[tile_of(x2, y2)];
+          }
+          push(run_key(sid(l, t, s2), a2 - n.entry), g + step, id, x2, y2, n.entry, n.fl, n.fh);
         }
         pq.emplace(f + via_cost, id | via_phase);
         continue;
@@ -2763,7 +2787,7 @@ struct Router {
               }
               if (best >= 0) {
                 int l2, t2, s2, x, y;
-                unsid(best, l2, t2, s2);
+                unsid(best & id_mask, l2, t2, s2);  // the key of an exact-run node carries its run offset above the id
                 xy(l2, t2, s2, x, y);
                 std::cerr << "   " << L[l].name << " nearest " << x << ' ' << y << " dist " << bd << " g " << bg
                           << " tree states reached " << marked << '\n';
@@ -2930,16 +2954,23 @@ struct Router {
         if (line.empty() || line[0] == '#') {
           continue;
         }
-        const auto q1 = line.find('"'), q2 = line.find('"', q1 + 1);
-        if (q2 == std::string::npos) {
+        // The placer writes the label with std::quoted, so a name with a backslash or a quote comes escaped.
+        std::istringstream fields(line);
+        std::string        name, number;
+        double             value = 0;
+        if (!(fields >> std::quoted(name) >> number)) {
           continue;
         }
-        auto       name  = line.substr(q1 + 1, q2 - q1 - 1);
+        try {
+          value = std::stod(number);  // also inf and nan, which stream extraction refuses
+        } catch (const std::exception&) {
+          continue;
+        }
         const auto colon = name.rfind(':');
         if (colon != std::string::npos) {
           name[colon] = '/';
         }
-        slack[name] = std::stod(line.substr(q2 + 1));
+        slack[name] = value;
       }
       std::vector<double> all;
       for (int i : order) {
@@ -3038,6 +3069,7 @@ struct Router {
       }
     }
     tiles_report("start");
+    tile_costs_init();
     std::deque<int> queue(order.begin(), order.end());
     for (int pass = 0; pass <= opt.final_passes; ++pass) {
       if (pass > 0) {  // leftovers get a fresh repair allowance
@@ -3455,7 +3487,7 @@ struct Router {
         for (const auto& s : ly.tr[b - ly.tc.begin()].s) {
           if (s.hi > ac - ra && s.lo < ac + ra) {
             std::cerr << " [" << s.lo - ac << ',' << s.hi - ac << ']'
-                      << (s.net < 0 ? std::string("OBS") : nets[s.net].name.substr(4));
+                      << (s.net < 0 ? std::string("OBS") : nets[s.net].name.substr(std::min<size_t>(4, nets[s.net].name.size())));
           }
         }
         std::cerr << '\n';
@@ -3919,7 +3951,7 @@ struct Router {
         f << x.kind << '\t' << x.layer << '\t' << x.nets << '\t' << x.xl << '\t' << x.yl << '\t' << x.xh << '\t' << x.yh << '\n';
       }
     }
-    for (size_t i = 0; i < found.size() && i < 20; ++i) {
+    for (size_t i = 0; opt.verbose && i < found.size() && i < 20; ++i) {  // the report file has every finding
       const auto& x = found[i];
       std::cerr << "verify " << x.kind << ' ' << x.layer << ' ' << x.nets << " (" << x.xl << ' ' << x.yl << ") (" << x.xh << ' '
                 << x.yh << ")\n";
@@ -4124,6 +4156,10 @@ void parse_options(Settings& opt, const std::vector<std::string>& args, std::vec
       opt.hweight = std::stod(next());
     } else if (a == "--pd-alpha") {
       opt.pd_alpha = std::stod(next());
+    } else if (a == "--pin-cost") {
+      opt.pin_cost = std::stod(next());
+    } else if (a == "--pin-tile") {
+      opt.pin_tile = std::stoi(next());
     } else if (a == "--hi-cost") {
       opt.hi_cost = std::stod(next());
     } else if (a == "--via-cost") {
@@ -4207,7 +4243,10 @@ void run(Router& r, const livehd::routing::Frame& frame, const std::string& repo
       throw std::runtime_error("routing fractions and pd-alpha must be between 0 and 1");
     }
   }
-  for (double cost : {r.opt.m2_cost, r.opt.m3_cost, r.opt.hi_cost, r.opt.via_cost, r.opt.hweight}) {
+  if (r.opt.pin_tile < 1) {
+    throw std::runtime_error("pin-tile must be at least one pin");
+  }
+  for (double cost : {r.opt.m2_cost, r.opt.m3_cost, r.opt.hi_cost, r.opt.via_cost, r.opt.hweight, r.opt.pin_cost}) {
     if (!std::isfinite(cost) || cost < 0) {
       throw std::runtime_error("routing costs and heuristic weight must be finite and nonnegative");
     }
