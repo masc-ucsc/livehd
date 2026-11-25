@@ -23,7 +23,9 @@ incremental modes is that the stored environment is SOME step's full environment
 step ran yet): `evEnv_correct` and `incEnv_correct` need nothing more, so a loop may step twice
 from one state. The same invariant lets them `reload` (compaction: new memories, the environment
 kept) and `peek` (the environment for the given inputs and its outputs, no edge: the next step
-starts from it). `CompileOpt` closes these against `interpretDesign`.
+starts from it). `vcEngine` also remembers the inputs a peek made its environment for
+(`envIn`): a step with those inputs takes that environment as it is, so a closed loop's peek and
+step update it once, not twice. `CompileOpt` closes these against `interpretDesign`.
 
 Mathlib-free.
 -/
@@ -48,11 +50,13 @@ def outputsOfEnv (R : ResidualProgram) (env : SlotEnv) : Array BV :=
 theorem stepOfEnv_outputs (R : ResidualProgram) (env : SlotEnv) (e : ClockEdges) (s : RuntimeState) :
     (stepOfEnv R env e s).outputs = outputsOfEnv R env := rfl
 
-/-- vc's default state: memories as tables, the last step's environment, whether a step ran. -/
+/-- vc's default state: memories as tables, the last step's environment, whether a step ran, and
+the inputs `env` is the full environment of on `tabs` when a peek made it. -/
 structure VcState where
   tabs    : RuntimeStateF
   env     : SlotEnvF
   started : Bool
+  envIn   : Option RuntimeInput := none
 
 /-- The environment for inputs `i` on tables `tabs`: full before any step, then event-driven from
 the last one. -/
@@ -60,32 +64,40 @@ the last one. -/
     (i : RuntimeInput) (tabs : RuntimeStateF) : SlotEnvF :=
   if started then evEnvF R fan env0 i tabs else fullEnvF R i tabs
 
+/-- The environment for inputs `i`: the one held when a peek made it for these inputs on these
+tables (`envIn = some i`), else `vcEnvF`. -/
+@[inline] def vcEnvAt (R : ResidualProgram) (fan : Array (Array Nat)) (env0 : SlotEnvF) (started : Bool)
+    (envIn : Option RuntimeInput) (i : RuntimeInput) (tabs : RuntimeStateF) : SlotEnvF :=
+  if envIn = some i then env0 else vcEnvF R fan env0 started i tabs
+
 /-- vc's default engine: memories as tables over each memory's `depth` words, the first step full,
 each later one event-driven with the program's fanout table `fan`. Each operation takes `q` apart
 first, so the old state is gone before the environment and the tables are updated: they stay
 unshared and are updated in place. -/
 def vcEngine (R : ResidualProgram) (fan : Array (Array Nat)) (depth : Nat → Nat) : Engine VcState where
   name := "vc"
-  load s := { tabs := ofState depth s, env := #[], started := false }
+  load s := { tabs := ofState depth s, env := #[], started := false, envIn := none }
   step e i q :=
     match q with
-    | ⟨tabs, env0, started⟩ =>
-      let env := vcEnvF R fan env0 started i tabs
+    | ⟨tabs, env0, started, envIn⟩ =>
+      let env := vcEnvAt R fan env0 started envIn i tabs
       let r := stepOfEnvF R env e tabs
-      .ok (r.1, { tabs := r.2, env, started := true })
+      .ok (r.1, { tabs := r.2, env, started := true, envIn := none })
   view q := absS q.tabs
   reload q s :=
     match q with
-    | ⟨_, env, started⟩ => { tabs := ofState depth s, env, started }
+    | ⟨_, env, started, _⟩ => { tabs := ofState depth s, env, started, envIn := none }
   peek? := some fun _ i q =>
     match q with
-    | ⟨tabs, env0, started⟩ =>
-      let env := vcEnvF R fan env0 started i tabs
-      .ok (outputsOfEnvF R env, { tabs, env, started := true })
+    | ⟨tabs, env0, started, envIn⟩ =>
+      let env := vcEnvAt R fan env0 started envIn i tabs
+      .ok (outputsOfEnvF R env, { tabs, env, started := true, envIn := some i })
 
-/-- vc's invariant on tables: no step ran, or the environment is some step's full one. -/
+/-- vc's invariant on tables: no step ran, or the environment is some step's full one; and when a
+peek recorded its inputs, it is their full environment on these tables. -/
 def VcInv (R : ResidualProgram) (q : VcState) : Prop :=
-  q.started = false ∨ ∃ i' s', absEnv q.env = fullEnv R i' s'
+  (q.started = false ∨ ∃ i' s', absEnv q.env = fullEnv R i' s') ∧
+    ∀ i0, q.envIn = some i0 → absEnv q.env = fullEnv R i0 (absS q.tabs)
 
 theorem vcEnvF_abs {R : ResidualProgram} (hw : wellOrdered R = true) {env0 : SlotEnvF}
     {started : Bool} (h : started = false ∨ ∃ i' s', absEnv env0 = fullEnv R i' s')
@@ -100,6 +112,16 @@ theorem vcEnvF_abs {R : ResidualProgram} (hw : wellOrdered R = true) {env0 : Slo
     · rw [hst] at h; cases h
     · rw [evEnvF_abs, h, evEnv_correct hw (fanout_ok R)]
 
+theorem vcEnvAt_abs {R : ResidualProgram} (hw : wellOrdered R = true) {env0 : SlotEnvF}
+    {started : Bool} {envIn : Option RuntimeInput} {tabs : RuntimeStateF}
+    (h : started = false ∨ ∃ i' s', absEnv env0 = fullEnv R i' s')
+    (hin : ∀ i0, envIn = some i0 → absEnv env0 = fullEnv R i0 (absS tabs)) (i : RuntimeInput) :
+    absEnv (vcEnvAt R (fanout R) env0 started envIn i tabs) = fullEnv R i (absS tabs) := by
+  unfold vcEnvAt
+  by_cases he : envIn = some i
+  · rw [ite_eq_left he]; exact hin i he
+  · rw [ite_eq_right he]; exact vcEnvF_abs hw h i tabs
+
 /-- A table step from step `i`'s full environment is `denoteResidual`'s step. -/
 theorem denote_of_envF {R : ResidualProgram} {env : SlotEnvF} {i : RuntimeInput} {tabs : RuntimeStateF}
     (h : absEnv env = fullEnv R i (absS tabs)) (e : ClockEdges) :
@@ -112,17 +134,18 @@ theorem vcEngine_sound {R : ResidualProgram} (hw : wellOrdered R = true) (depth 
     (vcEngine R (fanout R) depth).Sound (denoteResidual R) := by
   refine ⟨VcInv R, ⟨?_, ?_, ?_, ?_⟩⟩
   · intro s
-    exact ⟨Or.inl rfl, absS_ofState depth s⟩
+    exact ⟨⟨Or.inl rfl, fun _ h => by cases h⟩, absS_ofState depth s⟩
   · intro q s hq
-    obtain ⟨tabs, env, started⟩ := q
-    exact ⟨hq, absS_ofState depth s⟩
+    obtain ⟨tabs, env, started, envIn⟩ := q
+    exact ⟨⟨hq.1, fun _ h => by cases h⟩, absS_ofState depth s⟩
   · intro q hq e i o q' hs
-    obtain ⟨tabs, env0, started⟩ := q
+    obtain ⟨tabs, env0, started, envIn⟩ := q
+    obtain ⟨hq1, hq2⟩ := hq
     simp only [vcEngine, Except.ok.injEq, Prod.mk.injEq] at hs
     obtain ⟨rfl, rfl⟩ := hs
-    have henv := vcEnvF_abs hw hq i tabs
+    have henv := vcEnvAt_abs hw hq1 hq2 i
     have hres := denote_of_envF henv e
-    refine ⟨Or.inr ⟨i, absS tabs, henv⟩, ?_, ?_⟩
+    refine ⟨⟨Or.inr ⟨i, absS tabs, henv⟩, fun _ h => by cases h⟩, ?_, ?_⟩
     · show _ = (denoteResidual R e i (absS tabs)).outputs
       rw [hres]; rfl
     · show absS _ = (denoteResidual R e i (absS tabs)).nextState
@@ -130,14 +153,16 @@ theorem vcEngine_sound {R : ResidualProgram} (hw : wellOrdered R = true) (depth 
   · intro pk hp q hq e i o q' hs
     simp only [vcEngine, Option.some.injEq] at hp
     subst hp
-    obtain ⟨tabs, env0, started⟩ := q
+    obtain ⟨tabs, env0, started, envIn⟩ := q
+    obtain ⟨hq1, hq2⟩ := hq
     simp only [Except.ok.injEq, Prod.mk.injEq] at hs
     obtain ⟨rfl, rfl⟩ := hs
-    have henv := vcEnvF_abs hw hq i tabs
+    have henv := vcEnvAt_abs hw hq1 hq2 i
     have hres := denote_of_envF henv e
-    refine ⟨Or.inr ⟨i, absS tabs, henv⟩, ?_, rfl⟩
-    show _ = (denoteResidual R e i (absS tabs)).outputs
-    rw [hres]; rfl
+    refine ⟨⟨Or.inr ⟨i, absS tabs, henv⟩, fun i0 h => ?_⟩, ?_, rfl⟩
+    · cases h; exact henv
+    · show _ = (denoteResidual R e i (absS tabs)).outputs
+      rw [hres]; rfl
 
 /-- The state of the modes that keep memories as functions. -/
 structure VcFunState where
