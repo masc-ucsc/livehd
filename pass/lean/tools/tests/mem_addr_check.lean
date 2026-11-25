@@ -11,6 +11,11 @@ port. With `clamp`, each address goes through the clamp the front ends build,
 `idx < K ? idx : 0`, then the exporter's resize `Op_Or [x]`; without it, the raw
 4-bit index goes straight to the resize. `pass.bitwidth` proves the clamped
 index inside `[0, K)`, and the loader must agree exactly when `K ≤ depth`.
+
+`ramMask` writes the same clamp without a branch, as LiveHD's optimizer rewrites it:
+`idx & sext(idx < K)` (the compare sign-extended to the index's width, through one or two
+`Op_Sext`, the operands in either order). The loader must agree exactly as for the mux, refuse
+a mask whose compare guards another index, and bound a constant mask by the constant.
 -/
 import LeanSemanticPrimitives.Compiler.CertIOCodec
 
@@ -35,6 +40,33 @@ def ram (depth K : Nat) (clamp : Bool) : DesignCert :=
     outputs := #[{ slot := 14, width := 8 }]
     flops := #[]
     memories := #[{ aw := 4, dw := 8, nextImg := 13, depth := depth }] }
+
+/-- `ram` with each clamp written as a mask, `idx & sext(idx < K)`. Slots: 0 `wa`, 1 `wd`, 2 `we`,
+3 `ra`, 4 the memory image, 5 the constant `K`, 6 the constant 1 (1 bit), 7 the constant 1
+(2 bits), 8 the constant 7; nodes from slot 9. The write's mask goes through two sign
+extensions (as lhd writes it), the read's through one; `swap` puts the mask first; the write's
+compare reads slot `guard` (0: its own index); `constMask` makes the read's address `ra & 7`. -/
+def ramMask (depth K : Nat) (swap : Bool := false) (guard : Nat := 0) (constMask : Bool := false) :
+    DesignCert :=
+  let n (op : LGraphOp) (w : Nat) (deps : List Nat) : DenseNodeCert :=
+    { op := op, width := w, deps := deps.toArray }
+  { sources := #[.input 0 4, .input 1 8, .input 2 1, .input 3 4, .memImg 0 4 8,
+                 .const 4 K, .const 1 1, .const 2 1, .const 4 7]
+    nodes := #[
+      n .Op_ULT 1 [guard, 5],                      -- 9:  wa < K (or another slot < K)
+      n .Op_Sext 1 [9, 6],                         -- 10: sext at 1 bit
+      n .Op_Sext 4 [10, 7],                        -- 11: the mask, 1111 when the compare holds
+      n .Op_And 4 (if swap then [11, 0] else [0, 11]), -- 12: wa & mask
+      n .Op_Or 4 [12],                             -- 13: the resize
+      n .Op_ULT 1 [3, 5],                          -- 14: ra < K
+      n .Op_Sext 4 [14, 6],                        -- 15: the mask, one sign extension
+      n .Op_And 4 (if constMask then [3, 8] else [3, 15]), -- 16: ra & mask (or ra & 7)
+      n .Op_Or 4 [16],                             -- 17: the resize
+      n .Op_MemWrite 8 [4, 13, 1, 2],              -- 18: the write
+      n .Op_MemRead 8 [4, 17, 2]]                  -- 19: the read
+    outputs := #[{ slot := 19, width := 8 }]
+    flops := #[]
+    memories := #[{ aw := 4, dw := 8, nextImg := 18, depth := depth }] }
 
 /-- `ram`, plus a whole-array bus read of `n` words (slot 15, an output). -/
 def ramBus (depth n : Nat) : DesignCert :=
@@ -69,6 +101,13 @@ def main : IO UInt32 := do
     ("12-word memory, raw 4-bit address",      ram 12 12 false, some "bounded only by 15"),
     ("12-word memory, clamped at 13",          ram 12 13 true,  some "bounded only by 12"),
     ("16-word memory, raw 4-bit address",      ram 16 0 false,  none),
+    ("12-word memory, mask clamp at 12",       ramMask 12 12,   none),
+    ("12-word memory, mask clamp at 12, mask first", ramMask 12 12 (swap := true), none),
+    ("12-word memory, mask clamp at 11",       ramMask 12 11,   none),
+    ("12-word memory, mask clamp at 13",       ramMask 12 13,   some "bounded only by 12"),
+    ("12-word memory, mask guarding another index", ramMask 12 12 (guard := 3), some "bounded only by 15"),
+    ("12-word memory, constant mask 7 on the read", ramMask 12 12 (constMask := true), none),
+    ("6-word memory, constant mask 7 on the read",  ramMask 6 6 (constMask := true), some "bounded only by 7"),
     ("whole table by default (DCERT3 meaning)",
        { ram 12 12 false with memories := #[{ aw := 4, dw := 8, nextImg := 13 }] }, none),
     ("depth 0",                                ram 0 0 true,    some "declares depth 0"),

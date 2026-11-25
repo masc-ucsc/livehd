@@ -28,7 +28,12 @@ the certificate alone:
   * `Op_Or [x]`, the exporter's resize of an address: no more than `x`;
   * `Op_MuxBool [s, f, t]`: no more than the larger of its arms, where the arm
     `t` is capped at `K - 1` when the select is `Op_ULT [t, k]` with `k` a
-    constant `K` -- the clamp `t < K ? t : f`.
+    constant `K` -- the clamp `t < K ? t : f`;
+  * `Op_And [x, y]`: no more than either operand (an unsigned `and` never is), and
+    no more than `K - 1` when one operand is a mask that is nonzero only when the
+    other is below a constant `K`: the compare `Op_ULT [x, k]` itself or sign
+    extensions (`Op_Sext`) of it -- the same clamp written without a branch,
+    `x & sext(x < K)`, as LiveHD's optimizer rewrites `x < K ? x : 0`.
 
 For every memory READ or WRITE whose image comes from a declared memory, the
 bound of its address must be below that memory's `depth`. A whole-array load or
@@ -73,6 +78,33 @@ def ultGuard (D : DesignCert) (s t : Nat) : Option Nat :=
     | _, _             => none
   | none => none
 
+/-- How far `maskGuard` looks through sign extensions. -/
+def maskFuel : Nat := 4
+
+/-- `some K` when slot `m` is a mask that is nonzero only when slot `t` is below a constant `K`:
+the compare `Op_ULT [t, k]` (`ultGuard`), or a sign extension `Op_Sext [a, _]` of such a mask
+(zero stays zero under a sign extension). -/
+def maskGuard (D : DesignCert) : Nat → Nat → Nat → Option Nat
+  | 0, _, _ => none
+  | f + 1, m, t =>
+    match ultGuard D m t with
+    | some K => some K
+    | none =>
+      if m < D.sources.size then none else
+      match D.nodes[m - D.sources.size]? with
+      | some g =>
+        match g.op, g.deps.toList with
+        | .Op_Sext, [a, _] => maskGuard D f a t
+        | _, _ => none
+      | none => none
+
+/-- A bound `b` on operand `t` of an `Op_And` whose other operand is slot `m`: `b`, capped at
+`K - 1` when `m` is a mask that is nonzero only when `t < K`. -/
+def andCap (D : DesignCert) (b m t : Nat) : Nat :=
+  match maskGuard D maskFuel m t with
+  | some K => min b (K - 1)
+  | none => b
+
 /-- The width bound alone: a source's cap, a node's `2 ^ width - 1`, and `0` past
 the last slot (`denoteRef` reads `badVal` there). -/
 def capAt (D : DesignCert) (r : Nat) : Nat :=
@@ -101,10 +133,12 @@ def ub (D : DesignCert) : Nat → Nat → Nat
             | some K => min (ub D f ta) (K - 1)
             | none   => ub D f ta
           min (2 ^ c.width - 1) (max (ub D f fa) tb)
+        | .Op_And, [x, y] =>
+          min (2 ^ c.width - 1) (min (andCap D (ub D f x) y x) (andCap D (ub D f y) x y))
         | _, _ => 2 ^ c.width - 1
 
 /-- How far `ub` looks back. An address is the exporter's resize (`Op_Or [x]`)
-of a clamp (`Op_MuxBool`) of an index: three levels. -/
+of a clamp (`Op_MuxBool`, or `Op_And` with a mask) of an index: three levels. -/
 def ubFuel : Nat := 6
 
 /-- The declared memory an image slot comes from, following write and load
