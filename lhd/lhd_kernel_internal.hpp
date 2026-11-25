@@ -737,7 +737,7 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
 // source unit in var.lnasts (earlier entries are pre-loaded ln: imports).
 // Shared by compile AND the lec/verify side loaders (a Pyrope side never needs
 // a pre-compile to lg: just to resolve its imports).
-void discover_imports(Eprp_var& var, Result& res, size_t n_imports, const std::vector<std::string>& seed_files);
+void parse_pyrope_sources(Eprp_var& var, Result& res, const std::vector<std::string>& seeds);
 void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool already_final = false);
 void compile_sources(Options& opts, Result& res, const Ir_inputs& inputs);
 void compile_command(Options& opts, Result& res);

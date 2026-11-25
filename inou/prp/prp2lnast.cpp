@@ -210,7 +210,9 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name)
     : Prp2lnast(filename, module_name, slurp_file(filename)) {}
 
 // Buffer-backed entry (LSP / unsaved buffers): analyze `source` verbatim.
-Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, std::string_view source) {
+Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, std::string_view source,
+                     std::map<std::string, std::string> import_bindings)
+    : import_bindings_(std::move(import_bindings)) {
   // One slice per parsed file (profiling builds) — parse cost is per-file, so
   // this is the "which file is slow" view of the trace.
   TRACE_EVENT("pyrope", "prp2lnast", "file", std::string(filename));
@@ -8278,7 +8280,12 @@ std::optional<std::string> Prp2lnast::plain_string_literal_text(TSNode n) {
 // `import("lib.name")`, while `` `in c` `` keeps its escape) so the unit key
 // matches the canonical names prp2lnast stamps on `pub` entries and trees. The
 // `ln:`/`lg:` forms name a tree/graph verbatim and are left alone.
-static std::string canonical_import_unit(std::string_view unit) {
+std::string Prp2lnast::canonical_import_unit(std::string_view unit) const {
+  if (!import_bindings_.empty()) {
+    if (auto it = import_bindings_.find(std::string(unit)); it != import_bindings_.end()) {
+      unit = it->second;
+    }
+  }
   if (unit.starts_with("ln:") || unit.starts_with("lg:")) {
     return std::string(unit);
   }

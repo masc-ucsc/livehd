@@ -64,6 +64,7 @@ struct Source_unit {
   std::string              abs_path;  // read-only resolver identity
   std::string              bytes;     // the hermetic per-run snapshot
   std::vector<std::string> imports;
+  std::map<std::string, std::string> import_bindings;
   uint64_t                 semantic_hash{0};
   uint64_t                 interface_hash{0};
   bool                     exact_snapshot_match{false};
@@ -80,6 +81,7 @@ struct Prior_unit {
   std::string              snapshot_file;
   std::string              path;
   std::vector<std::string> imports;
+  std::map<std::string, std::string> import_bindings;
 };
 
 struct Prior_cache {
@@ -457,205 +459,140 @@ using Dependents = std::map<std::string, std::set<std::string>>;
 
 std::vector<Source_unit> capture_closure(const std::vector<std::string>& seeds, const Eprp_var& var, const Prior_cache* prior,
                                          const std::string& scope, Dependents& importers) {
-  Dependents                                                    importers_by_path;
-  std::vector<std::pair<std::string, std::vector<std::string>>> external_imports;
-  std::map<std::string, std::string> pending;  // logical unit -> path
-  std::set<std::string>              loaded;
-  std::set<std::string>              parsed_paths;
-  std::map<std::string, std::string> logical_paths;
-  livehd::prp_import::Resolver                                  resolver;
-
-  for (const auto& ln : var.lnasts) {
-    loaded.emplace(ln->get_top_module_name());
+  if (seeds.empty()) {
+    return {};
   }
-  const auto preloaded = loaded;
-  for (const auto& path : seeds) {
-    const auto unit = livehd::prp_import::unit_name_of(path);
-    const auto abs  = livehd::prp_import::abspath_of(path);
-    if (const auto it = logical_paths.find(unit); it != logical_paths.end() && it->second != abs) {
-      throw Lhd_error{"config",
-                      std::format("Pyrope source unit '{}' names both {} and {}", unit, it->second, abs),
-                      "rename one source file"};
-    }
-    logical_paths[unit] = abs;
-    pending[unit]       = normalized_user_path(path);
-  }
-
-  std::vector<Source_unit> out;
-  while (!pending.empty()) {
-    auto node = pending.extract(pending.begin());
-    auto name = std::move(node.key());
-    auto path = std::move(node.mapped());
-    auto abs  = livehd::prp_import::abspath_of(path);
-    if (!parsed_paths.insert(abs).second) {
-      loaded.insert(name);
-      continue;
-    }
-
-    Source_unit unit;
-    unit.name     = name;
-    unit.path     = normalized_user_path(path);
-    unit.abs_path = abs;
-    unit.bytes    = slurp(path);
-    if (prior != nullptr) {
-      const auto old = prior->units.find(unit.name);
-      if (old != prior->units.end() && old->second.path == unit.path) {
-        const auto comparison = compare_file_bytes(scope + "/pyrope/" + old->second.snapshot_file, unit.bytes);
-        if (comparison == File_compare::equal) {
-          unit.exact_snapshot_match = true;
-          unit.imports              = old->second.imports;
-        } else if (comparison == File_compare::unavailable) {
-          unit.snapshot_unavailable = true;
-        }
-      }
-    }
-    if (!unit.exact_snapshot_match) {
-      try {
-        unit.imports = Prp2lnast::scan_imports(unit.path, unit.bytes);
-      } catch (...) {
-        // The full parser below owns syntax diagnostics. An unterminated token
-        // means this compile will fail before any missing import can matter.
-        unit.imports.clear();
-      }
-    }
-    loaded.insert(name);
-
-    const std::string importer_dir = livehd::prp_import::dir_of(unit.path);
-    for (const auto& raw : unit.imports) {
-      if (raw.starts_with("lg:") || raw.starts_with("ln:")) {
-        continue;
-      }
-      const auto names     = livehd::prp_import::candidates(raw);
-      // An already-satisfied import must still run conflict DETECTION: skipping
-      // it made "ambiguous stem" depend on unit-name traversal order, while the
-      // cache-off discover_imports path errors deterministically. Resolution is
-      // cheap (per-directory listings are cached in the resolver).
-      const bool satisfied = std::any_of(names.begin(), names.end(), [&](const auto& n) { return loaded.contains(n); });
-      bool       local     = false;
-      for (const auto& candidate : names) {
-        const auto resolved = resolver.find(importer_dir, candidate);
-        if (resolved.empty()) {
-          continue;
-        }
-        const auto resolved_abs = livehd::prp_import::abspath_of(resolved);
-        if (const auto it = logical_paths.find(candidate); it != logical_paths.end() && it->second != resolved_abs) {
-          throw Lhd_error{"config",
-                          std::format("ambiguous import '{}': resolves to both {} and {}", candidate, it->second, resolved_abs),
-                          "rename the file or import explicitly"};
-        }
-        logical_paths[candidate] = resolved_abs;
-        importers_by_path[resolved_abs].insert(unit.name);
-        local = true;
-        if (!satisfied && !parsed_paths.contains(resolved_abs)) {
-          pending.try_emplace(candidate, normalized_user_path(resolved));
-        }
+  // A unit's public key is its source path relative to the common seed directory.
+  // Resolving the physical file first also unifies aliases such as lib/../lib/x.
+  fs::path root = fs::path(livehd::prp_import::abspath_of(seeds.front())).parent_path();
+  for (const auto& seed : seeds) {
+    const fs::path dir = fs::path(livehd::prp_import::abspath_of(seed)).parent_path();
+    while (true) {
+      const auto rel = dir.lexically_relative(root);
+      if (rel.empty() || rel.begin()->string() != "..") {
         break;
       }
-      if (!local || satisfied) {
-        // An already loaded unit or an explicit seed in another directory can
-        // satisfy a qualified spelling even when the scanner found a local candidate.
-        external_imports.emplace_back(unit.name, names);
+      const auto parent = root.parent_path();
+      if (parent == root) {
+        break;
       }
-    }
-    out.push_back(std::move(unit));
-  }
-
-  for (const auto& [importer, candidates] : external_imports) {
-    for (const auto& candidate : candidates) {
-      if (const auto it = logical_paths.find(candidate); it != logical_paths.end()) {
-        importers_by_path[it->second].insert(importer);
-      }
+      root = parent;
     }
   }
-  // Two import spellings can resolve to the same file. Both callers depend
-  // on the single LNAST captured for that path.
-  for (const auto& unit : out) {
-    if (auto it = importers_by_path.find(unit.abs_path); it != importers_by_path.end()) {
-      importers.emplace(unit.name, std::move(it->second));
-    }
-  }
-
-  std::sort(out.begin(), out.end(), [](const Source_unit& a, const Source_unit& b) { return a.name < b.name; });
-  for (size_t i = 0; i < out.size(); ++i) {
-    // The stable sorted ordinal is collision-free by construction. A digest
-    // here would turn a harmless fingerprint collision into path aliasing.
-    out[i].snapshot_file = std::format("unit_{:08}.prp", i);
-  }
-
-  // Match discover_imports exactly: all seed files are published first in
-  // command-line order, then each import breadth is published in logical-name
-  // order. The source inventory used to remain alphabetized here. That is a
-  // valid closure representation, but LNAST order is load-bearing for uPass's
-  // registries and CSE representatives; on XS it made an incremental cold
-  // compile produce a different NewCSR graph from the cache-disabled oracle.
-  // Snapshot ordinals above stay name-sorted so changing traversal order does
-  // not create needless cache-file churn.
-  std::map<std::string, size_t> by_name;
-  for (size_t i = 0; i < out.size(); ++i) {
-    by_name.emplace(out[i].name, i);
-  }
-  // `satisfied` mirrors the capture walk above: a name an ALREADY-LOADED lnast
-  // provides needs no import breadth of its own. `placed` is the separate
-  // ordering view -- a captured unit must appear exactly once in the result even
-  // when a preloaded lnast happens to share its logical name (a seed .prp beside
-  // an `ln:` import of the same module). Folding the two sets into one dropped
-  // that unit from the returned closure, and with it from the inventory and the
-  // closure key, so a later edit of it could not dirty the cache.
-  std::set<std::string> satisfied = preloaded;
-  std::set<std::string> placed;
-  std::vector<size_t>   order;
-  order.reserve(out.size());
-  const auto place = [&](const std::string& name, size_t index) {
-    if (!placed.insert(name).second) {
-      return;
-    }
-    satisfied.insert(name);
-    order.push_back(index);
+  const auto name_of = [&](const std::string& path) {
+    return fs::path(livehd::prp_import::abspath_of(path)).lexically_relative(root).replace_extension().generic_string();
   };
+
+  // Seeds in CLI order, then one sorted breadth of local imports at a time.
+  std::vector<std::string>                     pending;
+  std::set<std::string>                        scheduled;
+  std::map<std::string, std::set<std::string>> seed_by_stem;
   for (const auto& path : seeds) {
-    const auto name = livehd::prp_import::unit_name_of(path);
-    if (const auto it = by_name.find(name); it != by_name.end()) {
-      place(name, it->second);
+    const auto name = name_of(path);
+    seed_by_stem[livehd::prp_import::unit_name_of(path)].insert(name);
+    if (scheduled.insert(name).second) {
+      pending.push_back(normalized_user_path(path));
     }
   }
-  size_t next_scan = 0;
-  while (next_scan < order.size()) {
-    const size_t          scan_end = order.size();
-    std::set<std::string> found;
-    for (size_t pos = next_scan; pos < scan_end; ++pos) {
-      for (const auto& raw : out[order[pos]].imports) {
-        if (raw.starts_with("lg:") || raw.starts_with("ln:")) {
-          continue;
-        }
-        const auto names = livehd::prp_import::candidates(raw);
-        if (std::any_of(names.begin(), names.end(), [&](const auto& name) { return satisfied.contains(name); })) {
-          continue;
-        }
-        for (const auto& name : names) {
-          if (by_name.contains(name)) {
-            found.insert(name);
-            break;
+  std::set<std::string> preloaded;
+  for (const auto& ln : var.lnasts) {
+    preloaded.emplace(ln->get_top_module_name());
+  }
+  livehd::prp_import::Resolver resolver;
+  std::vector<Source_unit> out;
+  while (!pending.empty()) {
+    std::map<std::string, std::string> next;
+    for (const auto& path : pending) {
+      const auto  name = name_of(path);
+      const auto  abs  = livehd::prp_import::abspath_of(path);
+      Source_unit unit;
+      unit.name     = name;
+      unit.path     = normalized_user_path(path);
+      unit.abs_path = abs;
+      unit.bytes    = slurp(path);
+      if (prior != nullptr) {
+        const auto old = prior->units.find(unit.name);
+        if (old != prior->units.end() && old->second.path == unit.path) {
+          const auto comparison = compare_file_bytes(scope + "/pyrope/" + old->second.snapshot_file, unit.bytes);
+          if (comparison == File_compare::equal) {
+            unit.exact_snapshot_match = true;
+            unit.imports              = old->second.imports;
+          } else if (comparison == File_compare::unavailable) {
+            unit.snapshot_unavailable = true;
           }
         }
       }
+      if (!unit.exact_snapshot_match) {
+        try {
+          unit.imports = Prp2lnast::scan_imports(unit.path, unit.bytes);
+        } catch (...) {
+          // The full parser below owns syntax diagnostics. An unterminated token
+          // means this compile will fail before any missing import can matter.
+          unit.imports.clear();
+        }
+      }
+      for (const auto& raw : unit.imports) {
+        if (raw.starts_with("lg:") || raw.starts_with("ln:")) {
+          continue;
+        }
+        const auto candidates = livehd::prp_import::candidates(raw);
+        const auto bind       = [&](const std::string& candidate, const std::string& target) {
+          if (candidate != target) {
+            unit.import_bindings.emplace(raw, target + raw.substr(candidate.size()));
+          }
+          importers[target].insert(name);
+        };
+        bool local = false;
+        for (const auto& candidate : candidates) {
+          const auto resolved = resolver.find(livehd::prp_import::dir_of(path), candidate);
+          if (resolved.empty()) {
+            continue;
+          }
+          const auto target = name_of(resolved);
+          bind(candidate, target);
+          if (!preloaded.contains(target) && scheduled.insert(target).second) {
+            next.emplace(target, normalized_user_path(resolved));
+          }
+          local = true;
+          break;
+        }
+        if (!local) {
+          // A source can also import a separately supplied unit, without a
+          // sibling file. Preserve that spelling when there is one provider.
+          for (const auto& candidate : candidates) {
+            if (preloaded.contains(candidate)) {
+              break;
+            }
+            if (auto it = seed_by_stem.find(candidate); it != seed_by_stem.end()) {
+              if (it->second.size() != 1) {
+                throw Lhd_error{"config", std::format("ambiguous import '{}' in {}", raw, path), "use a package-relative import"};
+              }
+              bind(candidate, *it->second.begin());
+              break;
+            }
+          }
+        }
+      }
+      if (unit.exact_snapshot_match && prior->units.at(name).import_bindings != unit.import_bindings) {
+        unit.exact_snapshot_match = false;
+      }
+      out.push_back(std::move(unit));
     }
-    for (const auto& name : found) {
-      place(name, by_name.at(name));
+    pending.clear();
+    for (auto& [name, path] : next) {
+      pending.push_back(std::move(path));
     }
-    next_scan = scan_end;
   }
-  // Defensive only: every captured source should be reachable from a seed,
-  // but retain a deterministic complete inventory if a future resolver shape
-  // introduces an alias that the logical-name walk above cannot reconstruct.
-  for (const auto& [name, index] : by_name) {
-    place(name, index);
+  // Keep snapshot numbering independent of visitation order.
+  std::map<std::string, Source_unit*> sorted;
+  for (auto& unit : out) {
+    sorted.emplace(unit.name, &unit);
   }
-  std::vector<Source_unit> ordered;
-  ordered.reserve(out.size());
-  for (const auto index : order) {
-    ordered.push_back(std::move(out[index]));
+  size_t ordinal = 0;
+  for (auto& [name, unit] : sorted) {
+    unit->snapshot_file = std::format("unit_{:08}.prp", ordinal++);
   }
-  return ordered;
+  return out;
 }
 
 void digest_node(const Lnast& ln, const Lnast_nid& nid, std::string& bytes) {
@@ -1053,7 +990,7 @@ Prior_cache load_prior(const std::string& scope, const std::string& context) {
   rapidjson::Document doc;
   doc.Parse(text->data(), text->size());
   if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("schema_version") || !doc["schema_version"].IsInt()
-      || doc["schema_version"].GetInt() != 4 || !doc.HasMember("code_salt") || !doc["code_salt"].IsUint64()
+      || doc["schema_version"].GetInt() != 5 || !doc.HasMember("code_salt") || !doc["code_salt"].IsUint64()
       || doc["code_salt"].GetUint64() != livehd::kCompileSrcSalt || !doc.HasMember("context") || !doc["context"].IsString()
       || context != doc["context"].GetString() || !doc.HasMember("units") || !doc["units"].IsArray()) {
     return prior;
@@ -1076,6 +1013,15 @@ Prior_cache load_prior(const std::string& scope, const std::string& context) {
       }
       unit.imports.emplace_back(import.GetString());
     }
+    if (!u.HasMember("bindings") || !u["bindings"].IsObject()) {
+      return {};
+    }
+    for (const auto& entry : u["bindings"].GetObject()) {
+      if (!entry.value.IsString()) {
+        return {};
+      }
+      unit.import_bindings.emplace(entry.name.GetString(), entry.value.GetString());
+    }
     const std::string name = u["name"].GetString();
     if (!prior.units.emplace(name, std::move(unit)).second) {
       return {};
@@ -1090,7 +1036,7 @@ void write_inventory(const std::string& path, const std::string& context, const 
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("schema_version");
-  w.Int(4);
+  w.Int(5);
   w.Key("code_salt");
   w.Uint64(livehd::kCompileSrcSalt);
   w.Key("context");
@@ -1115,6 +1061,13 @@ void write_inventory(const std::string& path, const std::string& context, const 
       w.String(import.c_str());
     }
     w.EndArray();
+    w.Key("bindings");
+    w.StartObject();
+    for (const auto& [raw, target] : unit.import_bindings) {
+      w.Key(raw.c_str());
+      w.String(target.c_str());
+    }
+    w.EndObject();
     w.EndObject();
   }
   w.EndArray();
@@ -2465,6 +2418,38 @@ void store_cache(Options& opts, Result& res, const std::string& scope, const std
 
 }  // namespace
 
+// The uncached frontend and LEC use the same package binding and parse order
+// as incremental compilation. Parsing can run independently after discovery.
+void parse_pyrope_sources(Eprp_var& var, Result& res, const std::vector<std::string>& seeds) {
+  Phase_timer phase(res, "inou.prp");
+  res.recipe_steps.emplace_back("inou.prp files:" + join_csv(seeds));
+  Dependents                      importers;
+  auto                            units = capture_closure(seeds, var, nullptr, {}, importers);
+  std::vector<std::exception_ptr> errors(units.size());
+  std::atomic<size_t>             next{0};
+  const auto workers = std::min({units.size(), size_t{16}, std::max<size_t>(1, std::thread::hardware_concurrency())});
+  if (workers != 0) {
+    livehd::run_workers(workers, [&](size_t) {
+      for (auto i = next.fetch_add(1); i < units.size(); i = next.fetch_add(1)) {
+        auto& u = units[i];
+        try {
+          Prp2lnast converter(u.path, u.name, u.bytes, u.import_bindings);
+          u.lnast = converter.get_lnast();
+        } catch (...) {
+          errors[i] = std::current_exception();
+        }
+      }
+    });
+  }
+  for (size_t i = 0; i < units.size(); ++i) {
+    if (errors[i]) {
+      std::rethrow_exception(errors[i]);
+    }
+    units[i].lnast->rehome_name_pool(Lnast::active_name_pool());
+    var.add(std::move(units[i].lnast));
+  }
+}
+
 std::string compile_cache_scope_name(const Options& opts, const std::vector<std::string>& seed_files) {
   return scope_name(opts, seed_files);
 }
@@ -2557,7 +2542,7 @@ size_t compile_cache_parse_sources(Options& opts, Result& res, Eprp_var& var, co
         continue;
       }
       const auto t0 = std::chrono::steady_clock::now();
-      Prp2lnast  converter(unit.path, unit.name, unit.bytes);
+      Prp2lnast  converter(unit.path, unit.name, unit.bytes, unit.import_bindings);
       unit.lnast          = converter.get_lnast();
       unit.semantic_hash  = semantic_hash(*unit.lnast);
       unit.interface_hash = source_interface_hash(*unit.lnast);
@@ -2672,7 +2657,7 @@ size_t compile_cache_parse_sources(Options& opts, Result& res, Eprp_var& var, co
           --res.compile_cache.hits;
           ++res.compile_cache.misses;
         }
-        Prp2lnast converter(unit.path, unit.name, unit.bytes);
+        Prp2lnast converter(unit.path, unit.name, unit.bytes, unit.import_bindings);
         unit.lnast          = converter.get_lnast();
         unit.semantic_hash  = semantic_hash(*unit.lnast);
         unit.interface_hash = source_interface_hash(*unit.lnast);
@@ -2691,8 +2676,12 @@ size_t compile_cache_parse_sources(Options& opts, Result& res, Eprp_var& var, co
   if (deferred) {
     deferred->reserve(units.size());
     for (auto& unit : units) {
-      deferred->push_back(
-          {unit.name, unit.path, scope + "/ln/" + lnast_unit_dir(unit.snapshot_file), std::move(unit.bytes), unit.semantic_hash});
+      deferred->push_back({unit.name,
+                           unit.path,
+                           scope + "/ln/" + lnast_unit_dir(unit.snapshot_file),
+                           std::move(unit.bytes),
+                           unit.semantic_hash,
+                           std::move(unit.import_bindings)});
     }
   }
   return units.size();
@@ -2725,7 +2714,7 @@ static void materialize_sources(Result& res, Eprp_var& var, const std::vector<Co
       // The captured bytes remain authoritative even if another writer
       // replaced the compact tree after the scan or its payload is damaged.
       ++res.compile_cache.refused;
-      Prp2lnast converter(source.path, source.name, source.bytes);
+      Prp2lnast converter(source.path, source.name, source.bytes, source.import_bindings);
       auto      ln = converter.get_lnast();
       if (semantic_hash(*ln) != source.semantic_hash) {
         throw Lhd_error{"config",

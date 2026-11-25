@@ -32,7 +32,7 @@ namespace prp_tb {
 // `also_trace`: write `drv.tb.trace.o` as well, the same tests with a per-step trace hook and a stop flag (the observation
 // replay tool runs it; the simulation object itself carries no tracing code).
 int generate(const std::string& file, const std::string& simdir, const std::string& test_sel,
-             std::vector<prp_sim::Test_info>& tests, std::string& err, bool also_trace, bool dump_bitcode,
+             std::vector<prp_sim::Test_info>& tests, std::string& err, bool also_trace, bool dump_bitcode, bool eval_counts,
              std::optional<uint64_t> cache_salt);
 
 }  // namespace prp_tb

@@ -537,11 +537,14 @@ void sim_command(Options& opts, Result& res) {
   // --set sim.vcd=true / --vcd-from / --vcd-on-fail: the VCD is not the simulator's business. The setup also writes a
   // trace object (`drv.tb.trace.o`) and, after the run, lhd replays it from the nearest checkpoint (`lhd_simrt
   // --vcd-out`), one `<workdir>/<test>.vcd` per test.
+  bool eval_counts  = false;
   bool compile_only = false;
   bool vcd_on       = false;
   for (const auto& [k, v] : opts.sets) {
     if (k == "sim.compile_only") {
       compile_only = str_tools::parse_bool(v).value_or(false);
+    } else if (k == "sim.eval_counts") {
+      eval_counts = str_tools::parse_bool(v).value_or(false);
     } else if (k == "sim.dump_bitcode") {
       opts.sim_dump_bitcode = str_tools::parse_bool(v).value_or(false);
     } else if (k == "sim.vcd") {
@@ -550,6 +553,14 @@ void sim_command(Options& opts, Result& res) {
   }
   if (run_only && opts.sim_dump_bitcode) {
     throw Lhd_error{"usage", "sim.dump_bitcode requires simulator setup", "use --setup-only to write LLVM bitcode"};
+  }
+  if (run_only && eval_counts) {
+    const auto manifest = livehd::file_utils::read_file(simdir + "/" + std::string(prp_tb::kManifest));
+    if (!manifest || manifest->find("\"eval_word\"") == std::string::npos) {
+      throw Lhd_error{"usage",
+                      "sim.eval_counts requires simulator setup",
+                      "rerun --setup-only with --set sim.eval_counts=true"};
+    }
   }
   if (opts.sim_vcd_from >= 0 || opts.sim_vcd_on_fail) {
     vcd_on = true;
@@ -679,6 +690,7 @@ void sim_command(Options& opts, Result& res) {
                                 err,
                                 opts.sim_observe,
                                 opts.sim_dump_bitcode,
+                                eval_counts,
                                 opts.incremental ? std::optional{livehd::kCompileSrcSalt} : std::nullopt);
     }
     if (gen_rc != 0) {

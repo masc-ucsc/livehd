@@ -28,14 +28,13 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <print>
 #include <ranges>
 #include <set>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
-
-#include "tb_integer.hpp"
 
 #include "file_utils.hpp"
 #include "fnv1a.hpp"
@@ -48,6 +47,7 @@
 #include "sim_native_rt.hpp"
 #include "sim_program.hpp"
 #include "tb_abi.hpp"
+#include "tb_integer.hpp"
 #include "wide_decimal.hpp"
 
 namespace {
@@ -2098,6 +2098,7 @@ int main(int argc, char** argv) {
 
     long      fails = -1;
     Fail_info first;
+    std::string eval_json;
     uint64_t  sim_cycles = 0;
     const auto t0       = std::chrono::steady_clock::now();
     if (err.empty()) {
@@ -2295,6 +2296,25 @@ int main(int argc, char** argv) {
             std::vector<uint64_t> resolved(args.size());
             rt.resolved_params = resolved.data();
             fails = run(&rt, state.data(), args.data());
+            for (const auto& inst : t["instances"].GetArray()) {
+              if (!inst.HasMember("eval_word")) {
+                continue;
+              }
+              const auto       word      = inst["eval_word"].GetUint64();
+              const auto       attempted = state.at(word);
+              const auto       executed  = state.at(word + 1);
+              std::string_view instance  = inst["var"].GetString();
+              const auto       skipped   = attempted - executed;
+              std::print("sim eval {}.{} attempted={} executed={} skipped={}\n", name, instance, attempted, executed, skipped);
+              if (!eval_json.empty()) {
+                eval_json += ",";
+              }
+              eval_json += std::format("{{\"instance\":\"{}\",\"attempted\":{},\"executed\":{},\"skipped\":{}}}",
+                                       escape(std::string(instance)),
+                                       attempted,
+                                       executed,
+                                       skipped);
+            }
             size_t offset      = 0;
             for (const auto& p : t["params"].GetArray()) {
               if (!p.HasMember("bits")) {
@@ -2366,6 +2386,9 @@ int main(int argc, char** argv) {
         if (!first.msg.empty()) {
           rj += ",\"msg\":\"" + escape(first.msg) + "\"";
         }
+      }
+      if (!eval_json.empty()) {
+        rj += ",\"evaluations\":[" + eval_json + "]";
       }
       rj += ",\"sim_cycles\":" + std::to_string(sim_cycles) + ",\"sim_ns\":" + std::to_string(sim_ns) + "}";
     }

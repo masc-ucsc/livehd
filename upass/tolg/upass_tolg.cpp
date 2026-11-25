@@ -10156,6 +10156,9 @@ private:
         nxt  = lnast_->get_sibling_next(nxt);
       }
     }
+    if (!nxt.is_invalid() && Lnast_ntype::is_const(lnast_->get_type(nxt))) {
+      msg = std::string{lnast_->get_name(nxt)};
+    }
     // `cassert` is an ELABORATION check: the upass must fold it here, or it
     // fails. It never becomes an fproperty, so it
     // never reaches pass.formal and never survives into the netlist as a
@@ -10174,12 +10177,13 @@ private:
       // so it would slip through as "proven" and emit a full netlist. A cassert
       // the compiler cannot decide is exactly the case that must fail.
       if (!livehd::graph_util::const_of(cond.pin).is_known_true()) {
-        error_at(nid, {"cassert-false", "unsupported"}, "upass.tolg: cassert condition is not true at compile time");
+        error_at(nid,
+                 {"cassert-false", "unsupported"},
+                 "upass.tolg: cassert condition is not true at compile time{}{}",
+                 msg.empty() ? "" : ": ",
+                 msg);
       }
       return;  // folded true: discharged here, nothing to materialize
-    }
-    if (!nxt.is_invalid() && Lnast_ntype::is_const(lnast_->get_type(nxt))) {
-      msg = std::string{lnast_->get_name(nxt)};
     }
     if (kind == "undefined") {
       lower_undefined_marker(nid, cond, msg);

@@ -1023,22 +1023,9 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
       } else {
         check_inputs_exist({path});
       }
-      run_step("inou.prp",
-               var,
-               {
-                   {"files", files}
-      },
-               opts,
-               res);
-      // A Pyrope side resolves its own import() dependencies (sibling .prp in
-      // the importing file's directory, to a fixpoint) — no pre-compile to lg:
-      // is ever needed just to satisfy imports (Verilog still needs its own
-      // elaboration; this is the same discovery `lhd compile` runs).
-      {
-        std::vector<std::string> seeds;
-        str_tools::append_csv_names(seeds, files);
-        discover_imports(var, res, /*n_imports=*/0, seeds);
-      }
+      std::vector<std::string> seeds;
+      str_tools::append_csv_names(seeds, files);
+      parse_pyrope_sources(var, res, seeds);
     } else if (kind == "verilog") {  // slang: the direct SV -> LNAST front-end
       check_inputs_exist({path});
       // Slang needs definitions while elaborating a mapped Verilog side;

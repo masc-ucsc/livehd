@@ -3,8 +3,9 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <limits>
 #include <functional>
+#include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -487,34 +488,20 @@ struct Reset_input_port {
   friend bool operator==(const Reset_input_port&, const Reset_input_port&) = default;
 };
 
-struct Reset_input_ports {
-  std::vector<Reset_input_port> ports;
-  // False means some reset-bearing state in the subtree is driven by a cone
-  // that cannot be reduced to one declared input. A caller may still use the
-  // listed ports for clock correctness, but must not use them to skip the
-  // instance during simulation.
-  bool                          complete = true;
-};
-
 struct Clock_input_ports {
   absl::flat_hash_set<uint32_t> ports;
-  // Same discipline as Reset_input_ports::complete, and for the same reason:
-  // an empty port set means "nothing in the subtree takes an edge" ONLY when
-  // the walk got all the way down. A body-less callee, a mutually
-  // instantiating pair, or a clock cone that does not reduce to a declared
-  // input all produce an empty-looking answer that a caller must NOT read as
-  // "there is nothing to gate here".
-  bool                          complete = true;
+  // A reset can reopen only the clock that drives the corresponding state.
+  std::map<uint32_t, std::vector<Reset_input_port>> resets;
+  bool                                              complete        = true;
+  bool                                              resets_complete = true;
 };
 
 struct Clock_port_cache {
-  // node_hash_map: both memos hand out references that outlive later queries
+  // node_hash_map: the memo hands out references that outlive later queries
   // (callers bind `const auto& ports = ...` and the walk itself recurses while
   // an outer frame holds one). A flat map moves its values on rehash.
   absl::node_hash_map<const hhds::Graph*, Clock_input_ports> clock_memo;
   absl::flat_hash_set<const hhds::Graph*>                    clock_busy;
-  absl::node_hash_map<const hhds::Graph*, Reset_input_ports> reset_memo;
-  absl::flat_hash_set<const hhds::Graph*>                    reset_busy;
 };
 
 [[nodiscard]] const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph>& def, Clock_port_cache& cache);
@@ -522,7 +509,6 @@ struct Clock_port_cache {
 // state inside?" and have no gating decision riding on completeness.
 [[nodiscard]] const absl::flat_hash_set<uint32_t>& clock_input_ports(const std::shared_ptr<hhds::Graph>& def,
                                                                      Clock_port_cache&                   cache);
-[[nodiscard]] const Reset_input_ports& reset_input_ports(const std::shared_ptr<hhds::Graph>& def, Clock_port_cache& cache);
 
 // Insert Clock_cell(en = __valid | reset_asserted) on the structural clock
 // inputs of conditionally activated Sub instances. This is a post-lowering

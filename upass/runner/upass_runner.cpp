@@ -3651,6 +3651,155 @@ void uPass_runner::emit_inline_attr(const std::string& target, std::string_view 
   lm->pop_source();
 }
 
+namespace {
+
+// Reconstruct the aggregate before the template body runs. Inner tuples must
+// precede their users so forwarding a complete record works across files.
+void append_record_tuple(Lnast& ln, Lnast_nid body, const std::string& dst, const Bundle& record,
+                         const std::string& prefix, size_t& seq) {
+  std::vector<std::pair<std::string, Lnast_node>> fields;
+  for (const auto& field : record.top_levels()) {
+    const bool named = field.pos < 0;
+    const auto key   = named ? std::string(field.name) : std::to_string(field.pos);
+    if (field.has_leafs) {
+      auto       sub = record.get_bundle(bundle_path::of_string(key));
+      const auto tmp = std::format("%config_{}_{}", prefix, seq++);
+      append_record_tuple(ln, body, tmp, *sub, prefix, seq);
+      fields.emplace_back(named ? key : "", Lnast_node::create_ref(tmp));
+    } else {
+      fields.emplace_back(named ? key : "", Lnast_node::create_const(field.scalar.to_pyrope()));
+    }
+  }
+  auto tuple = ln.add_child(body, Lnast_ntype::create_tuple_add());
+  ln.add_child(tuple, Lnast_node::create_ref(dst));
+  for (const auto& [field, value] : fields) {
+    if (field.empty()) {
+      ln.add_child(tuple, value);
+    } else {
+      auto entry = ln.add_child(tuple, Lnast_ntype::create_store());
+      ln.add_child(entry, Lnast_node::create_ref(field));
+      ln.add_child(entry, value);
+    }
+  }
+}
+
+void append_record_literal(Lnast& ln, Lnast_nid body, const std::string& name, const Bundle& record) {
+  size_t     seq = 0;
+  const auto tmp = std::format("%config_{}_{}", name, seq++);
+  append_record_tuple(ln, body, tmp, record, name, seq);
+  auto decl = ln.add_child(body, Lnast_ntype::create_declare());
+  ln.add_child(decl, Lnast_node::create_ref(name));
+  ln.add_child(decl, Lnast_ntype::create_prim_type_none());
+  ln.add_child(decl, Lnast_node::create_const("const comptime"));
+  auto assign = ln.add_child(body, Lnast_ntype::create_store());
+  ln.add_child(assign, Lnast_node::create_ref(name));
+  ln.add_child(assign, Lnast_node::create_ref(tmp));
+}
+
+bool is_comptime_record_bundle(const Bundle& record) {
+  if (record.get_mode() == upass::Mode::type_kind) {
+    return false;
+  }
+  if (!(record.has_named_top() || record.get_value_kind() == upass::Kind::tuple || record.unnamed_top_count() > 1)) {
+    return false;
+  }
+  const auto leaves = record.non_attr_entries();
+  return !leaves.empty() && std::all_of(leaves.begin(), leaves.end(), [](const auto& field) {
+    const auto& v = field.second.trivial;
+    return (v.is_integer() || v.is_bool() || v.is_string()) && !v.has_unknowns();
+  });
+}
+
+// Reconstruct a compile-time record from straight-line prologue tuple_add/store
+// statements (e.g. a template's captured default record or file-scope record).
+std::shared_ptr<Bundle> eval_lnast_record(const std::shared_ptr<Lnast>& ln, std::string_view target, int depth) {
+  if (!ln || target.empty() || depth > 32) {
+    return nullptr;
+  }
+  using N = Lnast_ntype;
+  for (auto top : ln->children(ln->get_root())) {
+    if (!N::is_stmts(ln->get_type(top))) {
+      continue;
+    }
+    Lnast_nid writer{};
+    int       count  = 0;
+    for (auto stmt : ln->children(top)) {
+      const auto t = ln->get_type(stmt);
+      if (N::is_declare(t) || N::is_attr_set(t) || N::is_type_spec(t)) {
+        continue;
+      }
+      const auto dst = ln->get_first_child(stmt);
+      if (!dst.is_invalid() && N::is_ref(ln->get_type(dst)) && ln->get_name(dst) == target) {
+        writer = stmt;
+        ++count;
+      }
+    }
+    if (count != 1 || writer.is_invalid()) {
+      return nullptr;
+    }
+    const auto wt  = ln->get_type(writer);
+    const auto dst = ln->get_first_child(writer);
+    if (N::is_store(wt)) {
+      const auto rhs = ln->get_sibling_next(dst);
+      if (!rhs.is_invalid() && N::is_ref(ln->get_type(rhs))) {
+        return eval_lnast_record(ln, ln->get_name(rhs), depth + 1);
+      }
+      return nullptr;
+    }
+    if (N::is_tuple_add(wt)) {
+      auto b = std::make_shared<Bundle>(target);
+      b->set_value_kind(upass::Kind::tuple);
+      b->set_mode(upass::Mode::const_kind);
+      int pos = 0;
+      for (auto entry = ln->get_sibling_next(dst); !entry.is_invalid(); entry = ln->get_sibling_next(entry)) {
+        const auto et = ln->get_type(entry);
+        std::string key;
+        Lnast_nid   val = entry;
+        if (N::is_store(et)) {
+          const auto k = ln->get_first_child(entry);
+          val          = k.is_invalid() ? k : ln->get_sibling_next(k);
+          if (k.is_invalid() || val.is_invalid() || !N::is_ref(ln->get_type(k))) {
+            return nullptr;
+          }
+          key = std::string(ln->get_name(k));
+        } else {
+          key = std::to_string(pos++);
+        }
+        const auto vt = ln->get_type(val);
+        if (N::is_const(vt)) {
+          auto d = Dlop::from_pyrope(ln->get_name(val));
+          if (!d || d->has_unknowns() || !(d->is_integer() || d->is_bool() || d->is_string())) {
+            return nullptr;
+          }
+          b->set(bundle_path::of_string(key), *d);
+        } else if (N::is_ref(vt)) {
+          auto sub = eval_lnast_record(ln, ln->get_name(val), depth + 1);
+          if (!sub) {
+            return nullptr;
+          }
+          b->set(bundle_path::of_string(key), sub);
+        } else {
+          return nullptr;
+        }
+      }
+      return is_comptime_record_bundle(*b) ? b : nullptr;
+    }
+    break;
+  }
+  return nullptr;
+}
+
+std::string record_specialization_key(const Bundle& record) {
+  std::string key;
+  for (const auto& [field, entry] : record.non_attr_entries()) {
+    const std::string value(entry.trivial.to_pyrope());
+    key += std::format("{}:{}{}:{}", field.size(), field, value.size(), value);
+  }
+  return std::format("record_{:016x}", livehd::hash_util::fnv1a64(key));
+}
+
+}  // namespace
+
 void uPass_runner::emit_inline_tuple(const std::string& dst, const std::vector<std::pair<std::string, Lnast_node>>& fields) {
   // Build `dst = (k0=v0, k1=v1, …)` as a tuple_add and run it through the walk
   // so constprop builds dst's bundle (multi-output return splat). Layout:
@@ -6450,7 +6599,7 @@ std::optional<std::pair<Dlop, Dlop>> uPass_runner::declared_param_range(
     return std::nullopt;  // an array port: its shape is checked lane by lane (check_call_args_fit)
   }
   const auto gbi = e.type_name.empty() ? gbinds.end() : gbinds.find(e.type_name);
-  const bool gen = gbi != gbinds.end() && gbi->second.type_name.empty() && gbi->second.const_text.empty();
+  const bool gen = gbi != gbinds.end() && gbi->second.type_name.empty() && !gbi->second.is_value();
   if (e.kind == Io_kind::boolean || (gen && gbi->second.kind == Io_kind::boolean)) {
     return std::pair{*Dlop::create_integer(0), *Dlop::create_integer(1)};
   }
@@ -6546,7 +6695,7 @@ void uPass_runner::check_call_arg_kind(const Lnast_io_entry& e, const absl::flat
   }
   auto want = e.kind;
   if (const auto gbi = e.type_name.empty() ? gbinds.end() : gbinds.find(e.type_name);
-      gbi != gbinds.end() && gbi->second.type_name.empty() && gbi->second.const_text.empty()) {
+      gbi != gbinds.end() && gbi->second.type_name.empty() && !gbi->second.is_value()) {
     want = gbi->second.kind;  // `a:T` with T bound to a scalar type
   }
   check_bind_kind(e, want, value_kind_of(actual), callee, call_span);
@@ -6677,7 +6826,7 @@ void uPass_runner::check_call_args_fit(const std::shared_ptr<Lnast>& callee, con
     }
     const auto gbi = e.type_name.empty() ? gbinds.end() : gbinds.find(e.type_name);
     if (e.kind == Io_kind::boolean
-        || (gbi != gbinds.end() && gbi->second.type_name.empty() && gbi->second.const_text.empty()
+        || (gbi != gbinds.end() && gbi->second.type_name.empty() && !gbi->second.is_value()
             && gbi->second.kind == Io_kind::boolean)) {
       fcall_arg_fail(call_span,
                      "fcall-arg-overflow",
@@ -8611,6 +8760,15 @@ bool uPass_runner::try_inline_func_call() {
       func_param_bindings_[gname] = frame_portable_func_name(gb.func_name, callee->get_top_module_name());
       continue;
     }
+    if (gb.const_record) {
+      const auto name = upass::Lnast_manager::make_inlined_name(tag, g);
+      auto       copy = gb.const_record->get_bundle({});
+      if (copy) {
+        copy->set_mode(upass::Mode::const_kind);
+        symbol_table_.set(name, std::move(copy));
+      }
+      continue;
+    }
     if (!gb.const_text.empty()) {
       const auto gname = upass::Lnast_manager::make_inlined_name(tag, g);
       if (gb.decl_typed) {
@@ -9995,7 +10153,7 @@ std::optional<Dlop> uPass_runner::fold_template_bound(const std::shared_ptr<Lnas
   const auto envelope = [&](std::string_view base) -> std::optional<std::pair<Dlop, Dlop>> {
     if (auto it = binds.find(std::string(base)); it != binds.end()) {
       const auto& gb = it->second;
-      if (gb.const_text.empty() && gb.type_name.empty() && gb.kind == Io_kind::integer && gb.max && gb.min) {
+      if (!gb.is_value() && gb.type_name.empty() && gb.kind == Io_kind::integer && gb.max && gb.min) {
         return std::pair{*gb.max, *gb.min};
       }
       if (gb.decl_typed && gb.decl_max && gb.decl_min) {
@@ -10068,6 +10226,94 @@ std::optional<Dlop> uPass_runner::fold_template_bound(const std::shared_ptr<Lnas
       using N      = Lnast_ntype;
       if (N::is_declare(t) || N::is_attr_set(t) || N::is_type_spec(t)) {
         continue;  // a captured `comptime const`'s declaration; its value is the store
+      }
+      if (N::is_tuple_get(t)) {
+        // Resolve a record base through binds, chained tuple_gets (e.g.
+        // `C.queues[0].depth`), store aliases, or prologue record literals.
+        std::function<std::shared_ptr<Bundle>(std::string_view, int)> resolve_record;
+        resolve_record = [&](std::string_view name, int rdepth) -> std::shared_ptr<Bundle> {
+          if (name.empty() || rdepth > 32) {
+            return nullptr;
+          }
+          if (const auto it = binds.find(std::string(name)); it != binds.end() && it->second.const_record) {
+            return it->second.const_record;
+          }
+          for (auto s : tmpl->children(top)) {
+            const auto sd = tmpl->get_first_child(s);
+            if (sd.is_invalid() || !N::is_ref(tmpl->get_type(sd)) || tmpl->get_name(sd) != name) {
+              continue;
+            }
+            const auto st = tmpl->get_type(s);
+            if (N::is_declare(st) || N::is_attr_set(st) || N::is_type_spec(st)) {
+              continue;
+            }
+            if (N::is_store(st)) {
+              const auto rhs = tmpl->get_sibling_next(sd);
+              if (!rhs.is_invalid() && N::is_ref(tmpl->get_type(rhs))) {
+                return resolve_record(tmpl->get_name(rhs), rdepth + 1);
+              }
+              return nullptr;
+            }
+            if (N::is_tuple_add(st)) {
+              return eval_lnast_record(tmpl, name, 0);
+            }
+            if (N::is_tuple_get(st)) {
+              const auto b = tmpl->get_sibling_next(sd);
+              if (b.is_invalid() || !N::is_ref(tmpl->get_type(b))) {
+                return nullptr;
+              }
+              auto base_rec = resolve_record(tmpl->get_name(b), rdepth + 1);
+              if (!base_rec) {
+                return nullptr;
+              }
+              std::vector<Bundle::Seg> sub_path;
+              for (auto f = tmpl->get_sibling_next(b); !f.is_invalid(); f = tmpl->get_sibling_next(f)) {
+                if (N::is_const(tmpl->get_type(f))) {
+                  const auto field = bundle_path::of_name(tmpl->get_name_id(f));
+                  sub_path.insert(sub_path.end(), field.begin(), field.end());
+                } else if (N::is_ref(tmpl->get_type(f))) {
+                  const auto idx = fold_template_bound(tmpl, tmpl->get_name(f), binds, depth + 1, unbound);
+                  if (!idx || !idx->is_integer() || !idx->is_just_i64() || idx->to_just_i64() < 0) {
+                    return nullptr;
+                  }
+                  const auto field = bundle_path::of_string(std::to_string(idx->to_just_i64()));
+                  sub_path.insert(sub_path.end(), field.begin(), field.end());
+                } else {
+                  return nullptr;
+                }
+              }
+              return base_rec->get_bundle(sub_path);
+            }
+            return nullptr;
+          }
+          return nullptr;
+        };
+        const auto base = tmpl->get_sibling_next(dst);
+        if (base.is_invalid() || !N::is_ref(tmpl->get_type(base))) {
+          return std::nullopt;
+        }
+        const auto base_rec = resolve_record(tmpl->get_name(base), 0);
+        if (!base_rec) {
+          return std::nullopt;
+        }
+        std::vector<Bundle::Seg> path;
+        for (auto f = tmpl->get_sibling_next(base); !f.is_invalid(); f = tmpl->get_sibling_next(f)) {
+          if (N::is_const(tmpl->get_type(f))) {
+            const auto field = bundle_path::of_name(tmpl->get_name_id(f));
+            path.insert(path.end(), field.begin(), field.end());
+          } else if (N::is_ref(tmpl->get_type(f))) {
+            const auto idx = fold_template_bound(tmpl, tmpl->get_name(f), binds, depth + 1, unbound);
+            if (!idx || !idx->is_integer() || !idx->is_just_i64() || idx->to_just_i64() < 0) {
+              return std::nullopt;
+            }
+            const auto field = bundle_path::of_string(std::to_string(idx->to_just_i64()));
+            path.insert(path.end(), field.begin(), field.end());
+          } else {
+            return std::nullopt;
+          }
+        }
+        const auto& value = base_rec->get_trivial(path);
+        return value.is_integer() && !value.has_unknowns() ? std::optional<Dlop>(value) : std::nullopt;
       }
       if (N::is_attr_get(t)) {
         const auto base = tmpl->get_sibling_next(dst);
@@ -10284,9 +10530,27 @@ std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::share
     }
   };
 
+  const auto bind_records = [&](const Lnast_nid& body) {
+    for (const auto& g : tmpl->get_generics()) {
+      const auto it = type_subst.find(g);
+      if (it != type_subst.end() && it->second.const_record) {
+        append_record_literal(*clone, body, g, *it->second.const_record);
+      }
+    }
+  };
+  const bool has_records
+      = std::any_of(type_subst.begin(), type_subst.end(), [](const auto& bind) { return bool(bind.second.const_record); });
   if (vname.empty()) {
     for (auto c : tmpl->children(src_root)) {
-      copy_subtree_into(tmpl, c, clone, dst_root, subst);
+      if (has_records && Lnast_ntype::is_stmts(tmpl->get_type(c))) {
+        auto body = clone->add_child(dst_root, tmpl->get_type(c));
+        bind_records(body);
+        for (auto stmt : tmpl->children(c)) {
+          copy_subtree_into(tmpl, stmt, clone, body, subst);
+        }
+      } else {
+        copy_subtree_into(tmpl, c, clone, dst_root, subst);
+      }
     }
   } else {
     // Var-arg expansion: rebuild the io (drop the `...vname` marker
@@ -10321,6 +10585,7 @@ std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::share
       } else if (Lnast_ntype::is_stmts(ct) && !body_done) {
         body_done     = true;
         auto body_dst = clone->add_child(dst_root, ct);
+        bind_records(body_dst);
         auto recon    = clone->add_child(body_dst, Lnast_ntype::create_tuple_add());
         clone->add_child(recon, Lnast_node::create_ref(vname));
         for (const auto& vp : vports) {
@@ -14835,6 +15100,20 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
       }
       return gb;
     }
+    if (auto record = symbol_table_.get_bundle(s);
+        record && record->get_mode() != upass::Mode::type_kind
+        && (record->has_named_top() || record->get_value_kind() == upass::Kind::tuple || record->unnamed_top_count() > 1)) {
+      if (is_comptime_record_bundle(*record) && !symbol_table_.tuple_slot_ref.contains(s)) {
+        Generic_bind gb;
+        gb.from         = std::move(from);
+        gb.const_record = std::move(record);
+        return gb;
+      }
+      fcall_arg_fail(call_span,
+                     "fcall-generic-runtime",
+                     std::format("{} of `{}` is `{}`, a runtime value: a generic is bound at compile time", from, callee_name, s),
+                     "bind a constant, a type or a lambda; pass a runtime value as a call argument");
+    }
     // A variable or an input/output of the caller that does not fold is a
     // runtime value: bound as a type name it would read as nil in the callee.
     const auto  df    = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), s);
@@ -14856,8 +15135,46 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
   };
 
   // A generic left unbound by the call takes its DECLARATION default (`<T,
-  // N=1>`, todo 3g B): the default text is re-classified exactly like an
-  // explicit `<…>` argument (type / constant / lambda).
+  // N=1>`, todo 3g B): resolve record defaults in the callee's own scope first
+  // (so `--top` specialization and cross-file calls do not depend on the caller's
+  // symbol table), then re-classify scalar/type/lambda defaults like an explicit
+  // `<…>` argument.
+  const auto lookup_callee_default_record = [&](std::string_view def_name) -> std::shared_ptr<Bundle> {
+    if (auto rec = eval_lnast_record(callee, def_name, 0)) {
+      return rec;
+    }
+    if (registry_ == nullptr) {
+      return nullptr;
+    }
+    std::string unit{callee->get_top_module_name()};
+    if (const auto dot = unit.rfind('.'); dot != std::string::npos) {
+      unit.resize(dot);
+    }
+    const auto fit = reg().function_registry.find(unit);
+    if (fit == reg().function_registry.end() || !fit->second->get_lambda_kind().empty()) {
+      return nullptr;
+    }
+    const auto&       shell  = fit->second;
+    const std::string prefix = std::string(def_name) + ".";
+    std::shared_ptr<Bundle> from_pub;
+    for (const auto& [path, val_text] : shell->get_pub_values()) {
+      if (!path.starts_with(prefix) || val_text.find('|') != std::string::npos) {
+        continue;
+      }
+      if (!from_pub) {
+        from_pub = std::make_shared<Bundle>(def_name);
+        from_pub->set_value_kind(upass::Kind::tuple);
+        from_pub->set_mode(upass::Mode::const_kind);
+      }
+      if (auto d = Dlop::from_pyrope(val_text)) {
+        from_pub->set(bundle_path::of_string(std::string_view(path).substr(prefix.size())), *d);
+      }
+    }
+    if (from_pub && is_comptime_record_bundle(*from_pub)) {
+      return from_pub;
+    }
+    return eval_lnast_record(shell, def_name, 0);
+  };
   const auto& gdefaults      = callee->get_generic_defaults();
   const auto  apply_defaults = [&]() {
     for (std::size_t i = 0; i < gens.size(); ++i) {
@@ -14866,7 +15183,16 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
       }
       const std::string def = (i < gdefaults.size()) ? gdefaults[i] : std::string{};
       if (!def.empty()) {
-        auto gb         = bind_of_explicit_arg(def, std::format("the default for generic `{}`", gens[i]));
+        std::string from = std::format("the default for generic `{}`", gens[i]);
+        if (auto rec = lookup_callee_default_record(def)) {
+          Generic_bind gb;
+          gb.from         = std::move(from);
+          gb.const_record = std::move(rec);
+          gb.from_default = true;
+          binds[gens[i]]  = std::move(gb);
+          continue;
+        }
+        auto gb         = bind_of_explicit_arg(def, std::move(from));
         gb.from_default = true;  // identity-specialization test (see maybe_specialize_template_call)
         binds[gens[i]]  = std::move(gb);
       }
@@ -14880,7 +15206,7 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
   // 3g D). Value/lambda/default uses (`a + N`, `F(v)`, `in2=N`) stay legal.
   const auto validate_kinds = [&]() {
     for (const auto& [g, gb] : binds) {
-      if (gb.const_text.empty() && gb.func_name.empty()) {
+      if (!gb.is_value() && gb.func_name.empty()) {
         continue;  // a type bind is fine in a type slot
       }
       const auto in_type_slot = [&](const std::vector<Lnast_io_entry>& es) {
@@ -14957,7 +15283,7 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
       }
       const Generic_bind cand
           = bind_of_explicit_arg(ga.value, std::format("the explicit `<…>` argument `{}`", ga.value), ga.src_name);
-      const bool  cand_is_type = cand.const_text.empty() && cand.func_name.empty();  // type bind vs value/lambda
+      const bool  cand_is_type = !cand.is_value() && cand.func_name.empty();  // type bind vs value/lambda
       std::size_t target       = gens.size();
       // Exception 2: a bare identifier whose SOURCE name matches an unbound
       // generic name (`ga.value` is frame-renamed inside an inlined body),
@@ -15477,7 +15803,8 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
     // `m<inc>` to different `inc` bodies (each file's own) must not share one
     // clone, so key it by the same caller-portable spelling the clone writes
     // into the body (clone_template_specialized).
-    const std::string tok = !it->second.const_text.empty() ? it->second.const_text
+    const std::string tok = it->second.const_record          ? record_specialization_key(*it->second.const_record)
+                            : !it->second.const_text.empty() ? it->second.const_text
                             : it->second.func_name.empty()
                                 ? std::string{}
                                 : frame_portable_func_name(it->second.func_name, callee->get_top_module_name());

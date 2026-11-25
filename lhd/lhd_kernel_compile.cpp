@@ -371,188 +371,6 @@ Ir_inputs gather_ir_inputs(const Options& opts, std::string_view cmd) {
   return ir;
 }
 
-// 2i-import S1 — on-disk import discovery. For each source unit's unresolved
-// import (a bare logical name, not `lg:`/`ln:`), search the *importing file's
-// own directory* for `<name>.prp`, parse it (named by its logical import path),
-// and repeat to a fixpoint. So `lhd compile foo/bar.prp` pulls in its siblings
-// without the caller listing every dependency, and the LSP (which opens a
-// single file) resolves the same way. Resolution is importer-directory relative
-// only — never the cwd, never an ancestor crawl. A logical name that resolves
-// to two distinct files is an error, never a silent first-hit.
-std::vector<std::string> collect_imports(const std::shared_ptr<Lnast>& ln);  // defined below
-
-void discover_imports(Eprp_var& var, Result& res, size_t n_imports, const std::vector<std::string>& seed_files) {
-  TRACE_EVENT("pyrope", "discover_imports");
-  // The other half of the Pyrope front end, and for the one-seed-file shape
-  // (`lhd compile top.prp`, what ../lhdsuite/bench/matrix.sh runs) by far the
-  // BIGGER half: the threaded Prp2lnast parse of every transitively imported
-  // unit happens here, not in the "inou.prp" run_step that parsed the seeds.
-  // Disjoint from it — that run_step's timer closed before this call — so the
-  // two never double-count; sum them for the whole parse.
-  Phase_timer             phase(res, "inou.prp.imports");
-  // Resolution itself lives in prp_import.hpp and is also used by the
-  // incremental closure scanner. Keeping one implementation is a soundness
-  // requirement: the cache must never preserve a different closure from the
-  // compiler that consumes it.
-  livehd::prp_import::Resolver resolver;
-
-  absl::flat_hash_map<std::string, std::string> unit_dir;      // unit -> source dir (case-sensitive)
-  absl::flat_hash_set<std::string>              parsed_paths;  // abs paths already parsed
-  for (const auto& f : seed_files) {
-    unit_dir[livehd::prp_import::unit_name_of(f)] = livehd::prp_import::dir_of(f);
-    parsed_paths.insert(livehd::prp_import::abspath_of(f));
-  }
-
-  // Each unit's imports are examined exactly ONCE, in the round after the unit
-  // was parsed (`next_scan` worklist). Re-scanning every loaded unit per round
-  // is O(units × rounds) full-LNAST walks — and resolution is deterministic on
-  // a static tree, so a re-scan can never produce a different outcome: an
-  // import that resolved was parsed on the spot, one that didn't never will
-  // (same dir, same stem), and one satisfied by a later round's load needs no
-  // action anyway.
-  absl::flat_hash_set<std::string> loaded;
-  for (const auto& ln : var.lnasts) {
-    loaded.insert(std::string(ln->get_top_module_name()));
-  }
-  absl::flat_hash_map<std::string, std::vector<std::string>> import_cache;
-  size_t                                                     next_scan = n_imports;
-  while (true) {
-    std::map<std::string, std::string>           found;       // logical name -> file to parse
-    std::map<std::string, std::set<std::string>> seen_paths;  // logical name -> resolved files
-
-    const size_t scan_end = var.lnasts.size();
-    for (size_t i = next_scan; i < scan_end; ++i) {
-      const auto& ln  = var.lnasts[i];
-      auto        dit = unit_dir.find(std::string(ln->get_top_module_name()));
-      if (dit == unit_dir.end()) {
-        continue;  // a unit with no known on-disk origin (e.g. a derived tree)
-      }
-      const std::string dir = dit->second;
-      const std::string unit_name(ln->get_top_module_name());
-      auto [iit, inserted] = import_cache.try_emplace(unit_name);
-      if (inserted) {
-        iit->second = collect_imports(ln);
-      }
-      for (const auto& raw : iit->second) {
-        if (raw.starts_with("lg:") || raw.starts_with("ln:")) {
-          continue;  // artifact imports resolve elsewhere, not on-disk source
-        }
-        // A trailing `.entry` after the last '/' selects a pub member, so the
-        // file is the stem; otherwise the whole string is the file path.
-        const auto names   = livehd::prp_import::candidates(raw);
-        bool       already = false;
-        for (const auto& c : names) {
-          if (loaded.contains(c)) {
-            already = true;
-            break;
-          }
-        }
-        if (already) {
-          continue;
-        }
-        for (const auto& c : names) {
-          std::string path = resolver.find(dir, c);
-          if (!path.empty()) {
-            seen_paths[c].insert(livehd::prp_import::abspath_of(path));
-            found.try_emplace(c, path);
-            break;
-          }
-        }
-      }
-    }
-
-    bool ambiguous = false;
-    for (const auto& [name, paths] : seen_paths) {
-      if (paths.size() <= 1) {
-        continue;
-      }
-      ambiguous = true;
-      std::string list;
-      for (const auto& p : paths) {
-        if (!list.empty()) {
-          list += ", ";
-        }
-        list += p;
-      }
-      livehd::diag::sink().emit(
-          livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
-                                   .code     = "import-ambiguous",
-                                   .category = "name",
-                                   .pass     = "lhd.compile",
-                                   .message  = std::format("ambiguous import \"{}\": resolves to more than one file", name),
-                                   .hint     = std::format("candidates: {}; rename the file or import explicitly", list)});
-    }
-    if (ambiguous) {
-      throw classify_engine_failure("ambiguous import resolution");
-    }
-
-    struct Parse_job {
-      std::string              name;
-      std::string              path;
-      std::shared_ptr<Lnast>   lnast;
-      std::vector<std::string> imports;
-      std::exception_ptr       error;
-    };
-    std::vector<Parse_job> jobs;
-    jobs.reserve(found.size());
-    for (const auto& [name, path] : found) {
-      if (!parsed_paths.insert(livehd::prp_import::abspath_of(path)).second) {
-        continue;  // already parsed under some name — don't double-load the file
-      }
-      jobs.push_back(Parse_job{.name = name, .path = path, .lnast = {}, .imports = {}, .error = {}});
-    }
-
-    // Imported source units are independent parse jobs.  Parse a bounded
-    // batch in parallel, then publish the results in the deterministic logical
-    // name order above.  Sixteen workers avoids oversubscribing large machines
-    // and keeps the transient parser/source-buffer footprint small beside the
-    // retained LNAST closure.  Diagnostics serialize through diag::Sink while
-    // their staged record and source locator remain thread-local.
-    // Big-stack workers (livehd::run_workers): Prp2lnast descends the AST
-    // recursively, one frame per expression nesting level, and a default
-    // secondary-thread stack is 512 KiB on macOS -- a tiny fraction of what
-    // the same parse gets on the main thread.
-    if (!jobs.empty()) {
-      std::atomic<size_t> next{0};
-      const size_t        hw = std::max<size_t>(1, std::thread::hardware_concurrency());
-      const size_t        nw = std::min({jobs.size(), hw, size_t{16}});
-      livehd::run_workers(nw, [&](size_t) {
-        while (true) {
-          const size_t i = next.fetch_add(1, std::memory_order_relaxed);
-          if (i >= jobs.size()) {
-            break;
-          }
-          try {
-            Prp2lnast converter(jobs[i].path, jobs[i].name);
-            jobs[i].lnast   = converter.get_lnast();
-            jobs[i].imports = collect_imports(jobs[i].lnast);
-          } catch (...) {
-            jobs[i].error = std::current_exception();
-          }
-        }
-      });
-      for (const auto& job : jobs) {
-        if (job.error) {
-          std::rethrow_exception(job.error);
-        }
-      }
-      for (auto& job : jobs) {
-        job.lnast->rehome_name_pool(Lnast::active_name_pool());
-        var.add(std::move(job.lnast));
-        loaded.insert(job.name);
-        unit_dir[job.name] = livehd::prp_import::dir_of(job.path);
-        import_cache.emplace(job.name, std::move(job.imports));
-      }
-    }
-    next_scan = scan_end;
-    if (jobs.empty()) {
-      break;
-    }
-  }
-  // A discovered file that fails to parse propagates its own diagnostic out of
-  // Prp2lnast (caught by the top-level compile handler), so no extra check here.
-}
-
 // Pyrope parse phase: load ln: import units (visible to upass/inliner), then
 // parse+validate the source files. Returns the number of imported units (the
 // source units are var.lnasts[n_imports..]).
@@ -586,17 +404,7 @@ size_t pyrope_parse(Options& opts, Result& res, Eprp_var& var, const std::vector
   if (res.compile_cache.enabled) {
     compile_cache_parse_sources(opts, res, var, opts.files, deferred);
   } else {
-    run_step("inou.prp",
-             var,
-             {
-                 {"files", join_csv(opts.files)}
-    },
-             opts,
-             res);
-    // 2i-import S1 — transitively pull in imported sibling sources from each
-    // importing file's own directory, so a single-file compile needs no
-    // dependency list (and the LSP resolves the same way).
-    discover_imports(var, res, n_imports, opts.files);
+    parse_pyrope_sources(var, res, opts.files);
   }
   if (!deferred && lnastfmt_enabled(opts)) {
     run_step("pass.lnastfmt", var, {}, opts, res);
@@ -1528,46 +1336,95 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
           restore_unit(ln);
         }
       }
-      // An erased tree may be a runner-minted TEMPLATE SPECIALIZATION
-      // (`<callee-file>.<callee>__<mangled>`, see uPass_runner's
-      // maybe_specialize_template_call) or a loop body lifted from one.
-      // Re-walking the CALLEE's file never recreates it: only the CALL SITE
-      // that minted it does, and that call site lives in a different unit —
-      // one that may have blocked on nothing and is therefore about to be
-      // frozen as final just below. Retry the minter too, restored to its
-      // pristine body so the re-walk is a fresh elaboration rather than the
-      // corrupting re-walk the comment below warns about. A caller that is
-      // itself DERIVED (a specialization minted by another specialization,
-      // e.g. the identity clone of `mid<N=4>` calling `sub__N_4_W_8`) has no
-      // pristine body: drop it as well, so the search continues to ITS minter.
-      // Symptom when skipped: tolg reports `call to undefined function
-      // '<mangled>'` in a unit that itself looks perfectly resolved (minion's
-      // minion_dcache_tlb_array -> minion_tlb<Entries=8, NrMinions=1>).
-      if (!erased_work.empty()) {
-        absl::flat_hash_map<std::string, std::vector<std::shared_ptr<Lnast>>> callers;
-        for (const auto& ln : var.lnasts) {
-          if (restored.contains(ln.get()) || dropped.contains(ln.get())) {
+      // A retry can also invalidate a specialization outside the caller's
+      // package, and restoring callers of erased trees can invalidate further
+      // minters. Run both closures together to a fixpoint so no speculative
+      // clone survives after all of its minters are rewound.
+      std::map<std::string, std::vector<const Lnast*>> minted_by;
+      for (const auto& [name, child] : derived_by_name) {
+        for (const auto& parent : child->get_minters()) {
+          minted_by[std::string(parent)].push_back(child);
+        }
+      }
+      absl::flat_hash_map<std::string, std::vector<std::shared_ptr<Lnast>>> callers;
+      bool                                                                  callers_built = false;
+      std::set<std::string>                                                 invalid_callers = retry;
+      invalid_callers.insert(erased.begin(), erased.end());
+      std::vector<std::string> changed(invalid_callers.begin(), invalid_callers.end());
+      while (!changed.empty() || !erased_work.empty()) {
+        while (!changed.empty()) {
+          auto parent = std::move(changed.back());
+          changed.pop_back();
+          const auto children = minted_by.find(parent);
+          if (children == minted_by.end()) {
             continue;
           }
-          for (auto& callee : collect_called_names(ln)) {
-            callers[std::move(callee)].push_back(ln);
+          for (const auto* child : children->second) {
+            const auto& minters = child->get_minters();
+            if (!dropped.contains(child) && !minters.empty()
+                && std::all_of(minters.begin(), minters.end(), [&](const auto& caller) {
+                     return invalid_callers.contains(std::string(caller));
+                   })) {
+              drop_unit(child);
+              std::string name(child->get_top_module_name());
+              if (invalid_callers.insert(name).second) {
+                changed.push_back(std::move(name));
+              }
+            }
           }
         }
-        while (!erased_work.empty()) {
-          const auto callee = std::move(erased_work.back());
-          erased_work.pop_back();
-          const auto cit = callers.find(callee);
-          if (cit == callers.end()) {
-            continue;
+        // An erased tree may be a runner-minted TEMPLATE SPECIALIZATION
+        // (`<callee-file>.<callee>__<mangled>`, see uPass_runner's
+        // maybe_specialize_template_call) or a loop body lifted from one.
+        // Re-walking the CALLEE's file never recreates it: only the CALL SITE
+        // that minted it does, and that call site lives in a different unit —
+        // one that may have blocked on nothing and is therefore about to be
+        // frozen as final just below. Retry the minter too, restored to its
+        // pristine body so the re-walk is a fresh elaboration rather than the
+        // corrupting re-walk the comment below warns about. A caller that is
+        // itself DERIVED (a specialization minted by another specialization,
+        // e.g. the identity clone of `mid<N=4>` calling `sub__N_4_W_8`) has no
+        // pristine body: drop it as well, so the search continues to ITS minter.
+        // Symptom when skipped: tolg reports `call to undefined function
+        // '<mangled>'` in a unit that itself looks perfectly resolved (minion's
+        // minion_dcache_tlb_array -> minion_tlb<Entries=8, NrMinions=1>).
+        if (!erased_work.empty()) {
+          if (!callers_built) {
+            callers_built = true;
+            for (const auto& ln : var.lnasts) {
+              if (restored.contains(ln.get()) || dropped.contains(ln.get())) {
+                continue;
+              }
+              for (auto& callee : collect_called_names(ln)) {
+                callers[std::move(callee)].push_back(ln);
+              }
+            }
           }
-          for (const auto& ln : cit->second) {
-            if (restored.contains(ln.get()) || dropped.contains(ln.get())) {
+          while (!erased_work.empty()) {
+            const auto callee = std::move(erased_work.back());
+            erased_work.pop_back();
+            const auto cit = callers.find(callee);
+            if (cit == callers.end()) {
               continue;
             }
-            if (pristine_units.contains(ln.get())) {
-              restore_unit(ln);
-            } else {
-              drop_unit(ln.get());
+            for (const auto& ln : cit->second) {
+              if (restored.contains(ln.get()) || dropped.contains(ln.get())) {
+                continue;
+              }
+              if (pristine_units.contains(ln.get())) {
+                restore_unit(ln);
+              } else {
+                drop_unit(ln.get());
+              }
+              std::string name(ln->get_top_module_name());
+              if (invalid_callers.insert(name).second) {
+                changed.push_back(std::move(name));
+              }
+            }
+          }
+          for (const auto& name : erased) {
+            if (invalid_callers.insert(name).second) {
+              changed.push_back(name);
             }
           }
         }

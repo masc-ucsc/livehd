@@ -318,13 +318,15 @@ struct Instance {
 
 class Module_gen {
 public:
-  Module_gen() : mod_("prp_tb", ctx_), b_(ctx_) {
+  explicit Module_gen(bool counts) : eval_counts(counts), mod_("prp_tb", ctx_), b_(ctx_) {
     i64_ = llvm::Type::getInt64Ty(ctx_);
     i1_  = llvm::Type::getInt1Ty(ctx_);
     ptr_ = llvm::PointerType::get(ctx_, 0);
     void_ = llvm::Type::getVoidTy(ctx_);
     kernel_ty_ = llvm::FunctionType::get(void_, {ptr_, ptr_}, false);
   }
+
+  const bool eval_counts;
 
   llvm::LLVMContext& ctx() { return ctx_; }
   llvm::Module&      mod() { return mod_; }
@@ -354,11 +356,20 @@ public:
       llvm::cast<Function>(callee.getCallee())->setMemoryEffects(llvm::MemoryEffects::argMemOnly());
       return callee;
     };
+    // The first word following DUT storage is reserved by the driver. Count
+    // in the two additional per-instance words only in an instrumented image.
+    const auto add_evaluations = [&](Function* self, size_t counter, size_t amount) {
+      if (eval_counts && amount != 0) {
+        auto* p = b_.CreateGEP(i64_, self->getArg(0), {ConstantInt::get(i64_, d.words + 1 + counter)});
+        b_.CreateStore(b_.CreateAdd(b_.CreateLoad(i64_, p), ConstantInt::get(i64_, amount)), p);
+      }
+    };
     size_t     bit  = 0;
     const auto call = [&](Function* self, const std::string& name) {
       llvm::FunctionCallee callee = kernel(name);
       Value*               s      = self->getArg(0);
       if (d.gate_bits == 0) {
+        add_evaluations(self, 1, 1);
         b_.CreateCall(callee, {s, llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr_))});
         return;
       }
@@ -374,6 +385,7 @@ public:
       b_.SetInsertPoint(then);
       Value* w2 = b_.CreateLoad(i64_, gp);
       b_.CreateStore(b_.CreateAnd(w2, ConstantInt::get(i64_, ~mask)), gp);
+      add_evaluations(self, 1, 1);
       b_.CreateCall(callee, {s, llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr_))});
       b_.CreateBr(cont);
       b_.SetInsertPoint(cont);
@@ -385,6 +397,7 @@ public:
     // A zero dirty word skips its entire group. Within a live group re-read every
     // bit in order: a kernel can mark a later kernel during this same phase.
     const auto phase = [&](Function* self, const std::vector<std::string>& functions, size_t first_bit) {
+      add_evaluations(self, 0, functions.size());
       bit = first_bit;
       for (size_t i = 0; i < functions.size();) {
         const size_t count = std::min(64 - bit % 64, functions.size() - i);
@@ -511,7 +524,7 @@ public:
     size_t base = 0;
     for (auto& inst : insts_) {
       inst.base = base;
-      base      += inst.dut->words + 1;
+      base      += inst.dut->words + 1 + (m_.eval_counts ? 2 : 0);
       m_.emit_dut(*inst.dut, inst.explicit_clk);
     }
     r.instances   = insts_;
@@ -2916,7 +2929,7 @@ bool emit_object(llvm::Module& mod, const std::string& path, std::string& err, b
 }  // namespace
 
 int generate(const std::string& file, const std::string& simdir, const std::string& test_sel,
-             std::vector<prp_sim::Test_info>& tests, std::string& err, bool also_trace, bool dump_bitcode,
+             std::vector<prp_sim::Test_info>& tests, std::string& err, bool also_trace, bool dump_bitcode, bool eval_counts,
              std::optional<uint64_t> cache_salt) {
   try {
     const std::string src = slurp(file);
@@ -2955,8 +2968,8 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
     std::vector<Test_result> results;
     // One pass over the `test` blocks per object: the simulation object (no tracing code) and, on request,
     // the trace object the VCD replay tool runs. Only the first pass reports the tests.
-    const auto build = [&](bool trace, const std::string& object) -> bool {
-      Module_gen               mg;
+    const auto               build = [&](bool trace, const std::string& object) -> bool {
+      Module_gen               mg(eval_counts);
       std::vector<Test_result> mine;
       size_t                   index = 0;
       for (TSNode c : ts_node_named_children(root_node)) {
@@ -3049,8 +3062,16 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
       j += "],\"instances\":[";
       for (size_t i = 0; i < r.instances.size(); ++i) {
         used_stems.insert(r.instances[i].dut->stem);
-        j += std::format("{}{{\"var\":{},\"stem\":{},\"base\":{}}}", i ? "," : "", json_str(r.instances[i].var), json_str(r.instances[i].dut->stem),
-                         r.instances[i].base);
+        const auto& instance  = r.instances[i];
+        j                    += std::format("{}{{\"var\":{},\"stem\":{},\"base\":{}",
+                                            i ? "," : "",
+                                            json_str(instance.var),
+                                            json_str(instance.dut->stem),
+                                            instance.base);
+        if (eval_counts) {
+          j += std::format(",\"eval_word\":{}", instance.base + instance.dut->words + 1);
+        }
+        j += "}";
       }
       j += "],\"asserts\":[";
       for (size_t a = 0; a < r.asserts.size(); ++a) {

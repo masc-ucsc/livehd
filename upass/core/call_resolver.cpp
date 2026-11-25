@@ -264,7 +264,24 @@ void process_import_call(Lnast_manager& lm, Symbol_table& st,
             return;
           }
         }
-        pend();  // a tuple-valued pub member (member.0, …) — not handled by the dot selector yet
+        const std::string prefix = found->name + ".";
+        std::shared_ptr<Bundle> record;
+        for (const auto& [path, val_text] : src->get_pub_values()) {
+          if (!path.starts_with(prefix) || val_text.find('|') != std::string::npos) {
+            continue;
+          }
+          if (!record) {
+            record = std::make_shared<Bundle>(dst);
+            record->set_value_kind(upass::Kind::tuple);
+            record->set_mode(upass::Mode::const_kind);
+          }
+          record->set(bundle_path::of_string(std::string_view(path).substr(prefix.size())), *Dlop::from_pyrope(val_text));
+        }
+        if (record) {
+          st.set(dst, std::move(record));
+          return;
+        }
+        pend();
         return;
       }
       // A pub lambda: bind its qualified tree name so `f(...)` dispatches to it

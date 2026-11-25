@@ -987,6 +987,8 @@ protected:
     // `kind`/`max`/`min` still carry its envelope (so a constant bound into a
     // type slot has a width — todo 3g D). Never inferred (explicit/default only).
     std::string                    const_text   = {};
+    std::shared_ptr<Bundle>        const_record;
+    bool                           is_value() const { return const_record || !const_text.empty(); }
     // A constant bound FROM a typed comptime constant (`f<N=W>` with `comptime
     // const W:u8 = 13`): W's declared envelope. An attribute query on a generic
     // reads the substituted ENTITY (docs 06-functions), so `N.[bits]` is 8 as

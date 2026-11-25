@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -26,6 +27,7 @@ struct Compile_source {
   std::string tree_dir;
   std::string bytes;  // the scanner's captured source, for recovery from a damaged tree
   uint64_t    semantic_hash;
+  std::map<std::string, std::string> import_bindings;
 };
 
 // Parse the complete Pyrope source closure through the persistent Tier-A cache.

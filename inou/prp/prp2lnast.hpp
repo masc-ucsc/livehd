@@ -1,10 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #pragma once
-#include "prp_string.hpp"
-
 #include <deque>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <stack>
@@ -23,6 +22,7 @@
 #include "lnast_builder.hpp"
 #include "lnast_ntype.hpp"
 #include "prp_ast_facade.hpp"
+#include "prp_string.hpp"
 
 namespace prpparse {
 class Parser;
@@ -47,6 +47,8 @@ class Prp2lnast {
 protected:
   // Parsing (prpparse: a hand-written recursive-descent Pyrope parser whose Ast
   // is walked through the tree-sitter-shaped facade in prp_ast_facade.hpp).
+  std::map<std::string, std::string>       import_bindings_;
+  [[nodiscard]] std::string                canonical_import_unit(std::string_view spelling) const;
   std::string                              prp_file;
   std::string                              src_filename;  // source path, for diagnostic spans
   std::string                              src_relpath;   // workspace-relative form for SourceId minting
@@ -1201,7 +1203,8 @@ public:
   // Analyze an in-memory buffer (e.g. an editor's unsaved buffer / LSP request).
   // `filename` is a virtual path used only for diagnostic spans; `source` is the
   // buffer text (read verbatim — the file at `filename` is NOT opened).
-  Prp2lnast(std::string_view filename, std::string_view module_name, std::string_view source);
+  Prp2lnast(std::string_view filename, std::string_view module_name, std::string_view source,
+            std::map<std::string, std::string> import_bindings = {});
 
   ~Prp2lnast();
 

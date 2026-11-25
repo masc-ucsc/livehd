@@ -618,7 +618,11 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "form's O(1)-in-trip-count code footprint is what the large benchmarks depend on, so it is preserved by "
      "ruling. Set it to measure what a rolled loop costs (lhdtrack br_mux_onehot ran 2.5x, br_arb_lru 5.6x faster "
      "flat). Speed only: the simulated values never change", Sim_set_option::Stage::codegen},
-    {"dump_bitcode", "false", Sim_set_option::Kind::boolean,
+    {"eval_counts",
+     "false", Sim_set_option::Kind::boolean,
+     "count attempted and executed native evaluation kernels separately for each testbench DUT instance", Sim_set_option::Stage::codegen},
+    {"dump_bitcode",
+     "false", Sim_set_option::Kind::boolean,
      "write the pre-optimization LLVM module for each native kernel and testbench beside its object as .bc", Sim_set_option::Stage::codegen},
     {"init_zero",
      "false", Sim_set_option::Kind::boolean,

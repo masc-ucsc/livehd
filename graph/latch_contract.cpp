@@ -2079,6 +2079,86 @@ namespace {
 
 [[nodiscard]] bool const_true(const hhds::Pin_class& p) { return p.is_known_true(); }
 
+// Constant-evaluate a 1-bit boolean reset cone before pass.aegraph runs (e.g.
+// `rst and false` or `rst_n or true` from a specialized generic config).
+[[nodiscard]] std::optional<bool> const_reset_level(const hhds::Pin_class& p, int depth = 0) {
+  if (p.is_invalid() || depth > 16) {
+    return std::nullopt;
+  }
+  if (p.is_known_false()) {
+    return false;
+  }
+  if (p.is_known_true()) {
+    return true;
+  }
+  if (p.is_const() || gu::is_graph_input_pin(p)) {
+    return std::nullopt;
+  }
+  const auto n  = p.get_master_node();
+  const auto op = gu::type_op_of(n);
+  if (op == Ntype_op::And) {
+    bool all_true = true;
+    bool any_in   = false;
+    for (auto sink : n.inp_sorted_pins()) {
+      for (auto drv : sink.get_driver_pins()) {
+        any_in = true;
+        const auto v = const_reset_level(drv, depth + 1);
+        if (v && !*v) {
+          return false;
+        }
+        if (!v || !*v) {
+          all_true = false;
+        }
+      }
+    }
+    return (any_in && all_true) ? std::optional<bool>(true) : std::nullopt;
+  }
+  if (op == Ntype_op::Or) {
+    bool all_false = true;
+    bool any_in    = false;
+    for (auto sink : n.inp_sorted_pins()) {
+      for (auto drv : sink.get_driver_pins()) {
+        any_in = true;
+        const auto v = const_reset_level(drv, depth + 1);
+        if (v && *v) {
+          return true;
+        }
+        if (!v || *v) {
+          all_false = false;
+        }
+      }
+    }
+    return (any_in && all_false) ? std::optional<bool>(false) : std::nullopt;
+  }
+  if (op == Ntype_op::Ror) {
+    for (auto sink : n.inp_sorted_pins()) {
+      for (auto drv : sink.get_driver_pins()) {
+        return const_reset_level(drv, depth + 1);
+      }
+    }
+    return std::nullopt;
+  }
+  if (op == Ntype_op::EQ) {
+    std::vector<hhds::Pin_class> ins;
+    for (auto sink : n.inp_sorted_pins()) {
+      for (auto drv : sink.get_driver_pins()) {
+        ins.push_back(drv);
+      }
+    }
+    if (ins.size() == 2) {
+      if (ins[0].is_known_false()) {
+        const auto v = const_reset_level(ins[1], depth + 1);
+        return v ? std::optional<bool>(!*v) : std::nullopt;
+      }
+      if (ins[1].is_known_false()) {
+        const auto v = const_reset_level(ins[0], depth + 1);
+        return v ? std::optional<bool>(!*v) : std::nullopt;
+      }
+    }
+  }
+  return std::nullopt;
+}
+
 [[nodiscard]] std::optional<Reset_input_port> reset_root_port(const hhds::Pin_class& driver, bool active_low) {
   if (driver.is_invalid()) {
     return std::nullopt;
@@ -2096,7 +2176,7 @@ const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph
   // A subtree the walk cannot enter -- a body-less black box, or one whose walk
   // is already in flight (mutual instantiation) -- is NOT an analyzed-empty
   // one. Reporting it complete lets a caller gate nothing and call it success.
-  static const Clock_input_ports unknown{{}, /*complete=*/false};
+  static const Clock_input_ports unknown{{}, {}, /*complete=*/false, /*resets_complete=*/false};
   if (!def) {
     return unknown;
   }
@@ -2186,12 +2266,28 @@ const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph
   // unresolved analysis, exactly as on the reset side. A state element with no
   // clock_pin driver at all is not: it commits on the module's implicit clock,
   // so there is no port to name and nothing was lost.
-  const auto add_clock = [&](const hhds::Pin_class& driver) {
+  const auto add_clock = [&](const hhds::Pin_class& driver, const hhds::Pin_class& reset, bool active_low) {
     if (driver.is_invalid()) {
       return;
     }
     if (auto pid = root_port(driver, 0)) {
       result.ports.insert(*pid);
+      if (!reset.is_invalid()) {
+        // A reset pin folded to its inactive constant can never assert, so it
+        // needs no clock-gate bypass and must not fail structural analysis.
+        const auto level          = const_reset_level(reset);
+        const bool const_inactive = level && (*level == active_low);
+        if (!const_inactive) {
+          if (auto rp = reset_root_port(reset, active_low)) {
+            auto& resets = result.resets[*pid];
+            if (std::find(resets.begin(), resets.end(), *rp) == resets.end()) {
+              resets.push_back(*rp);
+            }
+          } else {
+            result.resets_complete = false;
+          }
+        }
+      }
     } else {
       result.complete = false;
     }
@@ -2200,7 +2296,9 @@ const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph
   for (auto n : def->body().nodes()) {
     const auto op = gu::type_op_of(n);
     if (op == Ntype_op::Memory) {
-      gu::for_each_memory_clock_driver(n, add_clock);
+      // Memory.reset is active high after port lowering.
+      const auto reset = gu::get_driver_of_sink_name(n, "reset");
+      gu::for_each_memory_clock_driver(n, [&](const auto& clock) { add_clock(clock, reset, false); });
       continue;
     }
     // A latch's gate IS its enable: `clock_pin` (pid 2) is RESERVED and tolg
@@ -2211,7 +2309,9 @@ const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph
     // it outright. Withholding the activation from a latch needs its ENABLE
     // gated rather than a clock port, which this walk does not model.
     if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
-      add_clock(gu::get_driver_of_sink_name(n, "clock_pin"));
+      add_clock(gu::get_driver_of_sink_name(n, "clock_pin"),
+                gu::get_driver_of_sink_name(n, "reset_pin"),
+                const_true(gu::get_driver_of_sink_name(n, "negreset")));
       continue;
     }
     if (op != Ntype_op::Sub) {
@@ -2229,18 +2329,31 @@ const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph
     const auto  child_graph = n.get_subnode_graph();
     const auto& child       = clock_input_interface(child_graph, cache);
     result.complete         = result.complete && child.complete;
-    for (const auto cp : child.ports) {
-      bool found = false;
-      for (auto sink : n.inp_sorted_pins()) {  // read-only walk
-        if (static_cast<uint32_t>(sink.get_port_id()) != cp) {
-          continue;
+    result.resets_complete  = result.resets_complete && child.resets_complete;
+    const auto binding      = [&](uint32_t pid) -> hhds::Pin_class {
+      for (auto sink : n.inp_sorted_pins()) {
+        if (static_cast<uint32_t>(sink.get_port_id()) == pid) {
+          return sink.get_driver_pin();
         }
-        add_clock(sink.get_driver_pin());
-        found = true;
-        break;
       }
-      if (!found) {
-        result.complete = false;  // the child clocks state on a port nothing binds
+      return {};
+    };
+    for (const auto cp : child.ports) {
+      const auto clock = binding(cp);
+      if (clock.is_invalid()) {
+        result.complete = false;
+        continue;
+      }
+      add_clock(clock, {}, false);
+      if (const auto domain = child.resets.find(cp); domain != child.resets.end()) {
+        for (const auto& rp : domain->second) {
+          const auto reset = binding(rp.port_id);
+          if (reset.is_invalid()) {
+            result.resets_complete = false;
+          } else {
+            add_clock(clock, reset, rp.active_low);
+          }
+        }
       }
     }
   }
@@ -2251,85 +2364,6 @@ const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph
 
 const absl::flat_hash_set<uint32_t>& clock_input_ports(const std::shared_ptr<hhds::Graph>& def, Clock_port_cache& cache) {
   return clock_input_interface(def, cache).ports;
-}
-
-const Reset_input_ports& reset_input_ports(const std::shared_ptr<hhds::Graph>& def, Clock_port_cache& cache) {
-  // Not `{}`: an unwalkable subtree (body-less black box, or a walk already in
-  // flight) has an empty port list because nothing was LOOKED at, which is the
-  // opposite of "no reset state in here" for every caller that decides whether
-  // it may skip the instance.
-  static const Reset_input_ports unknown{{}, /*complete=*/false};
-  if (!def) {
-    return unknown;
-  }
-  if (auto it = cache.reset_memo.find(def.get()); it != cache.reset_memo.end()) {
-    return it->second;
-  }
-  if (!cache.reset_busy.insert(def.get()).second) {
-    return unknown;
-  }
-
-  Reset_input_ports result;
-  auto              add_reset = [&](const hhds::Pin_class& driver, bool active_low) {
-    if (driver.is_invalid()) {
-      return;
-    }
-    if (auto root = reset_root_port(driver, active_low)) {
-      result.ports.push_back(*root);
-    } else {
-      result.complete = false;
-    }
-  };
-
-  for (auto n : def->body().nodes()) {
-    const auto op = gu::type_op_of(n);
-    if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
-      auto reset = gu::get_driver_of_sink_name(n, "reset_pin");
-      if (!reset.is_invalid()) {
-        add_reset(reset, const_true(gu::get_driver_of_sink_name(n, "negreset")));
-      }
-      continue;
-    }
-    if (op == Ntype_op::Memory) {
-      // tolg normalizes a Memory's reset sink to active high before it reaches
-      // the graph, including an explicitly active-low source reset.
-      add_reset(gu::get_driver_of_sink_name(n, "reset"), false);
-      continue;
-    }
-    if (op != Ntype_op::Sub) {
-      continue;
-    }
-    // Body-less stateless primitives, exempt for the same reason as in the
-    // clock walk above: a null `lgassert`/`fproperty` body is not an unwalkable
-    // subtree, so it must not turn the whole interface INCOMPLETE.
-    if (gu::is_property_marker(n)) {  // by name too: a loaded `lg:` may lose the primitive's binding
-      continue;
-    }
-    const auto  child_graph = n.get_subnode_graph();
-    const auto& child       = reset_input_ports(child_graph, cache);
-    result.complete         = result.complete && child.complete;
-    for (const auto& rp : child.ports) {
-      bool found = false;
-      for (auto sink : n.inp_sorted_pins()) {  // read-only walk
-        if (static_cast<uint32_t>(sink.get_port_id()) != rp.port_id) {
-          continue;
-        }
-        add_reset(sink.get_driver_pin(), rp.active_low);
-        found = true;
-        break;
-      }
-      if (!found) {
-        result.complete = false;
-      }
-    }
-  }
-
-  std::sort(result.ports.begin(), result.ports.end(), [](const Reset_input_port& a, const Reset_input_port& b) {
-    return std::pair{a.port_id, a.active_low} < std::pair{b.port_id, b.active_low};
-  });
-  result.ports.erase(std::unique(result.ports.begin(), result.ports.end()), result.ports.end());
-  cache.reset_busy.erase(def.get());
-  return cache.reset_memo.emplace(def.get(), std::move(result)).first->second;
 }
 
 int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass, const std::function<bool(const hhds::Graph*)>& is_boxed) {
@@ -4002,8 +4036,7 @@ int gate_activation_clocks(hhds::Graph* g, std::string_view from_pass, Clock_por
       continue;  // analyzed and stateless: nothing inside takes an edge, so there is nothing to withhold
     }
 
-    const auto& resets = reset_input_ports(def, cache);
-    if (!resets.complete) {
+    if (!clocks.resets_complete) {
       livehd::diag::err(from_pass, "activation-reset-structural", "time")
           .msg("conditional instance `{}` in `{}` has reset state whose reset cone is not reducible to a declared input",
                gu::debug_name(inst),
@@ -4012,35 +4045,40 @@ int gate_activation_clocks(hhds::Graph* g, std::string_view from_pass, Clock_por
           .emit();
       continue;
     }
-    if (resets.ports.size() > 1) {
-      livehd::diag::err(from_pass, "activation-reset-ambiguous", "time")
-          .msg("conditional instance `{}` in `{}` has {} structural reset inputs; its clock/reset domain mapping is ambiguous",
-               gu::debug_name(inst),
-               g->get_name(),
-               resets.ports.size())
-          .hint("a conditionally called module must expose at most one reset domain until per-clock reset mapping is represented")
-          .emit();
-      continue;
-    }
-
-    // RESOLVE the reset binding before minting anything. Every early exit past
-    // this point must leave the graph untouched: the enable cone below CREATES
-    // nodes, and a `continue` taken after building it leaves EQ/Or nodes with
-    // no consumer -- speculative orphans on a phase whose whole contract is
-    // idempotence.
-    hhds::Pin_class reset_driver;
-    bool            reset_active_low = false;
-    if (!resets.ports.empty()) {
-      const auto& rp = resets.ports.front();
-      auto        it = bound.find(rp.port_id);
-      if (it == bound.end() || it->second.is_invalid()) {
-        livehd::diag::err(from_pass, "activation-reset-unbound", "time")
-            .msg("conditional instance `{}` in `{}` leaves its structural reset input unbound", gu::debug_name(inst), g->get_name())
-            .emit();
-        continue;
+    const auto port_name = [&](uint32_t pid) -> std::string {
+      if (const auto it = names.find(pid); it != names.end()) {
+        return it->second;
       }
-      reset_driver     = it->second;
-      reset_active_low = rp.active_low;
+      return std::to_string(pid);
+    };
+    // Validate every domain before creating gates or rewiring the instance.
+    bool valid = true;
+    for (const auto& [clock, resets] : clocks.resets) {
+      if (resets.size() > 1) {
+        livehd::diag::err(from_pass, "activation-reset-ambiguous", "time")
+            .msg("conditional instance `{}` in `{}` clocks state with independent reset bindings on port `{}`",
+                 gu::debug_name(inst),
+                 g->get_name(),
+                 port_name(clock))
+            .hint("use a distinct clock port per reset domain for conditional activation")
+            .emit();
+        valid = false;
+        break;
+      }
+      const auto rit = bound.find(resets.front().port_id);
+      if (rit == bound.end() || rit->second.is_invalid()) {
+        livehd::diag::err(from_pass, "activation-reset-unbound", "time")
+            .msg("conditional instance `{}` in `{}` leaves its reset input `{}` unbound",
+                 gu::debug_name(inst),
+                 g->get_name(),
+                 port_name(resets.front().port_id))
+            .emit();
+        valid = false;
+        break;
+      }
+    }
+    if (!valid) {
+      continue;
     }
 
     // ROUND-TRIP idempotence (the second decline): a clock driver whose cone
@@ -4049,7 +4087,7 @@ int gate_activation_clocks(hhds::Graph* g, std::string_view from_pass, Clock_por
     // read back through a Verilog front end reaches the clock port through the
     // gate's own enable latch. Wrapping it again is not redundant but WRONG:
     // the fresh cell latches the guard ALONE (a re-read callee folds its sync
-    // reset into a data mux, so reset_input_ports sees no reset port to OR
+    // reset into a data mux, so the structural walk sees no reset port to OR
     // in), which withholds every reset edge while the call is inactive --
     // measured as the callee's state never leaving its power-on value
     // (conditional_state_call: ref=0, impl=255 after reset). The pin-identity
@@ -4075,19 +4113,17 @@ int gate_activation_clocks(hhds::Graph* g, std::string_view from_pass, Clock_por
       continue;
     }
 
-    hhds::Pin_class enable = nonzero1(g, guard);
-    if (!reset_driver.is_invalid()) {
-      auto reset_asserted = nonzero1(g, reset_driver);
-      if (reset_active_low) {
-        reset_asserted = logical_not1(g, reset_asserted);
-      }
-      enable = logical_or1(g, enable, reset_asserted);
-    }
-
+    const auto active = nonzero1(g, guard);
     for (const auto pid : ports_to_gate) {
-      auto bit = bound.find(pid);
-      if (bit == bound.end() || bit->second.is_invalid()) {
-        continue;
+      const auto bit    = bound.find(pid);
+      auto       enable = active;
+      if (const auto domain = clocks.resets.find(pid); domain != clocks.resets.end()) {
+        const auto& rp       = domain->second.front();
+        auto        asserted = nonzero1(g, bound.at(rp.port_id));
+        if (rp.active_low) {
+          asserted = logical_not1(g, asserted);
+        }
+        enable = logical_or1(g, active, asserted);
       }
 
       // Idempotence without confusing a design-authored gate for this one:
