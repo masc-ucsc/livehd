@@ -316,6 +316,20 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(json.loads(repair.stdout)["prior_failure_nets"], 1)
         self.assertEqual(json.loads(repair.stdout)["violations"], {})
 
+    def test_targeted_repair_preserves_unselected_open(self):
+        self.with_vias()
+        frame = self.frame([f"- {name} BUF + FIXED ( {x} 270 ) N ;"
+                            for name, x in [("a", 108), ("b", 324), ("c", 216), ("d", 432)]],
+                           ["- n ( a Z ) ( b A ) ;", "- later ( c Z ) ( d A ) ;"])
+        self.run_router(frame, "--limit", "0", "--report", "feedback.tsv", output="routed.def")
+        (self.root / "targets").write_text("n\n")
+        repair = subprocess.run([FEEDBACK, "--targets", "targets", "--out", "focus", ".", "tech.lef", "cells.lef"],
+                                cwd=self.root, capture_output=True, text=True, check=True, timeout=10)
+        result = json.loads(repair.stdout)
+        self.assertEqual((result["targeted_unrouted"], result["previous_unrouted"]), (1, 2))
+        self.assertEqual(result["violations"], {"verify_nets_without_wires": 1})
+        self.assertEqual([r["net"] for r in result["first_failures"]], ["later"])
+
     def test_placement_home_socket(self):
         self.with_vias()
         (self.root / "in.def").write_text(self.two_cells().replace("( 108 270 )", "( 216 270 )"))

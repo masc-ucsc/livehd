@@ -96,6 +96,9 @@ def main():
     p.add_argument("--radius", type=int, default=540, help="access window radius in DEF units")
     p.add_argument("--all-pins", action="store_true", help="release access at every endpoint of the failed nets")
     p.add_argument(
+        "--targets", type=Path, help="repair listed open nets and their released neighbors in this round"
+    )
+    p.add_argument(
         "--protect-failures",
         action="append",
         type=Path,
@@ -118,6 +121,13 @@ def main():
     start = time.monotonic()
     with (args.previous / "feedback.tsv").open() as src:
         failed = [r for r in csv.DictReader(src, delimiter="\t") if r["status"] != "routed"]
+    previous = failed
+    if args.targets:
+        targets = set(args.targets.read_text().splitlines())
+        unknown = targets - {r["net"] for r in previous}
+        if not targets or unknown:
+            p.error(f"expected open net names from the previous report; unknown names: {sorted(unknown)[:5]}")
+        failed = [r for r in previous if r["net"] in targets]
     findings = []
     report = args.previous / "findings.tsv"
     if report.is_file():
@@ -126,6 +136,7 @@ def main():
                 r
                 for r in csv.DictReader(src, delimiter="\t")
                 if r["kind"] not in ("no-wires", "cell-off-site", "cell-overlap")
+                and (not args.targets or targets.intersection(r["nets"].partition(" (")[0].split()))
             ]
     if not failed and not findings:
         p.error("previous report has no signal routing failures or geometry findings")
@@ -148,6 +159,12 @@ def main():
     (folder / "released.json").write_text(json.dumps(released))
     first = folder / "priority"
     only = folder / "first.txt"
+    selected = []
+    if args.targets:
+        repair_list = folder / "repair.txt"
+        cohort = priority.union(name.replace(r"\/", "/") for name in released)
+        repair_list.write_text("".join(name + "\n" for name in sorted(cohort)))
+        selected = ["--only", repair_list]
     only.write_text("".join(n + "\n" for n in sorted(priority)))
     opts = [args.router, *ROUTE, "--time-limit", str(args.seconds), "--final-passes", "3"]
     route(
@@ -173,6 +190,7 @@ def main():
             "--chain",
             "4",
             "--tile-move",
+            *selected,
             "--report",
             folder / "feedback.tsv",
             "--verify-report",
@@ -183,9 +201,27 @@ def main():
         ],
         folder,
     )
+    if args.targets:
+        # The router reports only its mutable cohort. Unselected opens keep
+        # their original failed-pin diagnostics. The full DEF verifier still
+        # checks every net, including all frozen conductors and cell poses.
+        with (folder / "feedback.tsv").open() as src:
+            rows = csv.DictReader(src, delimiter="\t")
+            fields = rows.fieldnames
+            reported = {row["net"] for row in rows}
+        with (folder / "findings.tsv").open() as src:
+            bare = {r["nets"] for r in csv.DictReader(src, delimiter="\t") if r["kind"] == "no-wires"}
+        old_rows = {r["net"]: r for r in previous}
+        with (folder / "feedback.tsv").open("a") as dst:
+            writer = csv.DictWriter(
+                dst, fieldnames=fields, delimiter="\t", lineterminator="\n", extrasaction="ignore"
+            )
+            for net in sorted(bare - reported):
+                writer.writerow(old_rows.get(net, {"net": net, "status": "unattempted", "why": "outside-cohort"}))
     result = dict(
         feedback(folder),
-        previous_unrouted=len(failed),
+        previous_unrouted=len(previous),
+        targeted_unrouted=len(failed),
         prior_failure_nets=len({name for name, _ in prior}),
         previous_geometry_findings=len(findings),
         released=len(released),

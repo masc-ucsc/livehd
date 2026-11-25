@@ -390,3 +390,9 @@ different cut, or `--plan` to keep an existing floorplan's home regions.
 A resident status reply counts deadline-deferred nets separately and lists
 attempted failures first. Within clock and data groups, retry gives nets
 that missed the preceding deadline a first search.
+
+For a congested assembly, put selected open net names from `feedback.tsv`
+in a file and pass `rf_feedback --targets nets.txt --pin-neighbors`. The
+repair pass reopens nearby routes and works on that cohort. A fresh
+whole-design readback preserves open nets outside the selected region in
+the feedback for subsequent rounds.
