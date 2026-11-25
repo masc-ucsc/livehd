@@ -19,8 +19,25 @@
 #include "rapidjson/writer.h"
 
 namespace lhd {
+namespace fs = std::filesystem;
+
+std::string physical_file_digest(const fs::path& path) {
+  std::ifstream input(path, std::ios::binary);
+  if (!input) {
+    throw std::runtime_error("cannot read physical cache input: " + path.string());
+  }
+  llvm::SHA256            hash;
+  std::array<char, 65536> bytes;
+  while (input.read(bytes.data(), bytes.size()) || input.gcount() > 0) {
+    hash.update(llvm::StringRef(bytes.data(), input.gcount()));
+  }
+  if (input.bad()) {
+    throw std::runtime_error("incomplete physical cache input: " + path.string());
+  }
+  return llvm::toHex(hash.final(), /*LowerCase=*/true);
+}
+
 namespace {
-namespace fs    = std::filesystem;
 using Inventory = std::map<std::string, std::string>;
 constexpr std::array kPlaceArtifacts{"out.def",
                                      "metadata.json",
@@ -41,22 +58,6 @@ constexpr std::array kPlaceArtifacts{"out.def",
                                      "sat_route_grid.json",
                                      "sat_route_guard.json"};
 
-std::string digest(const fs::path& path) {
-  std::ifstream input(path, std::ios::binary);
-  if (!input) {
-    throw std::runtime_error("cannot read physical cache input: " + path.string());
-  }
-  llvm::SHA256            hash;
-  std::array<char, 65536> bytes;
-  while (input.read(bytes.data(), bytes.size()) || input.gcount() > 0) {
-    hash.update(llvm::StringRef(bytes.data(), input.gcount()));
-  }
-  if (input.bad()) {
-    throw std::runtime_error("incomplete physical cache input: " + path.string());
-  }
-  return llvm::toHex(hash.final(), /*LowerCase=*/true);
-}
-
 Inventory inventory(const fs::path& directory) {
   Inventory result;
   for (const auto& entry : fs::recursive_directory_iterator(directory)) {
@@ -64,7 +65,7 @@ Inventory inventory(const fs::path& directory) {
       throw std::runtime_error("symlink in physical cache generation");
     }
     if (entry.is_regular_file()) {
-      result.emplace(entry.path().lexically_relative(directory).generic_string(), digest(entry.path()));
+      result.emplace(entry.path().lexically_relative(directory).generic_string(), physical_file_digest(entry.path()));
     }
   }
   return result;
@@ -73,7 +74,7 @@ Inventory inventory(const fs::path& directory) {
 Inventory dependencies(const std::vector<std::string>& paths) {
   Inventory result;
   for (const auto& path : paths) {
-    result.emplace(path, digest(path));
+    result.emplace(path, physical_file_digest(path));
   }
   return result;
 }
@@ -195,7 +196,7 @@ fs::path Physical_cache::placement_hint(fs::path* clock_report) const {
       const auto found = manifest["artifacts"].FindMember(artifact);
       const auto path  = directory_ / "artifacts" / artifact;
       if (found == manifest["artifacts"].MemberEnd() || !found->value.IsString() || fs::is_symlink(path)
-          || !fs::is_regular_file(path) || digest(path) != found->value.GetString()) {
+          || !fs::is_regular_file(path) || physical_file_digest(path) != found->value.GetString()) {
         return {};
       }
       return path;

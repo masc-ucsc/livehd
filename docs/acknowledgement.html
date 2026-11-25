@@ -503,7 +503,7 @@ Hover a marker for the details; <code>grep -n "todo-check\|fixme" docs/acknowled
 <h4>Steiner trees and net topology</h4>
 <ul class="refs">
 <li>C. Chu, Y.-C. Wong. <em>FLUTE: Fast Lookup Table Based Rectilinear Steiner Minimal Tree Algorithm for VLSI Design.</em> IEEE TCAD 27(1), 2008.<span class="use"><code>pass/place/steiner_topology.cpp</code>, signal routing, RSMT-RUDY and the detour reference in <code>tools/routetruth</code>.</span></li>
-<li>C.J. Alpert, T.C. Hu, J.H. Huang, A.B. Kahng, D. Karger. <em>Prim-Dijkstra Tradeoffs for Improved Performance-Driven Routing Tree Design.</em> IEEE TCAD 14(7), 1995.<span class="use">The driver-aware RC tree in <code>pass/place/steiner_topology.hpp</code>; the pin order of the experimental <code>tools/routefirst/rf_route</code>.</span></li>
+<li>C.J. Alpert, T.C. Hu, J.H. Huang, A.B. Kahng, D. Karger. <em>Prim-Dijkstra Tradeoffs for Improved Performance-Driven Routing Tree Design.</em> IEEE TCAD 14(7), 1995.<span class="use">The driver-aware RC tree in <code>pass/place/steiner_topology.hpp</code>; the pin order of the router in <code>pass/route/route.cpp</code>.</span></li>
 <li>C.J. Alpert, W.-K. Chow, K. Han, A.B. Kahng, Z. Li, D. Liu, S. Venkatesh. <em>Prim-Dijkstra Revisited: Achieving Superior Timing-driven Routing Trees.</em> ISPD 2018.</li>
 <li>H. Zhou, N. Shenoy, W. Nicholls. <em>Efficient Minimum Spanning Tree Construction without Delaunay Triangulation.</em> Information Processing Letters 81(5), 2002.<span class="use">Close idea: the quadrant visibility graph in <code>steiner_topology.cpp</code>.</span></li>
 </ul>
@@ -519,7 +519,7 @@ Hover a marker for the details; <code>grep -n "todo-check\|fixme" docs/acknowled
 LiveHD exchanges site-aligned strips and gives both workers complementary row exclusions.</span></li>
 <li>M. Pan, C. Chu. <em>FastRoute: A Step to Integrate Global Routing into Placement.</em> ICCAD 2006; Y. Xu, Y. Zhang, C. Chu. <em>FastRoute 4.0.</em> ASP-DAC 2009.<span class="use">L/Z pattern routing adapted in <code>pass/place/fast_route_pattern.cpp</code>.</span></li>
 <li>L. McMurchie, C. Ebeling. <em>PathFinder: A Negotiation-Based Performance-Driven Router for FPGAs.</em> FPGA 1995.<span class="use">Negotiated congestion in legroute and buffering.</span></li>
-<li>C.Y. Lee. <em>An Algorithm for Path Connections and Its Applications.</em> IRE Trans. EC-10(3), 1961.<span class="use">Maze routing (<code>signal_maze.cpp</code>, <code>tools/routefirst/rf_route.cpp</code>).</span></li>
+<li>C.Y. Lee. <em>An Algorithm for Path Connections and Its Applications.</em> IRE Trans. EC-10(3), 1961.<span class="use">Maze routing (<code>signal_maze.cpp</code>, <code>pass/route/route.cpp</code>).</span></li>
 <li>P.E. Hart, N.J. Nilsson, B. Raphael. <em>A Formal Basis for the Heuristic Determination of Minimum Cost Paths.</em> IEEE Trans. SSC 4(2), 1968; I. Pohl. <em>Heuristic Search Viewed as Path Finding in a Graph.</em> Artificial Intelligence 1, 1970.<span class="use">A* and weighted A* in legroute.</span></li>
 <li>E.W. Dijkstra. <em>A Note on Two Problems in Connexion with Graphs.</em> Numerische Mathematik 1, 1959.</li>
 </ul>

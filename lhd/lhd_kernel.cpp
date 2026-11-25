@@ -8,6 +8,7 @@
 
 #include "diag.hpp"
 #include "lhd_kernel_internal.hpp"
+#include "lhd_route_options.hpp"
 #include "pass.hpp"
 #include "synth_policy.hpp"
 
@@ -43,6 +44,12 @@ std::string canonical_set_key(std::string_view key, std::string_view ctx) {
   // unknown-sim-flag error instead of resolving somewhere else.
   if (key.size() > 4 && key.substr(0, 4) == "sim.") {
     return std::string{key};
+  }
+  if (key.starts_with("route.")) {
+    return std::string(key);
+  }
+  if (ctx == "route" && key.find('.') == std::string_view::npos) {
+    return "route." + std::string(key);
   }
   // Same for the `synth.*` command namespace (synth_command, kSynthSetOptions).
   if (key.size() > 6 && key.substr(0, 6) == "synth.") {
@@ -297,6 +304,9 @@ std::vector<Set_option> list_set_options() {
     }
     out.push_back(Set_option{std::format("sim.{}", s.name), "sim", std::string{s.default_value}, std::string{s.help}});
   }
+  for (const auto& setting : route_settings) {
+    out.push_back(Set_option{std::format("route.{}", setting.name), "route", "", std::string(setting.help)});
+  }
   // The `synth.*` command namespace (synth_command), same single-source rule.
   for (const auto& s : kSynthSetOptions) {
     if (std::string_view{s.help}.starts_with("DEPRECATED") || std::string_view{s.help}.starts_with("INTERNAL")) {
@@ -388,6 +398,8 @@ void run_engine_command(Options& opts, Result& res) {
     pass_command(opts, res);
   } else if (opts.command == "sim") {
     sim_command(opts, res);
+  } else if (opts.command == "route") {
+    route_command(opts, res);
   } else if (opts.command == "synth") {
     synth_command(opts, res);
   } else {

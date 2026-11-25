@@ -69,6 +69,26 @@ bool is_known_kind(std::string_view kind, bool output) {
   return std::find(kinds.begin(), kinds.end(), kind) != kinds.end();
 }
 
+bool is_route_input(std::string_view kind) {
+  for (auto name : {"def",
+                    "lef",
+                    "plan",
+                    "route",
+                    "reuse",
+                    "timing",
+                    "timing-eco",
+                    "targets",
+                    "protect-failures",
+                    "only",
+                    "clock-nets",
+                    "reserve-cells"}) {
+    if (kind == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // "KIND:PATH" -> Typed_path. Throws usage on a missing ':' or unknown kind.
 Typed_path parse_typed(std::string_view flag, std::string_view arg, bool output) {
   auto pos = arg.find(':');
@@ -78,7 +98,7 @@ Typed_path parse_typed(std::string_view flag, std::string_view arg, bool output)
                     "see `lhd list emit-kinds` for the KIND vocabulary"};
   }
   Typed_path tp{canonical_kind(arg.substr(0, pos)), std::string(arg.substr(pos + 1))};
-  if (!is_known_kind(tp.kind, output)) {
+  if (!is_known_kind(tp.kind, output) && (output || !is_route_input(tp.kind))) {
     throw Lhd_error{"usage",
                     std::format("unknown {} kind '{}' in '{}'", output ? "output" : "input", tp.kind, arg),
                     "see `lhd list emit-kinds` for the KIND vocabulary"};
@@ -803,7 +823,8 @@ Options parse_args(int argc, char** argv) {
                         "run `lhd pyrope lsp` (or point your editor's launcher at it)"};
       }
       if (a == "compile" || a == "lec" || a == "scan" || a == "pyrope" || a == "list" || a == "describe" || a == "version"
-          || a == "help" || a == "tool" || a == "tools" || a == "pass" || a == "sim" || a == "synth" || a == "formal") {
+          || a == "help" || a == "tool" || a == "tools" || a == "pass" || a == "sim" || a == "synth" || a == "route"
+          || a == "formal") {
         // tool keeps its positionals raw and ORDERED in opts.files: the verb
         // (cat/grep/diff/tree), the filter terms (name:/color:/from:…), and the
         // ln:/lg: inputs all keep their place — tool_command classifies them.
@@ -820,6 +841,8 @@ Options parse_args(int argc, char** argv) {
       } else {
         throw Lhd_error{"usage", std::format("unknown command '{}'", a), "run `lhd help` for the command list"};
       }
+    } else if (opts.command == "route" && a.find(':') != std::string_view::npos) {
+      opts.ins.emplace_back(parse_typed("--in", a, false));
     } else if (opts.command == "compile" && opts.language.empty() && opts.files.empty() && opts.ins.empty() && opts.in_dirs.empty()
                && (a == "verilog" || a == "pyrope")) {
       // The optional language word: the first positional after compile (flags
@@ -878,7 +901,8 @@ Options parse_args(int argc, char** argv) {
   // and reports its own real error.
   if (!want_help && n_user_tokens == 1
       && (opts.command == "compile" || opts.command == "lec" || opts.command == "scan" || opts.command == "tool"
-          || opts.command == "pass" || opts.command == "sim" || opts.command == "synth" || opts.command == "formal")) {
+          || opts.command == "pass" || opts.command == "sim" || opts.command == "synth" || opts.command == "route"
+          || opts.command == "formal")) {
     want_help = true;
   }
 
@@ -891,6 +915,14 @@ Options parse_args(int argc, char** argv) {
   if (opts.command.empty()) {
     opts.command = "help";
     return opts;
+  }
+
+  if (opts.command != "route" && opts.command != "help") {
+    for (const auto& in : opts.ins) {
+      if (is_route_input(in.kind)) {
+        throw Lhd_error{"usage", "input " + in.kind + ": belongs to lhd route", ""};
+      }
+    }
   }
 
   // Fold --config file defaults into sets BEFORE anything hashes or

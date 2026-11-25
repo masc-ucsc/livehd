@@ -1,6 +1,6 @@
 # lhd developer tools
 
-`lhd` is the stateless driver for compile, simulation, equivalence, and synthesis.
+`lhd` is the stateless driver for compile, simulation, equivalence, synthesis, and detailed routing.
 Use `lhd help` or `lhd describe <command>` for the command's accepted arguments.
 
 `lhd tool sta lg:net --top top` queries saved critical-path annotations, with
@@ -10,6 +10,21 @@ pass.opentimer.critical=true` (also accepted by `lhd synth`). The default margin
 is 5% of the target clock period; targets come from SDC or
 `--set pass.opentimer.targets=core:1ns,bus:4ns`. See
 [STA annotations and queries](../pass/opentimer/README.md#critical-path-annotations-and-queries).
+
+## Detailed routing
+
+Build `//lhd` and use the DEF bundle exported by `lhd synth --emit-dir def:placed` as the routing input. The bundle records the order of the technology, cell and macro LEFs in `lefs.json`. An explicit frame can also be passed as `def:design.def lef:tech.lef lef:cells.lef`.
+
+```sh
+lhd route def:placed --workdir flat
+lhd route chunk def:placed plan:fp_chunks.json --set lhd.jobs=4 --workdir W
+lhd route repair def:placed route:W/route --set route.pin_neighbors=true --workdir W --emit-dir def:routed
+lhd route verify def:routed
+```
+
+For a rectangular grid, use `--set route.grid=2x2` in place of the placement plan. The chunk coordinator schedules independent workers using the same `lhd` executable. With `--gui`, the resident router accepts placement-style agent requests at `W/route.sock` until the agent sends `finish`. In a second terminal, use `tools/lhd_gui.py --socket W/route.sock status`.
+
+Every completed invocation returns the standard result envelope. The `qor.complete` flag requires zero open nets and zero native geometry findings. Inspect `qor.unrouted` and `qor.violations` for the counts. `lhd route verify` checks the existing wires. A named workdir keeps its findings under `W/route-verify`. `--result-json FILE` saves the envelope. `W/route` points to the latest completed checkpoint. Earlier trials remain in `W/route-runs`. Repeating a chunk operation in the same workspace reuses compatible worker packets. Use `reuse:CHECKPOINT` to choose a specific source or `--set lhd.incremental=false` for fresh workers. `lhd route --help` and `lhd list options route` describe the routing settings.
 
 ## ABC-free build
 

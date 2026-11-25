@@ -754,6 +754,11 @@ std::string compute_run_id(const Options& opts) {
     buf += std::format("|raw:{}", a);
   }
 
+  if (opts.command == "route") {
+    buf += route_input_identity(opts);
+    return std::format("{:016x}", lh::woothash64(buf.data(), buf.size(), 1021));
+  }
+
   // Each input carries the kind and top that scope it: a lec --impl/--ref
   // lg: side is read only from its (per-side) top down, so its hash covers
   // just that slice; every other input — including --lib model libraries,

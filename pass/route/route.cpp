@@ -10,6 +10,9 @@
 //   R3 every piece has the minimum length;
 //   R4 cuts of one cut layer keep the Euclidean cut spacing.
 // A wire is legal when it is inserted, so the router never negotiates over shorts.
+#include "route.hpp"
+#include "pass/route/route_identity.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -181,24 +184,7 @@ struct Net {
   bool                 gr_on = false;
 };
 
-struct Options {
-  std::string order   = "short";
-  double      m2_cost = 1.6, m3_cost = 1.1, via_cost = 40, hi_cost = 1.0, hmin = 1.0, hweight = 1.0, pd_alpha = 0.0;
-  int         pd_min_pins = 4;
-  int         margin      = 720;
-  int64_t     max_expand  = 4000000;
-  int         limit       = -1;
-  int ripup = 0, rip_width = 4, explain = 0, shift = 0, shift_reach = 4, final_passes = 0, flop_reach = 0, shift_cap = 8, chain = 0;
-  bool        verbose = false, aim_link = true;
-  std::string trace, timing, clock_nets, verify_report, only, reserve_cells;
-  bool        prelegal = false, tile_move = false, reserve = false, verify = false;
-  double      anchor_frac   = 0;
-  double      time_limit    = 0;  // CPU seconds for the routing loop; 0 is no limit
-  double      long_frac     = 0;  // share of the data nets, by box, routed ahead of the others
-  double      space_frac    = 0;  // worst-slack share of the nets whose long wires keep the next tracks empty
-  int         space_min_len = 5000, space_min_layer = 1;
-  double      crit_frac = 0;
-};
+using livehd::routing::Settings;
 
 struct Router {
   ph::Technology         tech;
@@ -206,7 +192,7 @@ struct Router {
   std::vector<Layer>     L;   // M2..M7
   std::vector<Cut_layer> CL;  // V1..V6 ; CL[k] joins L[k-1] (or M1) and L[k]
   std::vector<Net>       nets;
-  Options                opt;
+  Settings               opt;
   int64_t                nstates = 0;
   struct Node {
     float   g     = std::numeric_limits<float>::infinity();
@@ -4117,112 +4103,105 @@ struct Router {
     out_file.close();
   }
 };
-}  // namespace
-
-int main(int argc, char** argv) try {
-  Router                   r;
-  std::vector<std::string> pos;
-  std::string              report;
-  bool                     agent = false;
-  for (int i = 1; i < argc; ++i) {
-    const std::string a    = argv[i];
-    const auto        next = [&] {
-      if (i + 1 >= argc) {
+void parse_options(Settings& opt, const std::vector<std::string>& args, std::vector<std::string>& pos) {
+  for (size_t i = 0; i < args.size(); ++i) {
+    const auto& a    = args[i];
+    const auto  next = [&] {
+      if (i + 1 >= args.size()) {
         throw std::runtime_error("missing value for " + a);
       }
-      return std::string(argv[++i]);
+      return args[++i];
     };
     if (a == "--agent") {
-      agent = true;
+      opt.agent = true;
     } else if (a == "--order") {
-      r.opt.order = next();
+      opt.order = next();
     } else if (a == "--m2-cost") {
-      r.opt.m2_cost = std::stod(next());
+      opt.m2_cost = std::stod(next());
     } else if (a == "--m3-cost") {
-      r.opt.m3_cost = std::stod(next());
+      opt.m3_cost = std::stod(next());
     } else if (a == "--hweight") {
-      r.opt.hweight = std::stod(next());
+      opt.hweight = std::stod(next());
     } else if (a == "--pd-alpha") {
-      r.opt.pd_alpha = std::stod(next());
+      opt.pd_alpha = std::stod(next());
     } else if (a == "--hi-cost") {
-      r.opt.hi_cost = std::stod(next());
+      opt.hi_cost = std::stod(next());
     } else if (a == "--via-cost") {
-      r.opt.via_cost = std::stod(next());
+      opt.via_cost = std::stod(next());
     } else if (a == "--margin") {
-      r.opt.margin = std::stoi(next());
+      opt.margin = std::stoi(next());
     } else if (a == "--limit") {
-      r.opt.limit = std::stoi(next());
+      opt.limit = std::stoi(next());
     } else if (a == "--report") {
-      report = next();
+      opt.report = next();
     } else if (a == "--ripup") {
-      r.opt.ripup = std::stoi(next());
+      opt.ripup = std::stoi(next());
     } else if (a == "--rip-width") {
-      r.opt.rip_width = std::stoi(next());
+      opt.rip_width = std::stoi(next());
     } else if (a == "--budget") {
-      r.opt.max_expand = std::stoll(next());
+      opt.max_expand = std::stoll(next());
     } else if (a == "--shift") {
-      r.opt.shift = std::stoi(next());
+      opt.shift = std::stoi(next());
     } else if (a == "--shift-reach") {
-      r.opt.shift_reach = std::stoi(next());
+      opt.shift_reach = std::stoi(next());
     } else if (a == "--flop-reach") {
-      r.opt.flop_reach = std::stoi(next());
+      opt.flop_reach = std::stoi(next());
     } else if (a == "--shift-cap") {
-      r.opt.shift_cap = std::stoi(next());
+      opt.shift_cap = std::stoi(next());
     } else if (a == "--chain") {
-      r.opt.chain = std::stoi(next());
+      opt.chain = std::stoi(next());
     } else if (a == "--final-passes") {
-      r.opt.final_passes = std::stoi(next());
+      opt.final_passes = std::stoi(next());
     } else if (a == "--explain") {
-      r.opt.explain = std::stoi(next());
+      opt.explain = std::stoi(next());
     } else if (a == "--aim-tree") {
-      r.opt.aim_link = false;
+      opt.aim_link = false;
     } else if (a == "--clock-nets") {
-      r.opt.clock_nets = next();
+      opt.clock_nets = next();
     } else if (a == "--long-frac") {
-      r.opt.long_frac = std::stod(next());
+      opt.long_frac = std::stod(next());
     } else if (a == "--only") {
-      r.opt.only = next();
+      opt.only = next();
     } else if (a == "--prelegal") {
-      r.opt.prelegal = true;
+      opt.prelegal = true;
     } else if (a == "--tile-move") {
-      r.opt.tile_move = true;
+      opt.tile_move = true;
     } else if (a == "--reserve") {
-      r.opt.reserve = true;
+      opt.reserve = true;
     } else if (a == "--reserve-cells") {
-      r.opt.reserve_cells = next();
+      opt.reserve_cells = next();
     } else if (a == "--verify-report") {
-      r.opt.verify        = true;
-      r.opt.verify_report = next();
+      opt.verify        = true;
+      opt.verify_report = next();
     } else if (a == "--verify") {
-      r.opt.verify = true;
+      opt.verify = true;
     } else if (a == "--space-frac") {
-      r.opt.space_frac = std::stod(next());
+      opt.space_frac = std::stod(next());
     } else if (a == "--space-min-len") {
-      r.opt.space_min_len = std::stoi(next());
+      opt.space_min_len = std::stoi(next());
     } else if (a == "--space-min-layer") {
-      r.opt.space_min_layer = std::stoi(next());
+      opt.space_min_layer = std::stoi(next());
     } else if (a == "--time-limit") {
-      r.opt.time_limit = std::stod(next());
+      opt.time_limit = std::stod(next());
     } else if (a == "--anchor-frac") {
-      r.opt.anchor_frac = std::stod(next());
+      opt.anchor_frac = std::stod(next());
     } else if (a == "--timing") {
-      r.opt.timing = next();
+      opt.timing = next();
     } else if (a == "--crit-frac") {
-      r.opt.crit_frac = std::stod(next());
+      opt.crit_frac = std::stod(next());
     } else if (a == "--trace") {
-      r.opt.trace = next();
+      opt.trace = next();
     } else if (a == "-v") {
-      r.opt.verbose = true;
+      opt.verbose = true;
     } else if (a.starts_with("--")) {
       throw std::runtime_error("unknown rf_route option: " + a);
     } else {
       pos.push_back(a);
     }
   }
-  if (pos.size() < 4) {
-    std::cerr << "usage: rf_route [options] input.def output.def tech.lef cells.lef ...\n";
-    return 2;
-  }
+}
+
+void run(Router& r, const livehd::routing::Frame& frame, const std::string& report, bool agent, std::ostream& summary) {
   for (double fraction : {r.opt.anchor_frac, r.opt.crit_frac, r.opt.space_frac, r.opt.long_frac, r.opt.pd_alpha}) {
     if (!(fraction >= 0 && fraction <= 1)) {
       throw std::runtime_error("routing fractions and pd-alpha must be between 0 and 1");
@@ -4234,16 +4213,7 @@ int main(int argc, char** argv) try {
     }
   }
   const double t0 = now_s(), c0 = cpu_s();
-  r.setup({pos.begin() + 2, pos.end()}, pos[0]);
-  if (pos[1] == "-") {  // check an existing routed DEF only
-    r.verify(pos[0]);
-    for (const auto& [k, v] : r.stat) {
-      if (k.starts_with("verify_")) {
-        std::cout << k << ' ' << v << '\n';
-      }
-    }
-    return 0;
-  }
+  r.setup(frame.lefs, frame.input_def);
   const double t1 = now_s(), c1 = cpu_s();
   r.run();
   double route_wall = now_s() - t1, route_cpu = cpu_s() - c1;
@@ -4329,9 +4299,9 @@ int main(int argc, char** argv) try {
     }
   }
   const double t2 = now_s();
-  r.write_def(pos[0], pos[1]);
+  r.write_def(frame.input_def, frame.output_def);
   if (r.opt.verify) {
-    r.verify(pos[1]);
+    r.verify(frame.output_def);
   }
   const double       t3 = now_s();
   std::ostringstream o;
@@ -4365,9 +4335,75 @@ int main(int argc, char** argv) try {
     }
     f.close();
   }
-  std::cout << o.str();
+  summary << o.str();
+}
+}  // namespace
+
+namespace livehd::routing {
+
+Settings parse_settings(const std::vector<std::string>& args) {
+  Settings                 settings;
+  std::vector<std::string> positional;
+  parse_options(settings, args, positional);
+  if (!positional.empty()) {
+    throw std::invalid_argument("unexpected routing argument: " + positional.front());
+  }
+  return settings;
+}
+
+static Outcome outcome(const Router& router, std::string stats) {
+  Outcome result{std::move(stats), {}};
+  for (const auto& [name, value] : router.stat) {
+    if (name.starts_with("verify_") && value) {
+      result.findings.emplace(name, value);
+    }
+  }
+  return result;
+}
+
+Outcome route_frame(const Frame& frame, const Settings& settings) {
+  Router router;
+  router.opt = settings;
+  std::ostringstream summary;
+  run(router, frame, settings.report, settings.agent, summary);
+  return outcome(router, summary.str());
+}
+
+Outcome verify_frame(const Frame& frame, const Settings& settings) {
+  Router router;
+  router.opt = settings;
+  router.setup(frame.lefs, frame.input_def);
+  router.verify(frame.input_def);
+  std::ostringstream counts;
+  for (const auto& [key, value] : router.stat) {
+    if (key.starts_with("verify_")) {
+      counts << key << ' ' << value << '\n';
+    }
+  }
+  return outcome(router, counts.str());
+}
+
+int worker(int argc, char** argv) try {
+  if (argc == 2 && std::string_view(argv[1]) == "--identity") {
+    std::cout << LHD_ROUTE_ID << '\n';
+    return 0;
+  }
+  Settings                 settings;
+  std::vector<std::string> positional;
+  parse_options(settings, {argv + 1, argv + argc}, positional);
+  if (positional.size() < 3) {
+    throw std::invalid_argument("routing worker expects input DEF, output DEF and ordered LEFs");
+  }
+  Frame frame{
+      positional[0],
+      positional[1],
+      {positional.begin() + 2, positional.end()}
+  };
+  const auto result = frame.output_def == "-" ? verify_frame(frame, settings) : route_frame(frame, settings);
+  std::cout << result.stats;
   return 0;
 } catch (const std::exception& e) {
   std::cerr << e.what() << '\n';
   return 1;
 }
+}  // namespace livehd::routing

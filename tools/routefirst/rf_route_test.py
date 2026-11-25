@@ -56,7 +56,7 @@ class RouteTest(unittest.TestCase):
 
     def run_router(self, frame, *opts, output="out.def", success=True):
         (self.root / "in.def").write_text(frame)
-        run = subprocess.run([ROUTER, *opts, "in.def", output, "tech.lef", "cells.lef"],
+        run = subprocess.run([ROUTER, "--route-worker", *opts, "in.def", output, "tech.lef", "cells.lef"],
                              cwd=self.root, capture_output=True, text=True, timeout=10)
         if success:
             self.assertEqual(run.returncode, 0, run.stderr)
@@ -295,7 +295,7 @@ class RouteTest(unittest.TestCase):
     def test_retry_after_deadline(self):
         self.with_vias()
         (self.root / "in.def").write_text(self.two_cells())
-        run = subprocess.run([ROUTER, "--agent", "--time-limit", "0.000000001", "--verify",
+        run = subprocess.run([ROUTER, "--route-worker", "--agent", "--time-limit", "0.000000001", "--verify",
                               "in.def", "out.def", "tech.lef", "cells.lef"],
                              cwd=self.root, input="retry 300000 1 1 2\nfinish\n",
                              capture_output=True, text=True, check=True, timeout=10)
@@ -318,7 +318,7 @@ class RouteTest(unittest.TestCase):
     def test_live_release_and_retry(self):
         self.with_vias()
         (self.root / "in.def").write_text(self.two_cells())
-        run = subprocess.run([ROUTER, "--agent", "--verify", "in.def", "out.def", "tech.lef", "cells.lef"],
+        run = subprocess.run([ROUTER, "--route-worker", "--agent", "--verify", "in.def", "out.def", "tech.lef", "cells.lef"],
                              cwd=self.root, input="release n\nretry 300000 1 1 2\nfinish\n",
                              capture_output=True, text=True, check=True, timeout=10)
         ready, released, retried, final = run.stdout.split("\n", 3)
@@ -334,11 +334,56 @@ class RouteTest(unittest.TestCase):
         assignment.write_text("missing\n")
         self.assertIn("missing", self.run_router(self.two_cells(), "--only", str(assignment), success=False))
 
+    def test_lhd_route_bundle_chunk_and_repair(self):
+        self.with_vias()
+        bundle = self.root / "placed"
+        bundle.mkdir()
+        for name in ("tech.lef", "cells.lef"):
+            (self.root / name).rename(bundle / name)
+        (bundle / "lefs.json").write_text('["tech.lef","cells.lef"]')
+        (bundle / "pcrs_clock.sdc").write_text("# clock handoff\n")
+        (bundle / "out.def").write_text(self.two_cells())
+
+        def invoke(*args):
+            run = subprocess.run([ROUTER, *args, "--result-json", "result.json"], cwd=self.root,
+                                 text=True, capture_output=True, timeout=12)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            return json.loads((self.root / "result.json").read_text())
+
+        partial = invoke("route", "def:placed", "--workdir", "flat", "--set", "route.limit=0")
+        self.assertEqual(partial["qor"]["unrouted"], 1)
+        self.assertFalse(partial["qor"]["complete"])
+        fixed = invoke("route", "repair", "def:placed", "route:flat/route", "--workdir", "fixed")
+        self.assertEqual(fixed["qor"]["violations"], {})
+        (self.root / "routing.toml").write_text('[route]\ngrid = "2x1"\n')
+        chunk = invoke("route", "chunk", "--in", "def:placed", "--config", "routing.toml",
+                       "--set", "lhd.jobs=1", "--workdir", "chunk", "--emit-dir", "def:result")
+        self.assertEqual(chunk["qor"]["grid"], [2, 1])
+        self.assertEqual(chunk["qor"]["violations"], {})
+        self.assertEqual((self.root / "chunk/route/finish/routed.def").read_bytes(), (self.root / "result/out.def").read_bytes())
+        self.assertEqual((self.root / "result/pcrs_clock.sdc").read_bytes(), (bundle / "pcrs_clock.sdc").read_bytes())
+        self.assertEqual(json.loads((self.root / "result/lefs.json").read_text()), ["tech.lef", "cells.lef"])
+        reread = invoke("route", "verify", "def:result", "--workdir", "chunk")
+        self.assertTrue(reread["qor"]["complete"])
+        self.assertEqual(reread["command"], "route verify")
+        self.assertEqual(reread["qor"]["violations"], {})
+        reused = invoke("route", "chunk", "def:placed", "reuse:chunk/route", "--set", "grid=2x1", "--workdir", "reuse")
+        self.assertEqual(reused["qor"]["retained"], chunk["qor"]["retained"])
+        self.assertTrue((self.root / "reuse/route/worker-0").is_symlink())
+        published = (self.root / "chunk/route").resolve()
+        again = invoke("route", "chunk", "def:placed", "--set", "grid=2x1", "--workdir", "chunk")
+        self.assertEqual(again["qor"]["reused_workers"], 2)
+        self.assertNotEqual((self.root / "chunk/route").resolve(), published)
+        self.assertTrue((published / "finish/routed.def").is_file())
+        new = invoke("route", "chunk", "def:placed", "--set", "grid=1x1", "--workdir", "chunk")
+        self.assertEqual(new["qor"]["reused_workers"], 0)
+
+
     def test_parallel_chunks_and_feedback(self):
         self.with_vias()
         frame = self.two_cells().replace("( 720 720 )", "( 1440 720 )").replace("( 108 270 )", "( 216 270 )")
         (self.root / "in.def").write_text(frame)
-        args = [CHUNKS, "--grid", "2", "1", "--out", "trial",
+        args = [CHUNKS, "--lhd", ROUTER, "--grid", "2", "1", "--out", "trial",
                 "in.def", "tech.lef", "cells.lef"]
         trial = subprocess.run(args, cwd=self.root, capture_output=True, text=True, timeout=10)
         self.assertEqual(trial.returncode, 0, trial.stderr)
@@ -371,7 +416,7 @@ class RouteTest(unittest.TestCase):
                            ["- n ( a Z ) ( b A ) ;", "- later ( c Z ) ( d A ) ;"])
         self.run_router(frame, "--limit", "0", "--report", "feedback.tsv", output="routed.def")
         (self.root / "targets").write_text("n\n")
-        repair = subprocess.run([FEEDBACK, "--targets", "targets", "--out", "focus", ".", "tech.lef", "cells.lef"],
+        repair = subprocess.run([FEEDBACK, "--lhd", ROUTER, "--targets", "targets", "--out", "focus", ".", "tech.lef", "cells.lef"],
                                 cwd=self.root, capture_output=True, text=True, check=True, timeout=10)
         result = json.loads(repair.stdout)
         self.assertEqual((result["targeted_unrouted"], result["previous_unrouted"]), (1, 2))
@@ -387,7 +432,7 @@ class RouteTest(unittest.TestCase):
                             "      + ROUTED M4 ( 90 54 0 ) ( 306 * 0 ) ;"], pins)
         self.run_router(frame, "--limit", "0", "--report", "feedback.tsv", output="routed.def")
         for folder, extra, expected in (("all", [], ["high"]), ("lower", ["--pin-access-layers"], [])):
-            run = subprocess.run([FEEDBACK, "--all-pins", *extra, "--out", folder, ".", "tech.lef", "cells.lef"],
+            run = subprocess.run([FEEDBACK, "--lhd", ROUTER, "--all-pins", *extra, "--out", folder, ".", "tech.lef", "cells.lef"],
                                  cwd=self.root, capture_output=True, text=True, timeout=10)
             self.assertEqual(run.returncode, 0, run.stderr)
             self.assertEqual(json.loads((self.root / folder / "released.json").read_text()), expected)
@@ -403,7 +448,7 @@ class RouteTest(unittest.TestCase):
         # Bazel's TEST_TMPDIR may exceed the Unix sockaddr path limit.
         with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
             sock = pathlib.Path(tmp) / "route.sock"
-            with subprocess.Popen([CHUNKS, "--plan", "plan.json", "--agent-socket", sock, "--out", "homes",
+            with subprocess.Popen([CHUNKS, "--lhd", ROUTER, "--plan", "plan.json", "--agent-socket", sock, "--out", "homes",
                                    "in.def", "tech.lef", "cells.lef"], cwd=self.root,
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as proc:
                 try:
@@ -451,7 +496,7 @@ class RouteTest(unittest.TestCase):
         stats = self.run_router(self.frame(nets=nets, pins=pins), "--verify", output="routed.def")
         (self.root / "stats.json").write_text(json.dumps(stats))
         (self.root / "pins.tsv").write_text('"critical_a" -10 0\n"other_a" 3 0\n"clk_a" -20 1\n')
-        run = subprocess.run([FEEDBACK, "--timing-eco", "pins.tsv", "--net-count", "1", "--out", "eco", ".",
+        run = subprocess.run([FEEDBACK, "--lhd", ROUTER, "--timing-eco", "pins.tsv", "--net-count", "1", "--out", "eco", ".",
                               "tech.lef", "cells.lef"], cwd=self.root, capture_output=True, text=True, timeout=10)
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual((self.root / "eco/nets.txt").read_text(), "critical\n")

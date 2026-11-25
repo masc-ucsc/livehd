@@ -7,6 +7,8 @@
 
 namespace lhd {
 
+std::string physical_file_digest(const std::filesystem::path& path);
+
 // One completed physical generation: repaired color bodies, inter-color
 // buffers, placement/RC attributes and their final boundary feedback travel
 // together. A partial/edited input falls back to ordinary region mapping.

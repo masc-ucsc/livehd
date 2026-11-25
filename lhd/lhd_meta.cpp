@@ -20,7 +20,7 @@ constexpr std::string_view kJsonPassUsyn
     = R"json({"schema_version":1,"name":"pass usyn","description":"Native register-rooted XAG synthesis with bounded endpoint selection and residual rewriting/resubstitution. target=cmos preserves original state. tmap=none emits logical CMOS without Liberty; tmap=abc (default) requests only technology mapping from an optional provider. USYN invokes no ABC synthesis or SATOPT and has no ABC fallback. Logical and optional mapped-region reuse follow lhd.incremental with a named workdir; changing Liberty or mapping policy preserves native logical reuse.","inputs":["lg"],"outputs":["lg","verilog"],"examples":["lhd pass usyn lg:design --top top --set pass.usyn.tmap=none --emit-dir lg:net --workdir W","lhd synth design.v --top top --set synth.mapper=usyn --set synth.liberty=cells.lib --workdir W"]})json";
 
 constexpr std::string_view kSteps
-    = R"json(["compile verilog","compile pyrope","synth","synth chunk","sim","lec","formal verify","formal lec","scan","tool","pass","pyrope fmt","pyrope lsp","pyrope style"])json";
+    = R"json(["compile verilog","compile pyrope","synth","synth chunk","route","route chunk","route repair","route verify","sim","lec","formal verify","formal lec","scan","tool","pass","pyrope fmt","pyrope lsp","pyrope style"])json";
 constexpr std::string_view kEmitKinds
     = R"json(["ln","lg","verilog","pyrope","lnast-dump","isabelle","lean","sim","graphviz","metadata","results","report","def","diagnostics"])json";
 constexpr std::string_view kErrorClasses
@@ -577,7 +577,10 @@ int describe_command(const Options& opts) {
     std::print(stderr, "lhd describe: requires a name (a command or an emit kind)\n");
     return 1;
   }
-  const std::string& name = opts.files.front();
+  std::string name = opts.files.front();
+  if (name == "route" && opts.files.size() == 2) {
+    name += " " + opts.files[1];
+  }
 
   if (int rc = describe_tool(name); rc >= 0) {
     return rc;
@@ -635,6 +638,26 @@ int describe_command(const Options& opts) {
         R"json({"schema_version":1,"name":"verilog","description":"Verilog source; as --emit a deterministic name-sorted concatenation of per-module cgen output","direction":"in/out"})json");
     return 0;
   }
+  if (name == "route") {
+    print_json_line(
+        R"json({"schema_version":1,"name":"route","description":"Route a placed ASAP7 DEF with the native detailed router. A synthesis DEF bundle supplies the ordered LEFs.","inputs":["def","lef","timing","only","clock-nets","reserve-cells"],"outputs":["def"],"examples":["lhd route def:placed --workdir W"]})json");
+    return 0;
+  }
+  if (name == "route chunk") {
+    print_json_line(
+        R"json({"schema_version":1,"name":"route chunk","description":"Route independent placement regions or grid tiles with native workers and assemble the design. Use --gui for resident agent feedback.","inputs":["def","lef","plan","reuse","timing"],"outputs":["def"],"examples":["lhd route chunk def:placed plan:fp_chunks.json --set lhd.jobs=4 --workdir W"]})json");
+    return 0;
+  }
+  if (name == "route repair") {
+    print_json_line(
+        R"json({"schema_version":1,"name":"route repair","description":"Reopen selected nets from a routing checkpoint using pin-access or timing feedback.","inputs":["route","def","lef","targets","protect-failures","timing-eco"],"outputs":["def"],"examples":["lhd route repair def:placed route:W/route --workdir W --emit-dir def:routed"]})json");
+    return 0;
+  }
+  if (name == "route verify") {
+    print_json_line(
+        R"json({"schema_version":1,"name":"route verify","description":"Read back existing wires and report open nets and native geometry findings in qor.","inputs":["def","lef"],"outputs":[],"examples":["lhd route verify def:routed"]})json");
+    return 0;
+  }
   if (name == "synth chunk") {
     print_json_line(R"json({"schema_version":1,"name":"synth chunk","description":"Export a memory-sized floorplan, select physical homes and run their macro and final placement. Use lhd synth chunk <subcommand> --help for arguments.","subcommands":["init","update","plan","list","show","macro","final","move-io","score","next","assemble","gui"],"examples":["lhd synth chunk init top.v --top top --budget 1GiB --workdir W --set synth.liberty=cells.lib --set synth.lef=tech.lef,cells.lef","lhd synth chunk update --workdir W","lhd synth chunk list --workdir W --stage final --status stale"]})json");
     return 0;
@@ -645,7 +668,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "def") {
     print_json_line(
-        R"json({"schema_version":1,"name":"def","description":"Legal placed DEF from lhd synth with synth.place=true and synth.place.mode=full. Uses synth.lef for technology/cell geometry. Also saved as <workdir>/synth/place/out.def. GP mode emits no DEF. --emit-dir only","direction":"out"})json");
+        R"json({"schema_version":1,"name":"def","description":"Legal placed DEF from lhd synth with synth.place=true and synth.place.mode=full. Uses synth.lef for technology/cell geometry. Also saved as <workdir>/synth/place/out.def. GP mode emits no DEF. lhd route reads and exports the physical bundle.","direction":"in/out"})json");
     return 0;
   }
   if (name == "report") {
@@ -802,6 +825,7 @@ void print_general_help() {
       "  synth      one-shot synthesis: compile -> optional reduce -> color synth -> tech-map -> STA (QoR + timing)\n"
       "               lhd synth cpu.prp --top Cpu --workdir W          # reports in W/synth/, incremental on re-run\n"
       "               lhd synth lg:cpu_lg --top Cpu --emit-dir lg:net --stats\n"
+      "  route [chunk|repair|verify] def:PLACED --workdir DIR   (native detailed routing)\n"
       "  synth chunk init | update | plan | list | show | macro | final | move-io | gui   (lhd synth chunk --help)\n"
       "  sim        build + run a native simulation of a Pyrope design's `test` blocks (dynamic verify)\n"
       "               lhd sim foo.prp                  # build + run every test block\n"
@@ -1433,6 +1457,9 @@ int help_json_dispatch(const std::string& topic, const std::string& sub, const O
     print_json_line(kJsonSimCommand);
     return 0;
   }
+  if (topic == "route") {
+    return describe_as(sub.empty() ? "route" : "route " + std::string(sub));
+  }
   if (topic == "synth" && sub == "chunk") {
     return describe_as("synth chunk");
   }
@@ -1901,6 +1928,16 @@ int help_command(const Options& opts) {
                "  lhd sim foo.prp --setup-only --workdir build/  # generate the native objects\n"
                "  lhd sim foo.prp --run-only --workdir build/    # run a prior setup\n");
     return print_options_section({"sim."});
+  }
+  if (topic == "route") {
+    std::print(
+        "lhd route [chunk|repair|verify] def:PLACED --workdir DIR [--emit-dir def:OUTPUT]\n"
+        "  Supply a synthesis DEF bundle or def:FILE with ordered lef:FILE inputs.\n"
+        "  chunk  route independent interiors, then verify the assembly. Use plan:fp_chunks.json or --set route.grid=NXxNY.\n"
+        "  repair supply route:CHECKPOINT and optionally targets:NETS or timing-eco:TSV.\n"
+        "  --set lhd.jobs=N limits chunk workers. --set route.agent_socket=PATH enables the live chunk agent.\n"
+        "  verify checks existing wires. qor.complete records closure. Each trial writes DIR/route.\n");
+    return print_options_section({"route."});
   }
   if (topic == "synth" && sub == "chunk") {
     std::print("lhd synth chunk — pre-CTS placement by physical home\n"

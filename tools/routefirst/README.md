@@ -88,20 +88,21 @@ in DEF units. This mode includes via cuts and both metal landings.
 
 ## Native track router (experimental)
 
-`rf_route` routes every unrouted signal net of a legal DEF on M2 to M7 and writes
+`lhd route` routes every unrouted signal net of a legal DEF on M2 to M7 and writes
 the DEF back with `ROUTED` wiring and the cells it moved. The method, the rule
-table and the measurements are at the end of this file; what is still to do is
+table and measurements below use the original worker flag names. The public API and typed inputs are in [the driver reference](../../lhd/README.md#detailed-routing); what is still to do is
 in [the route-first plan](../../todo/livehd/3r-routefirst.html). It calls no
 external tool. The rule limits in the source are for ASAP7 and were measured with
 OpenROAD's checker on two-wire layouts.
 
 ```sh
-bazel build -c opt //tools/routefirst:rf_route
-bazel-bin/tools/routefirst/rf_route --hweight 1.05 --via-cost 120 --pd-alpha 0.3 \
-  --shift 3 --shift-reach 6 --chain 4 --flop-reach 2 --ripup 3 --rip-width 6 --final-passes 6 \
-  --budget 300000 --timing legroute_plan0/timing.tsv --crit-frac 1 \
-  --tile-move --reserve --anchor-frac 0.1 --verify --prelegal \
-  --report nets.tsv frame.def routed.def asap7_tech.lef asap7_cells.lef > stats.json
+bazel build -c opt //lhd
+bazel-bin/lhd/lhd route def:frame.def lef:asap7_tech.lef lef:asap7_cells.lef timing:legroute_plan0/timing.tsv \
+  --set route.hweight=1.05 --set route.via_cost=120 --set route.pd_alpha=0.3 --set route.budget=300000 \
+  --set route.shift=3 --set route.shift_reach=6 --set route.chain=4 --set route.flop_reach=2 \
+  --set route.ripup=3 --set route.rip_width=6 --set route.final_passes=6 --set route.crit_frac=1 \
+  --set route.tile_move=true --set route.reserve=true --set route.anchor_frac=0.1 --set route.prelegal=true \
+  --workdir W --emit-dir def:routed
 ```
 
 The options above are the measured setting, not defaults: with no options the
@@ -133,7 +134,7 @@ tool runs plain shortest-first routing with no repair.
 | `--budget N` | state expansions per search |
 | `--report F`, `--explain N`, `--trace NET` | per-net status, the neighbourhood of N failed pins, the paths of one net |
 
-`rf_route routed.def - tech.lef cells.lef` only runs the check of `--verify` on an existing DEF. The check covers the
+`lhd route verify def:routed.def lef:tech.lef lef:cells.lef` checks an existing DEF. The check covers the
 track rules, cut spacing and duplicates, the conductor check of `check_connections`, nets without wires, V1 landings
 inside the pin they reach, and each cell's footprint against the original rows, placement blockages and taller cells.
 It does not read OpenROAD's patch rectangles and expects landings inside the pin metal, so it over-reports on
@@ -326,9 +327,9 @@ the assembled design with the same binary. The inputs are the unrouted legalized
 `out.def` and the LEFs exported beside it. Supply the tech LEF first.
 
 ```sh
-bazel build -c opt //tools/routefirst:{rf_chunks,rf_feedback}
-bazel-bin/tools/routefirst/rf_chunks --grid 2 2 --workers 4 --out trial frame.def tech.lef cells.lef
-bazel-bin/tools/routefirst/rf_feedback --radius 540 --out repair trial/finish tech.lef cells.lef
+bazel build -c opt //lhd
+bazel-bin/lhd/lhd route chunk def:placed --set route.grid=2x2 --set lhd.jobs=4 --workdir W
+bazel-bin/lhd/lhd route repair def:placed route:W/route --set route.radius=540 --workdir W
 ```
 
 Each worker owns nets whose endpoints fall in one rectangle. It returns only
@@ -418,8 +419,7 @@ statistics. Supply native placement pin slacks, the maximum number of
 mutable signals, the previous route directory and the original LEFs.
 
 ```sh
-rf_feedback --timing-eco timing.tsv --net-count 12 --pd-alpha 0.6 \
-  --out timing-trial previous-route tech.lef cells.lef
+lhd route repair def:placed route:W/route timing-eco:timing.tsv --set route.net_count=12 --set route.pd_alpha=0.6 --workdir timing-trial
 ```
 
 The agent selects ordinary signal nets by worst endpoint slack, breaking ties

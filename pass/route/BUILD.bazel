@@ -1,0 +1,17 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+genrule(
+    name = "worker_identity",
+    srcs = ["route.cpp", "route.hpp", "//inou/lefdef:inou_lefdef", "//:MODULE.bazel"],
+    outs = ["route_identity.hpp"],
+    cmd = """h=$$(cat $(SRCS) | (shasum -a 256 2>/dev/null || sha256sum) | cut -d' ' -f1)
+printf '#pragma once\n#define LHD_ROUTE_ID "%s"\n' "$$h" > $@""",
+)
+
+cc_library(
+    name = "route",
+    srcs = ["route.cpp", "route_identity.hpp"],
+    hdrs = ["route.hpp"],
+    visibility = ["//lhd:__pkg__"],
+    deps = ["//inou/lefdef:inou_lefdef"],
+)

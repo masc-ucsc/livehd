@@ -10,8 +10,13 @@ import math
 import re
 from pathlib import Path
 import time
+import sys
 
-from rf_chunks import CONN, POSE, ROUTE, WIRE, feedback, records, route, section
+# A Bazel runfile can be a symlink into an otherwise sparse source tree.
+# Import the coordinator beside the invoked script in the runfiles directory.
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+
+from rf_chunks import CONN, POSE, ROUTE, WIRE, feedback, records, route, section, worker_command, worker_options
 
 
 def localized_seed(
@@ -161,7 +166,7 @@ def timing_eco(args):
     localized_seed(frame, [{"net": n, "fail_pin": ""} for _, _, n in ranked], 0, seed)
     route(
         [
-            args.router,
+            *args.worker,
             "--only",
             names,
             "--timing",
@@ -203,7 +208,7 @@ def timing_eco(args):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--router", type=Path, default=Path(__file__).with_name("rf_route"))
+    worker_options(p)
     p.add_argument("--radius", type=int, default=540, help="access window radius in DEF units")
     p.add_argument(
         "--all-pins",
@@ -251,6 +256,7 @@ def main():
         help="release tracks near failed pins only on M1 through M3, including vias starting on those layers",
     )
     args = p.parse_args()
+    args.worker = worker_command(args)
     if args.timing_eco:
         if (
             args.targets
@@ -329,7 +335,7 @@ def main():
         selected = ["--only", repair_list]
     only.write_text("".join(n + "\n" for n in sorted(priority)))
     opts = [
-        args.router,
+        *args.worker,
         *ROUTE,
         "--time-limit",
         str(args.seconds),

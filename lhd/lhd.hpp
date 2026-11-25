@@ -185,6 +185,7 @@ struct Options {
   std::string gui_repair_mode;
   std::uint64_t gui_replay_seq = 0;
   std::string gui_trace;            // JSONL action trace path (default <workdir>/synth/place/gui_trace.jsonl)
+  std::string driver_path;  // current executable for independent route workers
   std::string workdir;
   // Set by workdir() when it MINTED an ephemeral scratch dir because the user
   // named none. Every persistent-reuse gate (compile cache, abc_cache,
@@ -2473,6 +2474,7 @@ void install_crash_reporter();
 // reads nothing else, so nothing else may move the run_id. The side role and
 // per-side top hash into every impl/ref row (file or directory); --lib model
 // libraries and every other directory input hash whole.
+std::string route_input_identity(const Options& opts);
 std::string compute_run_id(const Options& opts);
 
 // Serialize the result envelope (single JSON line) to --result-json or stdout.

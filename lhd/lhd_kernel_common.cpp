@@ -1301,6 +1301,12 @@ std::string leaf_match_hint(std::string_view flag) {
 
 void check_known_set_passes(const Options& opts) {
   for (const auto& [key, value] : opts.sets) {
+    if (key.starts_with("route.")) {
+      if (opts.command != "route") {
+        throw Lhd_error{"usage", key + " belongs to lhd route", ""};
+      }
+      continue;  // route_command validates the setting for the selected mode.
+    }
     if (key == "formal.jobs" || key == "formal.lec.jobs" || key == "sim.jobs" || key == "synth.threads") {
       throw Lhd_error{"usage", std::format("--set/--config '{}' was renamed", key), "use --set lhd.jobs=" + value};
     }

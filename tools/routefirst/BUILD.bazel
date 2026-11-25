@@ -9,11 +9,10 @@ cc_binary(
     deps = ["//inou/lefdef:inou_lefdef"],
 )
 
-cc_binary(
-    name = "rf_route",
-    srcs = ["rf_route.cpp"],
-    tags = ["manual"],
-    deps = ["//inou/lefdef:inou_lefdef"],
+filegroup(
+    name = "coordinators",
+    srcs = ["rf_chunks.py", "rf_feedback.py"],
+    visibility = ["//lhd:__pkg__"],
 )
 
 cc_binary(
@@ -69,8 +68,8 @@ py_test(
     name = "rf_route_test",
     size = "small",
     srcs = ["rf_route_test.py"],
-    args = ["$(location :rf_route)", "$(location :rf_chunks)", "$(location :rf_feedback)"],
-    data = [":rf_route", ":rf_chunks", ":rf_feedback"],
+    args = ["$(location //lhd)", "$(location :rf_chunks)", "$(location :rf_feedback)"],
+    data = ["//lhd", ":rf_chunks", ":rf_feedback"],
     legacy_create_init = 0,
 )
 
@@ -78,19 +77,21 @@ py_library(
     name = "rf_chunks_lib",
     srcs = ["rf_chunks.py"],
     imports = ["."],
+    deps = ["@rules_python//python/runfiles"],
 )
 
 py_binary(
     name = "rf_chunks",
     srcs = ["rf_chunks.py"],
-    data = [":rf_route"],
+    data = ["//lhd"],
     legacy_create_init = 0,
+    deps = ["@rules_python//python/runfiles"],
 )
 
 py_binary(
     name = "rf_feedback",
     srcs = ["rf_feedback.py"],
-    data = [":rf_route"],
+    data = ["//lhd"],
     legacy_create_init = 0,
     deps = [":rf_chunks_lib"],
 )

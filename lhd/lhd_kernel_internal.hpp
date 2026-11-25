@@ -785,6 +785,7 @@ std::vector<double> parse_macro_anchor_milestones(std::string_view text);
 // `lhd synth`: compile -> pass.color reduce -> pass.color synth -> pass.abc ->
 // pass.opentimer over
 // ONE in-memory design (lhd_kernel_synth.cpp).
+void route_command(Options& opts, Result& res);
 void        synth_command(Options& opts, Result& res);
 void        tool_command(Options& opts, Result& res);
 

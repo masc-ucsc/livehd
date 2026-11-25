@@ -26,6 +26,7 @@ extern char** environ;
 #include "lhd_pyrope.hpp"
 #include "pass/place/chunk_jobs.hpp"
 #include "pass/place/gui/gui_ipc.hpp"
+#include "pass/route/route.hpp"
 #include "perf_tracing.hpp"
 #include "process_group.hpp"
 #include "rules_cc/cc/runfiles/runfiles.h"
@@ -49,19 +50,25 @@ struct Trace_guard {
   ~Trace_guard() { stop_tracing(); }
 };
 
+std::filesystem::path executable_path(const char* argv0) {
+  std::error_code ec;
+  auto            exe = std::filesystem::read_symlink("/proc/self/exe", ec);
+  return ec ? std::filesystem::path(livehd::file_utils::get_exe_path()) / std::filesystem::path(argv0).filename() : exe;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
+  if (argc >= 2 && std::string_view(argv[1]) == "--route-worker") {
+    (void)livehd::cost::install_memory_backstop();
+    return livehd::routing::worker(argc - 1, argv + 1);
+  }
   if (argc >= 3 && std::string_view(argv[1]) == "synth" && std::string_view(argv[2]) == "chunk"
       && !(argc > 3 && (std::string_view(argv[3]) == "--help" || std::string_view(argv[3]) == "-h"
                         || std::string_view(argv[3]).starts_with("--diag-fmt")))) {
     using rules_cc::cc::runfiles::Runfiles;
     std::string     error;
-    std::error_code ec;
-    auto            exe = std::filesystem::read_symlink("/proc/self/exe", ec);
-    if (ec) {
-      exe = std::filesystem::path(livehd::file_utils::get_exe_path()) / std::filesystem::path(argv[0]).filename();
-    }
+    auto                      exe = executable_path(argv[0]);
     std::unique_ptr<Runfiles> files(Runfiles::Create(exe.string(), BAZEL_CURRENT_REPOSITORY, &error));
     if (!files) {
       std::fprintf(stderr, "lhd synth chunk: %s\n", error.c_str());
@@ -189,6 +196,14 @@ int main(int argc, char** argv) {
   // reconciliation after run_engine_command below).
   try {
     opts = lhd::parse_args(argc, argv);
+    if (opts.command == "route") {
+      opts.driver_path = executable_path(argv[0]).string();
+      for (auto& in : opts.ins) {
+        if (in.kind == "route" || in.kind == "reuse") {
+          in.path = std::filesystem::weakly_canonical(in.path).string();
+        }
+      }
+    }
     opts.gui_worker_socket = worker_socket;
     opts.gui_worker_id     = worker_id;
     opts.gui_worker_tier   = worker_tier;

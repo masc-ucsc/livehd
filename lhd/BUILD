@@ -194,7 +194,7 @@ cc_library(
     srcs = ["export_file.cpp"],
     hdrs = ["export_file.hpp"],
     copts = COPTS,
-    deps = ["//core:file_utils"],
+    deps = ["//core:file_utils", "@rapidjson"],
 )
 
 cc_test(
@@ -227,6 +227,8 @@ cc_library(
         "lhd_kernel_formal.cpp",
         "lhd_kernel_internal.hpp",
         "lhd_kernel_synth.cpp",
+        "lhd_kernel_route.cpp",
+        "lhd_route_options.hpp",
         "lhd_synth_provenance.cpp",
         "lhd_kernel_passes.cpp",
         "lhd_kernel_sim.cpp",
@@ -280,6 +282,8 @@ cc_library(
         "//inou/lefdef:inou_lefdef",
         "//pass/place",
         "//pass/place:preroute_host",
+        "//pass/route",
+        "@rules_cc//cc/runfiles",
         "//pass/cprop:pass_cprop",
         "//pass/enableopt:pass_enableopt",
         "//pass/isabelle:pass_isabelle",
@@ -367,6 +371,7 @@ cc_binary(
     ],
     copts = COPTS,
     data = [
+        "//tools/routefirst:coordinators",
         "chunk_flow.py",
         "chunk_dispatch.py",
         "chunk_resources.py",
@@ -407,6 +412,7 @@ cc_binary(
     deps = [
         ":lhd_lib",
         "//pass/place:gui",
+        "//pass/route",
         "@rules_cc//cc/runfiles",
         "//inou/prp:pyrope_style",
         "//lsp",

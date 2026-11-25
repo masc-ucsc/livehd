@@ -246,6 +246,24 @@ def socket_commands(process, path):
             path.unlink(missing_ok=True)
 
 
+def worker_options(parser):
+    drivers = parser.add_mutually_exclusive_group()
+    drivers.add_argument("--lhd", type=Path, help="LiveHD executable for independent routing workers")
+    drivers.add_argument("--router", type=Path, help=argparse.SUPPRESS)
+
+
+def worker_command(args):
+    if args.router:
+        return [args.router]
+    binary = args.lhd
+    if binary is None:
+        # The compatibility launchers have //lhd in their Bazel runfiles.
+        from python.runfiles import Runfiles
+
+        binary = Path(Runfiles.Create().Rlocation("_main/lhd/lhd"))
+    return [binary.resolve(), "--route-worker"]
+
+
 def route(args, folder, agent=False, socket_path=None):
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "command.json").write_text(json.dumps([str(x) for x in args]))
@@ -283,7 +301,7 @@ def worker(args, frame, box, names, folder):
             out = Path(tmp) / "worker.def"
             route(
                 [
-                    args.router,
+                    *args.worker,
                     *args.costs,
                     "--only",
                     only,
@@ -353,7 +371,7 @@ def feedback(folder, homes=()):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--router", type=Path, default=Path(__file__).with_name("rf_route"))
+    worker_options(p)
     homes = p.add_mutually_exclusive_group()
     homes.add_argument(
         "--plan", type=Path, help="use the rectangular or stepped regions of a LiveHD fp_chunks.json"
@@ -379,6 +397,7 @@ def main():
         help="give these tile interiors to the coordinator after feedback",
     )
     p.add_argument("--reuse", type=Path, help="reuse the verified worker inputs and wires of this trial")
+    p.add_argument("--reuse-if-compatible", type=Path, help=argparse.SUPPRESS)
     p.add_argument("--out", required=True, type=Path)
     p.add_argument("frame", type=Path)
     p.add_argument("lefs", nargs="+", type=Path)
@@ -394,6 +413,7 @@ def main():
     p.add_argument("--crit-frac", type=float, default=0.0)
     p.add_argument("--pd-alpha", type=float, default=0.3)
     args = p.parse_args()
+    args.worker = worker_command(args)
     if args.grid is None:
         args.grid = (2, 2)
         if not args.plan:
@@ -426,7 +446,9 @@ def main():
             return h.hexdigest()
 
     stamp = dict(
-        inputs=[digest(f) for f in (args.router, args.frame, *args.lefs, Path(__file__))],
+        worker_identity=(digest(args.router) if args.router else subprocess.check_output(
+            [*args.worker, "--identity"], text=True).strip()),
+        inputs=[digest(f) for f in (args.frame, *args.lefs, Path(__file__))],
         timing=digest(args.timing) if args.timing else None,
         placement_plan=digest(args.plan) if args.plan else None,
         alpha=args.pd_alpha,
@@ -436,6 +458,10 @@ def main():
         trunks_first=args.trunks_first,
         trunk_seconds=args.finish_seconds if args.trunks_first else None,
     )
+    if not args.reuse and args.reuse_if_compatible:
+        prior = args.reuse_if_compatible
+        if (prior / "inputs.json").is_file() and json.loads((prior / "inputs.json").read_text()) == stamp:
+            args.reuse = prior
     if args.reuse and json.loads((args.reuse / "inputs.json").read_text()) != stamp:
         raise ValueError("stale worker result: inputs, grid or worker budget changed")
     (args.out / "inputs.json").write_text(json.dumps(stamp))
@@ -450,7 +476,7 @@ def main():
             only.write_text("".join(x.replace(r"\/", "/") + "\n" for x in cross))
             route(
                 [
-                    args.router,
+                    *args.worker,
                     *args.costs,
                     "--final-passes",
                     "1",
@@ -493,12 +519,13 @@ def main():
         crossing_or_clock=len(cross),
         assigned=[len(x) for x in assignments],
         retained=len(wires),
+        reused_workers=len(boxes) if args.reuse else 0,
         worker_wall_s=time.monotonic() - start,
     )
     (args.out / "assembly.json").write_text(json.dumps(prefix, indent=2))
     route(
         [
-            args.router,
+            *args.worker,
             *args.costs,
             "--final-passes",
             "3",

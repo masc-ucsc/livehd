@@ -77,7 +77,7 @@ void validate_emits(const Options& opts) {
   }
   // `report:` is the QoR/timing sidecar directory of `lhd synth` and of the passes that write those reports
   // (pass abc|usyn: qor.json, pass opentimer: timing.json); anywhere else it is a typo, not a silent no-op.
-  if (opts.command != "synth") {
+  if (opts.command != "synth" && opts.command != "route") {
     reject_emit_kind(opts, "def", {"usage", "--emit-dir def: is a `lhd synth --set synth.place=true` output", ""});
     const std::string sub     = opts.command == "pass" && !opts.files.empty() ? opts.files.front() : std::string{};
     const bool        reports = sub == "opentimer" || find_mapper(sub) != nullptr;
