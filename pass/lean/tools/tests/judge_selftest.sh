@@ -168,8 +168,15 @@ cert() { # <design> <top> <src> : compile [-> single_edge] -> certificate in <de
   fi
 }
 for d in accS acc2 acc2b pv0 pv1 pv1b rS rD rDb; do cert "$d" "$d" "$OUT/$d.v"; done
-# the falling-edge capture makes pv* two slots per clock
-grep -q 'P=2 slots' "$OUT/pv0.se.log" || { cat "$OUT/pv0.se.log" | tail -5; echo "FAIL: pv0 is not P = 2"; exit 1; }
+# the falling-edge capture makes pv* two slots per clock: single_edge then adds its 1-bit phase
+# divider, the flop `single_edge_phase` (created only when P > 1), which the certificate's
+# _io.json lists; accS (one edge, P = 1) gets none
+has_phase() { "$PY" -c 'import json, sys
+sys.exit(0 if any(f.get("name") == "single_edge_phase" for f in json.load(open(sys.argv[1]))["flops"]) else 1)' "$1"; }
+has_phase "$OUT/pv0_lean/pv0_io.json" \
+  || { cat "$OUT/pv0_lean/pv0_io.json"; echo "FAIL: pv0 is not P = 2 (no single_edge_phase flop)"; exit 1; }
+! has_phase "$OUT/accS_lean/accS_io.json" \
+  || { cat "$OUT/accS_lean/accS_io.json"; echo "FAIL: accS has a single_edge_phase flop (P > 1)"; exit 1; }
 
 acc_map() { # <name> <impl> <slot kind> <maxstall>
   printf '%s\n' "impl $2_lean/$2.dcert" "spec accS_lean/accS.dcert" \
