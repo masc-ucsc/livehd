@@ -239,6 +239,17 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(stats.get("edge_pin_stub_wires", 0), 0)
         self.assertEqual({k: v for k, v in stats.items() if k.startswith("verify_") and v}, {})
 
+        # A direct VIA34 needs 11 DBU of M3 enclosure on each end. Its pad
+        # exactly fills this short pin. Shrinking the pin by one DBU disallows it.
+        for bottom, expected in (("0.115", 1), ("0.116", 0)):
+            short = block.replace("0.100 0.040 0.118 0.112", f"0.100 {bottom} 0.118 0.137")
+            (self.root / "cells.lef").write_text(CELLS.replace("END LIBRARY", short))
+            stats = self.run_router(frame, "--verify")
+            self.assertEqual(stats["nets_routed"], expected)
+            self.assertEqual(stats.get("edge_pin_stub_wires", 0), 0)
+            self.assertEqual({k: v for k, v in stats.items() if k.startswith("verify_") and v},
+                             {} if expected else {"verify_nets_without_wires": 1})
+
     def test_on_track_via_inside_macro_pin_and_one_dbu_outside(self):
         self.with_vias()
         tech = self.root / "tech.lef"

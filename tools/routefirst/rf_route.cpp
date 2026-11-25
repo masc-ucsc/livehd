@@ -1227,12 +1227,12 @@ struct Router {
     }
     int lo = alo, hi = ahi;
     if (alo <= box_lo || ahi >= box_hi) {
-      const bool down = alo <= box_lo;
-      bool       done = false;
+      const bool down     = alo <= box_lo;
+      bool       done     = false;
       // A power strap can block the long extension while leaving room for
       // the nearest landing. Every shorter trial must still meet the layer's
       // minimum length together with the LEF pin and pass the same spacing test.
-      const int shortest = std::max(ly.ext, ly.minlen - (ahi - alo));
+      const int  shortest = std::max(ly.ext, ly.minlen - (ahi - alo));
       for (int reach : {200, 120, std::max(shortest, ly.pitch), shortest}) {
         if (done) {
           break;
@@ -1260,9 +1260,33 @@ struct Router {
       if (la < 0 || la >= int(L.size())) {
         continue;
       }
-      const auto& a  = L[la];
-      auto        tk = std::lower_bound(a.tc.begin(), a.tc.end(), lo + ly.ext);
-      for (; tk != a.tc.end() && *tk <= hi - ly.ext; ++tk) {
+      const auto& a     = L[la];
+      const int   cut   = std::max(int(l), la);
+      int         first = lo + ly.ext, last = hi - ly.ext;
+      auto        tk     = std::lower_bound(a.tc.begin(), a.tc.end(), first);
+      const bool  direct = tk == a.tc.end() || *tk > last;
+      if (direct) {
+        // An existing macro pin supplies its own metal. A via whose complete
+        // enclosure fits can land even when a new wire's end margin would not.
+        const auto via = tech.vias.find(CL[cut].via);
+        if (via == tech.vias.end() || !via->second.unsupported.empty()) {
+          continue;
+        }
+        ph::Rect pad{1e18, 1e18, -1e18, -1e18};
+        for (const auto& shape : via->second.shapes) {
+          if (shape.layer == ly.name) {
+            pad = pad.hull(shape.rect);
+          }
+        }
+        if (pad.empty() || pc + std::lround((ly.horiz ? pad.yl : pad.xl) * fp.dbu) < plo
+            || pc + std::lround((ly.horiz ? pad.yh : pad.xh) * fp.dbu) > phi) {
+          continue;
+        }
+        first = alo - int(std::lround((ly.horiz ? pad.xl : pad.yl) * fp.dbu));
+        last  = ahi - int(std::lround((ly.horiz ? pad.xh : pad.yh) * fp.dbu));
+        tk    = std::lower_bound(a.tc.begin(), a.tc.end(), first);
+      }
+      for (; tk != a.tc.end() && *tk <= last; ++tk) {
         auto above = std::lower_bound(a.stops.begin(), a.stops.end(), pc);
         for (auto st : {above, above == a.stops.begin() ? above : above - 1}) {
           if (st == a.stops.end()) {
@@ -1272,8 +1296,8 @@ struct Router {
           cd.L    = la;
           cd.t    = int(tk - a.tc.begin());
           cd.s    = int(st - a.stops.begin());
-          cd.cut  = std::max(int(l), la);
-          cd.stub = int(stubs.size()) - 1;
+          cd.cut  = cut;
+          cd.stub = direct ? -1 : int(stubs.size()) - 1;
           cd.x    = ly.horiz ? *tk : pc;
           cd.y    = ly.horiz ? pc : *tk;
           p.cands.push_back(cd);
@@ -1284,7 +1308,7 @@ struct Router {
       }
       // the landing kept for this pin: the crossing track furthest out of the macro that is still free there
       std::vector<int> order;
-      for (auto u = std::lower_bound(a.tc.begin(), a.tc.end(), lo + ly.ext); u != a.tc.end() && *u <= hi - ly.ext; ++u) {
+      for (auto u = std::lower_bound(a.tc.begin(), a.tc.end(), first); u != a.tc.end() && *u <= last; ++u) {
         order.push_back(int(u - a.tc.begin()));
       }
       if (hi > ahi) {
@@ -1916,7 +1940,7 @@ struct Router {
         if (!cand_ok(n2, cd, &already_owned)) {
           continue;
         }
-        undo[i] = Undo{};
+        undo[i]    = Undo{};
         new_cut[i] = !already_owned;
         if (new_cut[i]) {
           add_cut(0, cd.x, cd.y, n2);
@@ -2460,8 +2484,8 @@ struct Router {
       runs.front().hi = std::max(runs.front().hi, at);
     }
     for (size_t i = 0; i < vias.size(); ++i) {
-      const auto& v = vias[i];
-      bool already_owned = false;
+      const auto& v             = vias[i];
+      bool        already_owned = false;
       if (!cut_ok(v.cl, v.x, v.y, ni, &already_owned)) {
         ++stat["reject_cut_" + CL[v.cl].name];
         for (const auto& r : runs) {  // forbid the runs that meet at this cut
