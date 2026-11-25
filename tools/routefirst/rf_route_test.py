@@ -1,10 +1,13 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+import http.client
 import json
 import pathlib
 import re
+import socket
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 ROUTER = pathlib.Path(sys.argv.pop(1)).resolve()
@@ -206,6 +209,19 @@ class RouteTest(unittest.TestCase):
         self.assertEqual({k: v for k, v in stats.items() if k.startswith("verify_") and v}, {})
         self.assertRegex((self.root / "out.def").read_text(), r"M3 \( 415 360 0 \) \( \* 614 0 \)")
 
+    def test_direct_macro_via_keeps_pin_metal_in_the_lef(self):
+        self.with_vias()
+        block = ("MACRO BLK\n CLASS BLOCK ; ORIGIN 0 0 ; SIZE 0.216 BY 0.216 ;\n"
+                 " PIN P\n  DIRECTION INPUT ; PORT LAYER M3 ; RECT 0.100 0.040 0.118 0.112 ; END\n"
+                 " END P\nEND BLK\nEND LIBRARY")
+        (self.root / "cells.lef").write_text(CELLS.replace("END LIBRARY", block))
+        frame = self.frame(["- big BLK + FIXED ( 306 360 ) N ;", "- a BUF + FIXED ( 108 270 ) N ;"],
+                           ["- n ( a Z ) ( big P ) ;"])
+        stats = self.run_router(frame, "--verify")
+        self.assertEqual(stats["nets_routed"], 1)
+        self.assertEqual(stats.get("edge_pin_stub_wires", 0), 0)
+        self.assertEqual({k: v for k, v in stats.items() if k.startswith("verify_") and v}, {})
+
     def with_vias(self):
         cuts = "".join(f"LAYER V{k}\n TYPE CUT ;\nEND V{k}\n" for k in range(1, 7))
         vias = ""
@@ -261,12 +277,47 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(json.loads(reused.stdout)["violations"], {})
 
         self.run_router(frame, "--limit", "0", "--report", "feedback.tsv", output="routed.def")
-        repair = subprocess.run([FEEDBACK,
+        repair = subprocess.run([FEEDBACK, "--protect-failures", "feedback.tsv",
                                  "--out", "repair", ".", "tech.lef", "cells.lef"],
                                 cwd=self.root, capture_output=True, text=True, timeout=10)
         self.assertEqual(repair.returncode, 0, repair.stderr)
         self.assertEqual(json.loads(repair.stdout)["previous_unrouted"], 1)
+        self.assertEqual(json.loads(repair.stdout)["prior_failure_nets"], 1)
         self.assertEqual(json.loads(repair.stdout)["violations"], {})
+
+    def test_placement_home_socket(self):
+        self.with_vias()
+        (self.root / "in.def").write_text(self.two_cells().replace("( 108 270 )", "( 216 270 )"))
+        plan = [{"class": "livehd.placement.chunk_plan", "design": "tiny", "chunks": [
+            {"id": "mac", "box_dbu": [0, 0, 500, 720], "region_dbu": [[0, 0, 500, 360], [0, 360, 450, 720]]},
+            {"id": "glue", "box_dbu": [500, 0, 720, 720]}]}]
+        (self.root / "plan.json").write_text(json.dumps(plan))
+        # Bazel's TEST_TMPDIR may exceed the Unix sockaddr path limit.
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
+            sock = pathlib.Path(tmp) / "route.sock"
+            with subprocess.Popen([CHUNKS, "--plan", "plan.json", "--agent-socket", sock, "--out", "homes",
+                                   "in.def", "tech.lef", "cells.lef"], cwd=self.root,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as proc:
+                try:
+                    deadline = time.monotonic() + 5
+                    while not sock.exists() and proc.poll() is None and time.monotonic() < deadline:
+                        time.sleep(0.02)
+                    self.assertTrue(sock.exists())
+                    for cmd in ("status", "finish"):
+                        conn = http.client.HTTPConnection("localhost", timeout=5)
+                        with socket.socket(socket.AF_UNIX) as link:
+                            link.connect(str(sock))
+                            conn.sock = link
+                            conn.request("POST", "/agent", body=json.dumps({"cmd": cmd}))
+                            reply = json.loads(conn.getresponse().read())
+                            self.assertTrue(reply["ok"], reply)
+                    stdout, stderr = proc.communicate(timeout=5)
+                    self.assertEqual(proc.returncode, 0, stderr)
+                    self.assertEqual(json.loads(stdout)["homes"], ["mac", "glue"])
+                    self.assertFalse(sock.exists())
+                finally:
+                    if proc.poll() is None:
+                        proc.terminate()
 
     def test_long_share_and_invalid_fractions(self):
         self.with_vias()

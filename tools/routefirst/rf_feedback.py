@@ -11,16 +11,25 @@ import time
 from rf_chunks import CONN, POSE, ROUTE, WIRE, feedback, records, route, section
 
 
-def localized_seed(frame, failed, radius, output, all_pins=False):
+def localized_seed(frame, failed, radius, output, all_pins=False, findings=(), pin_neighbors=False):
     owners = {row["fail_pin"].rsplit("/", 1)[0] for row in failed if row["fail_pin"]}
     owners.update(row["fail_pin"] for row in failed if row["fail_pin"])
+    blocked = owners.copy()
+    priority = {row["net"] for row in failed}
+    # Older reports have endpoint names only. New frames provide the pin
+    # coordinate, which can be far from the origin of a rotated hard macro.
+    exact = [
+        (int(r["fail_x_dbu"]), int(r["fail_y_dbu"])) for r in failed if r.get("fail_x_dbu") and r.get("fail_y_dbu")
+    ]
     if all_pins:
         missing = {row["net"] for row in failed}
         for name, head, _ in records(frame):
             if name.replace(r"\/", "/") in missing:
                 for inst, pin in CONN.findall(head.partition(" + ")[0]):
                     owners.add((pin if inst == "PIN" else inst).replace(r"\/", "/"))
-    centers = []
+    issue_nets = {name for r in findings for name in r["nets"].partition(" (")[0].split() if name != "fixed"}
+    centers = exact + [((int(r["xl"]) + int(r["xh"])) // 2, (int(r["yl"]) + int(r["yh"])) // 2) for r in findings]
+
     current = ""
     # Copy through the signal-net header verbatim, retaining the last pose,
     # clock tree, special nets and every placement or routing exclusion.
@@ -58,7 +67,14 @@ def localized_seed(frame, failed, radius, output, all_pins=False):
 
         released = []
         for name, head, paths in records(frame):
-            if paths and any(touches(path) for path in paths):
+            net = name.replace(r"\/", "/")
+            neighbor = pin_neighbors and any(
+                (pin if inst == "PIN" else inst).replace(r"\/", "/") in blocked
+                for inst, pin in CONN.findall(head.partition(" + ")[0])
+            )
+            if neighbor or net in issue_nets:
+                priority.add(net)
+            if paths and (net in priority or any(touches(path) for path in paths)):
                 dst.write(head.rstrip() + " ;\n")
                 released.append(name)
             else:
@@ -71,7 +87,7 @@ def localized_seed(frame, failed, radius, output, all_pins=False):
                 break
         for line in src:
             dst.write(line)
-    return released
+    return released, priority
 
 
 def main():
@@ -79,6 +95,17 @@ def main():
     p.add_argument("--router", type=Path, default=Path(__file__).with_name("rf_route"))
     p.add_argument("--radius", type=int, default=540, help="access window radius in DEF units")
     p.add_argument("--all-pins", action="store_true", help="release access at every endpoint of the failed nets")
+    p.add_argument(
+        "--protect-failures",
+        action="append",
+        type=Path,
+        default=[],
+        metavar="TSV",
+        help="route earlier failed nets from this same placement alongside current failures to break repair cycles",
+    )
+    p.add_argument(
+        "--pin-neighbors", action="store_true", help="route every net of a blocked cell in the priority pass"
+    )
     p.add_argument("--seconds", type=float, default=120, help="CPU budget per routing pass")
     p.add_argument("--out", required=True, type=Path)
     p.add_argument("previous", type=Path, help="directory containing routed.def and feedback.tsv")
@@ -91,16 +118,50 @@ def main():
     start = time.monotonic()
     with (args.previous / "feedback.tsv").open() as src:
         failed = [r for r in csv.DictReader(src, delimiter="\t") if r["status"] != "routed"]
-    if not failed:
-        p.error("previous routing report has no failed nets")
+    findings = []
+    report = args.previous / "findings.tsv"
+    if report.is_file():
+        with report.open() as src:
+            findings = [
+                r
+                for r in csv.DictReader(src, delimiter="\t")
+                if r["kind"] not in ("no-wires", "cell-off-site", "cell-overlap")
+            ]
+    if not failed and not findings:
+        p.error("previous report has no signal routing failures or geometry findings")
     seed = folder / "seed.def"
-    released = localized_seed(args.previous / "routed.def", failed, args.radius, seed, args.all_pins)
+    prior = {}
+    for report in args.protect_failures:
+        with report.open() as src:
+            for row in csv.DictReader(src, delimiter="\t"):
+                if row["status"] != "routed":
+                    prior[row["net"], row["fail_pin"]] = row
+    released, priority = localized_seed(
+        args.previous / "routed.def",
+        [*prior.values(), *failed],
+        args.radius,
+        seed,
+        args.all_pins,
+        findings,
+        args.pin_neighbors,
+    )
     (folder / "released.json").write_text(json.dumps(released))
     first = folder / "priority"
     only = folder / "first.txt"
-    only.write_text("".join(r["net"] + "\n" for r in failed))
+    only.write_text("".join(n + "\n" for n in sorted(priority)))
     opts = [args.router, *ROUTE, "--time-limit", str(args.seconds), "--final-passes", "3"]
-    route([*opts, "--only", only, seed, first / "routed.def", *args.lefs], first)
+    route(
+        [
+            *opts,
+            *(["--reserve", "--shift", "3", "--chain", "4", "--flop-reach", "2"] if args.pin_neighbors else []),
+            "--only",
+            only,
+            seed,
+            first / "routed.def",
+            *args.lefs,
+        ],
+        first,
+    )
     route(
         [
             *opts,
@@ -125,9 +186,12 @@ def main():
     result = dict(
         feedback(folder),
         previous_unrouted=len(failed),
+        prior_failure_nets=len({name for name, _ in prior}),
+        previous_geometry_findings=len(findings),
         released=len(released),
         radius=args.radius,
         all_pins=args.all_pins,
+        priority_nets=len(priority),
         wall_s=time.monotonic() - start,
     )
     (folder / "feedback.json").write_text(json.dumps(result, indent=2))

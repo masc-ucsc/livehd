@@ -191,6 +191,31 @@ must occur in the input DEF. Each net in a limited run’s TSV is labeled
 Run the repository-owned CLI regressions with
 `bazel test --config=backend //tools/routefirst:rf_route_test`.
 
+## From placement to a routed design
+
+What happens after global placement on eyeriss (times are wall seconds of the LiveHD run; each step was checked
+against the source and the run's artifacts). The routing steps are `rf_route`, which is not a LiveHD pass yet.
+
+1. Expand virtual buffers (only where a first-order cap or slew estimate fails), then wirelength resynthesis on
+   cloned graphs; a batch is kept only if timing does not degrade and wirelength drops (339 s).
+2. First PCRS clock tree, legalized, so timing sees a propagated clock (3 s).
+3. Timing-driven re-place and region refinement (685 s; the slack-weighted re-placement ran no round here).
+4. Gate sizing and buffer-tree repair (197 s). The buffer sweep was refused by the hold guard.
+5. Repair loop, three iterations of re-place, sizing and buffer repair (1,250 s). All 15 buffer sweeps refused by
+   the hold guard.
+6. Final PCRS clock tree: strip and rebuild with balancing from the optimized positions (69 s). Cells and clock
+   nets, no wires.
+7. Final frame and legroute planning (about 1,210 s): split rows, taps and endcaps, the power grid as obstacles, a
+   2-D global route that rates every net (pin slacks, pose before legalization, congestion), feedback rounds kept
+   only if routing improves. No wires are written.
+8. Terminal legalization: critical nets first, rest by slack, legality check (37 s).
+9. Power grid, IO pins snapped to tracks, wire RC, DEF written (about 470 s).
+10. IO check and fast timing estimate (11 s). End of the flow. The DEF has no signal or clock wires.
+11. `rf_route` setup: tracks, obstacles, clock nets, pin access (51 s).
+12. `rf_route`: clock nets first, data nets by slack, repair ladder, optional route-first legalization (1,518 s).
+13. `rf_route`: write the routed DEF and run the native check (80 s).
+14. Referee outside the flow: connectivity, `drt::check_drc` on several grids, OpenROAD extraction and timing.
+
 ## rf_route: method
 
 - Every wire is an interval on a track with an owner. A wire is inserted only
@@ -312,8 +337,9 @@ routes clocks, crossing nets, spills and failures on the original design
 with the accepted metal present. With `--trunks-first` it routes clocks and
 crossings before dispatch. The workers currently load the complete placement
 and LEFs. This experiment measures routing parallelism and does not enforce
-the placement worker's memory ceiling. Its grids are independent of the
-hierarchy-based placement partitions.
+the placement worker's memory ceiling. Use `--plan fp_chunks.json` to route the rectangular or stepped regions of an
+existing placement plan. The coordinator handles exterior pins and reports
+blocked pin coordinates and failure counts by placement home.
 
 `assembly.json` records ownership and reuse. `finish/feedback.tsv` gives the
 failed pin, reason and search effort for each attempted net. `findings.tsv`
@@ -339,3 +365,17 @@ of 300000, three extra passes, four rip-ups and a 60 CPU-second round budget.
 `finish` writes the DEF and requested checks. The route timer excludes time
 spent waiting for agent commands. Frozen worker metal can be reconsidered
 through the release or localized repair operations above.
+
+For the same Unix-socket client as placement, pass
+`--agent-socket /path/to/router.sock` in a private directory. Send requests
+with `tools/lhd_gui.py --socket /path/to/router.sock status`,
+`retry budget=300000 passes=3 ripup=4 seconds=60` and `finish`.
+`rf_feedback --pin-neighbors` gives all ordinary nets on a blocked cell a
+joint priority pass. This lets a pin move without stranding another pin
+on the same cell. The repair also releases named wires from the native
+geometry report and uses the marker and blocked-pin coordinates.
+When two nets alternate as the last open, add
+`--protect-failures earlier/feedback.tsv` from the same placement. The
+priority pass routes both sets of nets together. On the independently
+placed two-home NVDLA M frame, protecting the preceding round released
+36 of the existing routes and closed the final open in 5.52 seconds wall.

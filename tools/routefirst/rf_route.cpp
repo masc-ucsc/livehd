@@ -149,8 +149,9 @@ uint64_t      bkey(int bx, int by) { return (uint64_t(uint32_t(bx)) << 32) | uin
 struct Cand {
   int  L = 0, t = 0, s = 0;  // state on the first routing layer the pin reaches
   int  x = 0, y = 0;
-  bool v1  = false;  // needs a V1 from the M1 pin
-  int  cut = -1;     // cut layer of the via at (x, y) that joins the pin to this state; 0 with v1
+  bool v1   = false;  // needs a V1 from the M1 pin
+  int  stub = -1;     // selected macro-pin extension, if this access needs one
+  int  cut  = -1;     // cut layer of the via at (x, y) that joins the pin to this state; 0 with v1
 };
 struct Pin {
   int               comp = -1;  // component index, -1 for a terminal
@@ -1185,7 +1186,7 @@ struct Router {
     const auto&    m    = tech.macros.at(comp.macro.str());
     auto&          ly   = L[l];
     auto&          p    = nets[ni].pins[pi];
-    const auto     box  = ph::placed_rect(m, comp.place, fp.dbu, ph::Rect{0, 0, m.width, m.height});
+    const auto     box  = footprint(m, comp.place, fp.dbu);
     const int      plo = int(ly.horiz ? r.yl : r.xl), phi = int(ly.horiz ? r.yh : r.xh);
     const int      alo = int(ly.horiz ? r.xl : r.yl), ahi = int(ly.horiz ? r.xh : r.yh);
     const int      box_lo = int(std::lround(ly.horiz ? box.xl : box.yl)), box_hi = int(std::lround(ly.horiz ? box.xh : box.yh));
@@ -1239,12 +1240,13 @@ struct Router {
             continue;
           }
           Cand cd;
-          cd.L   = la;
-          cd.t   = int(tk - a.tc.begin());
-          cd.s   = int(st - a.stops.begin());
-          cd.cut = std::max(int(l), la);
-          cd.x   = ly.horiz ? *tk : pc;
-          cd.y   = ly.horiz ? pc : *tk;
+          cd.L    = la;
+          cd.t    = int(tk - a.tc.begin());
+          cd.s    = int(st - a.stops.begin());
+          cd.cut  = std::max(int(l), la);
+          cd.stub = int(stubs.size()) - 1;
+          cd.x    = ly.horiz ? *tk : pc;
+          cd.y    = ly.horiz ? pc : *tk;
           p.cands.push_back(cd);
           if (*st == pc) {
             break;
@@ -3849,14 +3851,15 @@ struct Router {
         }
       }
     }
-    for (const auto& sb : stubs) {  // the bar of a macro pin, from the pin to the via that took it
+    for (size_t i = 0; i < stubs.size(); ++i) {
+      const auto& sb  = stubs[i];
       const auto& net = nets[sb.net];
       const auto& pin = net.pins[sb.pin];
-      if (!net.routed || pin.used < 0 || pin.cands[pin.used].cut < 0) {
+      if (!net.routed || pin.used < 0 || pin.cands[pin.used].stub != int(i) || (sb.lo == sb.pin_lo && sb.hi == sb.pin_hi)) {
         continue;
       }
-      // The whole bar goes out, also when the via sits on the pin: its ends are the ones the tracks were routed
-      // against, and the pin alone can be shorter than the minimum length of a piece.
+      // Emit the selected extension in full. If the via lands directly on existing pin metal, the LEF already
+      // supplies that conductor; duplicating a short pin as a signal wire creates a false minimum-length segment.
       const auto& ly = L[sb.l];
       const int   lo = sb.lo, hi = sb.hi;
       const int   c  = (sb.plo + sb.phi) / 2;
@@ -4215,7 +4218,7 @@ int main(int argc, char** argv) try {
   if (!report.empty()) {
     std::ofstream f(report);
     f.exceptions(std::ios::badbit | std::ios::failbit);
-    f << "net\tpins\thpwl\tstatus\tfail_pin\twhy\texpansions\tcalls\n";
+    f << "net\tpins\thpwl\tstatus\tfail_pin\twhy\texpansions\tcalls\tfail_x_dbu\tfail_y_dbu\n";
     for (const auto& n : r.nets) {
       if (!n.skip) {
         f << n.name << '\t' << n.pins.size() << '\t' << n.bbox_hp << '\t'
@@ -4223,7 +4226,14 @@ int main(int argc, char** argv) try {
               : n.failed ? "failed"
                          : "unattempted")
           << '\t' << (n.fail_pin >= 0 ? n.pins[n.fail_pin].name : "") << '\t' << n.fail_why << '\t' << n.expanded << '\t' << n.calls
-          << '\n';
+          << '\t';
+        if (n.fail_pin >= 0) {
+          const auto& pin = n.pins[n.fail_pin];
+          f << pin.cx << '\t' << pin.cy;
+        } else {
+          f << '\t';
+        }
+        f << '\n';
       }
     }
     f.close();

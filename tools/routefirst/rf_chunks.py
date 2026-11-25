@@ -5,9 +5,11 @@ import argparse
 import concurrent.futures
 import csv
 import hashlib
+from http.server import BaseHTTPRequestHandler
 import json
 from pathlib import Path
 import re
+from socketserver import UnixStreamServer
 import subprocess
 import tempfile
 import time
@@ -46,20 +48,50 @@ def section(line, current):
     return current
 
 
-def partition(frame, nx, ny):
+def intersection_area(a, b):
+    return max(0, min(a[2], b[2]) - max(a[0], b[0])) * max(0, min(a[3], b[3]) - max(a[1], b[1]))
+
+
+def partition(frame, nx, ny, plan_path=None):
     cells, ports = {}, {}
-    jobs = [[] for _ in range(nx * ny)]
+    labels = []
+    jobs = []
     boxes = []
     current = ""
     cross = []
     with frame.open() as src:
         for line in src:
             current = section(line, current)
+            if line.startswith("DESIGN "):
+                design = line.split()[1]
             if line.startswith("DIEAREA "):
                 (x0, y0), (x1, y1) = [tuple(map(int, p)) for p in re.findall(POINT, line)]
-                xs = [x0 + (x1 - x0) * i // nx for i in range(nx + 1)]
-                ys = [y0 + (y1 - y0) * j // ny for j in range(ny + 1)]
-                boxes = [(xs[i], ys[j], xs[i + 1], ys[j + 1]) for j in range(ny) for i in range(nx)]
+                if plan_path:
+                    plans = [
+                        r
+                        for r in json.loads(plan_path.read_text())
+                        if r.get("class") == "livehd.placement.chunk_plan" and r.get("design") == design
+                    ]
+                    if len(plans) != 1:
+                        raise ValueError(f"expected one placement chunk plan for {design}")
+                    occupied = []
+                    for home in plans[0]["chunks"]:
+                        shape = home.get("region_dbu") or [home["box_dbu"]]
+                        for rect in shape:
+                            l, b, r, t = rect
+                            if not (x0 <= l < r <= x1 and y0 <= b < t <= y1):
+                                raise ValueError("chunk rectangle outside routing frame")
+                            if any(intersection_area(rect, other) for other in occupied):
+                                raise ValueError("independent routing workers require disjoint placement regions")
+                            occupied.append(rect)
+                        labels.append(home["id"])
+                        boxes.append(shape)
+                else:
+                    xs = [x0 + (x1 - x0) * i // nx for i in range(nx + 1)]
+                    ys = [y0 + (y1 - y0) * j // ny for j in range(ny + 1)]
+                    boxes = [[(xs[i], ys[j], xs[i + 1], ys[j + 1])] for j in range(ny) for i in range(nx)]
+                    labels = list(range(len(boxes)))
+                jobs = [[] for _ in boxes]
             if not line.startswith("- ") or not current:
                 continue
             name = line.split(None, 2)[1]
@@ -79,18 +111,29 @@ def partition(frame, nx, ny):
                     x, y = ports[pin] if inst == "PIN" else cells[inst]
                     # Cells are assigned by origin. The worker must also prove
                     # that all its emitted paths lie inside this same tile.
-                    i = min(nx - 1, max(0, ((x - x0 + 1) * nx - 1) // (x1 - x0)))
-                    j = min(ny - 1, max(0, ((y - y0 + 1) * ny - 1) // (y1 - y0)))
-                    owners.add(j * nx + i)
+                    if plan_path:
+                        owner = next(
+                            (
+                                i
+                                for i, shape in enumerate(boxes)
+                                if any(l <= x < r and b <= y < t for l, b, r, t in shape)
+                            ),
+                            None,
+                        )
+                        owners.add(owner)
+                    else:
+                        i = min(nx - 1, max(0, ((x - x0 + 1) * nx - 1) // (x1 - x0)))
+                        j = min(ny - 1, max(0, ((y - y0 + 1) * ny - 1) // (y1 - y0)))
+                        owners.add(j * nx + i)
                     if len(owners) > 1:
                         break
-                if len(owners) == 1 and "+ USE CLOCK" not in line:
+                if len(owners) == 1 and None not in owners and "+ USE CLOCK" not in line:
                     jobs[owners.pop()].append(name)
                 else:
                     cross.append(name)
     if not boxes:
         raise ValueError("missing rectangular DIEAREA")
-    return boxes, jobs, cross
+    return boxes, jobs, cross, labels
 
 
 def records(frame):
@@ -117,7 +160,6 @@ def records(frame):
 def contained(paths, box):
     # rf_route emits ASAP7 default-width M2-M7 wires and VIA12..67. A
     # 128-DBU seam reserve covers their enclosures and the calibrated spacing.
-    xl, yl, xh, yh = box
     for path in paths:
         m = WIRE.fullmatch(path)
         if not m:
@@ -125,19 +167,98 @@ def contained(paths, box):
         x, y = int(m[1]), int(m[2])
         x2 = int(m[4]) if m[4] not in (None, "*") else x
         y2 = int(m[5]) if m[5] not in (None, "*") else y
-        if not (
-            xl + 128 <= min(x, x2) <= max(x, x2) <= xh - 128 and yl + 128 <= min(y, y2) <= max(y, y2) <= yh - 128
-        ):
+        rect = (min(x, x2) - 128, min(y, y2) - 128, max(x, x2) + 128, max(y, y2) + 128)
+        if sum(intersection_area(rect, slab) for slab in box) < (rect[2] - rect[0]) * (rect[3] - rect[1]):
             return False
     return bool(paths)
 
 
-def route(args, folder, agent=False):
+def socket_commands(process, path):
+    """Use the same local POST /agent protocol as tools/lhd_gui.py."""
+    ready = process.stdout.readline()
+    if not ready:
+        raise RuntimeError("router stopped before agent startup")
+    state = json.loads(ready)
+    finished = False
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            nonlocal state, finished
+            try:
+                if self.path != "/agent":
+                    self.send_error(404)
+                    return
+                size = int(self.headers.get("Content-Length", 0))
+                if not 0 < size <= 65536:
+                    raise ValueError("expected one JSON command")
+                req = json.loads(self.rfile.read(size))
+                op = req["cmd"]
+                if op == "status":
+                    reply = dict(ok=True, **state)
+                else:
+                    if op == "retry":
+                        command = "retry {} {} {} {}".format(
+                            int(req["budget"]), int(req["passes"]), int(req["ripup"]), float(req["seconds"])
+                        )
+                    elif op == "release":
+                        name = req["net"]
+                        if not isinstance(name, str) or not name or any(c.isspace() for c in name):
+                            raise ValueError("expected one net name")
+                        command = "release " + name
+                    elif op == "finish":
+                        command = op
+                    else:
+                        raise ValueError("expected status, release, retry or finish")
+                    print(command, file=process.stdin, flush=True)
+                    finished = op == "finish"
+                    if finished:
+                        reply = {"ok": True}
+                    else:
+                        result = json.loads(process.stdout.readline())
+                        if "error" not in result:
+                            state = result
+                        reply = dict(ok="error" not in result, **result)
+            except (KeyError, ValueError, TypeError) as exc:
+                reply = {"ok": False, "error": str(exc)}
+            data = json.dumps(reply).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+    # Bind without unlinking an existing socket. Make it private before
+    # listening and remove only our own socket at shutdown.
+    with UnixStreamServer(str(path), Handler, bind_and_activate=False) as server:
+        server.server_bind()
+        try:
+            path.chmod(0o600)
+            server.server_activate()
+            server.timeout = 1
+            while not finished:
+                if process.poll() is not None:
+                    raise RuntimeError(f"resident router exited with status {process.returncode}")
+                server.handle_request()
+        finally:
+            path.unlink(missing_ok=True)
+
+
+def route(args, folder, agent=False, socket_path=None):
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "command.json").write_text(json.dumps([str(x) for x in args]))
     with (folder / "stats.json").open("w") as out, (folder / "stderr.log").open("w") as err:
         if agent:
-            with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=err, text=True) as process:
+            with subprocess.Popen(
+                args, stdin=subprocess.PIPE if socket_path else None, stdout=subprocess.PIPE, stderr=err, text=True
+            ) as process:
+                if socket_path:
+                    try:
+                        socket_commands(process, socket_path)
+                    finally:
+                        process.stdin.close()
                 for line in process.stdout:
                     if line.strip() == "{":
                         out.write(line)
@@ -204,12 +325,26 @@ def assemble(frame, dest, wires):
         raise ValueError("worker wires do not match source net records")
 
 
-def feedback(folder):
+def feedback(folder, homes=()):
     with (folder / "feedback.tsv").open() as src:
         failures = [dict(row) for row in csv.DictReader(src, delimiter="\t") if row["status"] != "routed"]
     stats = json.loads((folder / "stats.json").read_text())
+    by_home = {}
+    if homes:
+        for row in failures:
+            owner = "unlocated"
+            if row.get("fail_x_dbu") and row.get("fail_y_dbu"):
+                x, y = int(row["fail_x_dbu"]), int(row["fail_y_dbu"])
+                owner = next(
+                    (str(name) for name, slabs in homes if any(l <= x < r and b <= y < t for l, b, r, t in slabs)),
+                    "exterior",
+                )
+            counts = by_home.setdefault(owner, {})
+            why = row["why"] or row["status"]
+            counts[why] = counts.get(why, 0) + 1
     return {
         "unrouted": len(failures),
+        "failures_by_home": by_home,
         "violations": {k: v for k, v in stats.items() if k.startswith("verify_") and v},
         "first_failures": failures[:20],
         "route_cpu_s": stats["route_cpu_s"],
@@ -219,7 +354,11 @@ def feedback(folder):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--router", type=Path, default=Path(__file__).with_name("rf_route"))
-    p.add_argument("--grid", type=int, nargs=2, default=(2, 2), metavar=("NX", "NY"))
+    homes = p.add_mutually_exclusive_group()
+    homes.add_argument(
+        "--plan", type=Path, help="use the rectangular or stepped regions of a LiveHD fp_chunks.json"
+    )
+    homes.add_argument("--grid", type=int, nargs=2, default=(2, 2), metavar=("NX", "NY"))
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--worker-seconds", type=float, default=120)
     p.add_argument("--finish-seconds", type=float, default=600)
@@ -242,10 +381,14 @@ def main():
         action="store_true",
         help="keep the assembled router resident for status, release and retry commands",
     )
+    p.add_argument(
+        "--agent-socket", type=Path, help="serve the resident router over a local Unix socket for tools/lhd_gui.py"
+    )
     p.add_argument("--timing", type=Path, help="LiveHD pin slack TSV from this placement")
     p.add_argument("--crit-frac", type=float, default=0.0)
     p.add_argument("--pd-alpha", type=float, default=0.3)
     args = p.parse_args()
+    args.agent = args.agent or args.agent_socket is not None
     if not 0 <= args.pd_alpha <= 1 or not 0 <= args.crit_frac <= 1 or (args.crit_frac and not args.timing):
         p.error("pd-alpha and crit-frac must be in [0,1], with timing supplied for critical-net priority")
     args.costs = list(ROUTE)
@@ -256,7 +399,7 @@ def main():
         p.error("grid, workers and CPU budgets must be positive")
     args.out.mkdir(parents=True, exist_ok=False)
     start = time.monotonic()
-    boxes, assignments, cross = partition(args.frame, *args.grid)
+    boxes, assignments, cross, labels = partition(args.frame, *args.grid, args.plan)
     if any(i < 0 or i >= len(boxes) for i in args.release):
         p.error("released tile outside grid")
 
@@ -270,6 +413,7 @@ def main():
     stamp = dict(
         inputs=[digest(f) for f in (args.router, args.frame, *args.lefs, Path(__file__))],
         timing=digest(args.timing) if args.timing else None,
+        placement_plan=digest(args.plan) if args.plan else None,
         alpha=args.pd_alpha,
         critical_fraction=args.crit_frac,
         grid=list(args.grid),
@@ -328,7 +472,9 @@ def main():
     assemble(frame, seed, wires)
     work = args.out / "finish"
     prefix = dict(
-        grid=args.grid,
+        grid=None if args.plan else args.grid,
+        homes=labels,
+        regions_dbu=boxes,
         crossing_or_clock=len(cross),
         assigned=[len(x) for x in assignments],
         retained=len(wires),
@@ -364,8 +510,9 @@ def main():
         ],
         work,
         agent=args.agent,
+        socket_path=args.agent_socket,
     )
-    result = dict(prefix, **feedback(work), wall_s=time.monotonic() - start)
+    result = dict(prefix, **feedback(work, list(zip(labels, boxes))), wall_s=time.monotonic() - start)
     (args.out / "feedback.json").write_text(json.dumps(result, indent=2))
     print(json.dumps(result))
 
