@@ -251,12 +251,37 @@ The additional rules are enabled by default and do not use `--min-repeats`:
   used as data, a later write to the register (the clear is then not a priority
   reset), both arms constant (a data mux), clears mixed with non-register
   assignments, `elif` chains that reuse the port, arrays/memories and latches.
-- **`reset-port-type`** finds a `U1`/`Bool` input that only acts as a reset (same
+- **`reset-port-type`** (a **warning**) finds a `U1`/`Bool` input (also the legacy
+  lower-case `u1`/`bool` of translated sources) that only acts as a reset (same
   functional test, counting `reset_pin=PORT` uses too) and suggests declaring it
-  `Reset`, since clocks and resets bind by type, not by name. It is the follow-up
-  to `hardcoded-reset`: `struct_top_port.prp` (hand-written clear) triggers both,
-  `struct_top_port_1.prp` (`reset_pin`, `U1`) only this one, and
+  `Reset`, since clocks and resets bind by type, not by name. In a `mod`, a port
+  *named* like a reset (a `_`-separated word `reset`, `rst`, `rstn`, `nreset`,
+  `arst`, ... as its last `_`-separated word, before an optional `_n`/`_ni`/`_i`/digit
+  suffix; not `reset_vector`, `rst_cnt`, `preset`) is also flagged when it is only
+  forwarded unchanged to calls (`child(reset=reset)`) or never read. It is a
+  warning when the port is reset-named or a `reset_pin`; a hand-cleared control
+  with another name (`clear`, `flush`) stays an info suggestion. It is the
+  follow-up to `hardcoded-reset`: `struct_top_port.prp` (hand-written clear)
+  triggers both, `struct_top_port_1.prp` (`reset_pin`, `U1`) only this one, and
   `struct_top_port_2.prp` (`Reset`) neither.
+- **`clock-port-type`** (a **warning**) is the clock twin: a 1-bit input used only
+  as `clock_pin=PORT`, or, in a `mod`, one named like a clock (last word `clk`,
+  `clock`, `gclk`, ...: `clk_i`, `core_clock`; not `clk_en`,
+  `tl_slave_clock_xing_out_a_ready`) that is
+  only forwarded to calls or never read. A `U1` "clock" is a data bit: the
+  registers silently bind the implicit clock instead. Suggests `NAME:Clock`.
+
+- **`unneeded-backtick`** (a **warning**) flags ``clock`` / ``reset`` written with
+  backticks: old style from before the upper-case type rule, when they were
+  reserved. The types are now `Clock`/`Reset` and `clock`/`reset` are ordinary
+  names. One finding per word per file, anchored at its first use (notes list
+  more uses; the `uses` attribute counts them all).
+
+  These findings are warnings rather than info suggestions because an untyped
+  clock/reset is likely wrong hardware (and the backticks are obsolete syntax);
+  they are expected to become compile errors. Warnings rank ahead of every info
+  suggestion, so `--max-findings` never hides one. Like every rule they are
+  silenced with `// prp-style-allow`.
 
 - **`narrow-scoped-mut`** finds a local `mut` initialized with a literal, assigned
   once in a narrower scope, and read only after that assignment within the same

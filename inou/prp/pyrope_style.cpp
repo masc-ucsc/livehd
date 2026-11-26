@@ -2,6 +2,8 @@
 #include "pyrope_style.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <charconv>
 #include <format>
 #include <limits>
@@ -703,12 +705,64 @@ class Detector {
   // name. "Only acts as a reset" is functional: every use of the port is either
   // the condition of a hand-written `if PORT { reg = CONST }` clear or a
   // `reset_pin=PORT` attribute; any other use (arithmetic, data, an argument)
-  // disqualifies it.
+  // disqualifies it. A port NAMED like a reset (`reset`, `rst_ni`, ...) may also
+  // be forwarded unchanged to calls (`child(reset=reset)`) or be unused: the
+  // usual shape of translated RTL, where every module gets `clock`/`reset`.
+  //
+  // The same holds for clocks: a 1-bit input used only as `clock_pin=PORT` (or,
+  // when named like a clock, only forwarded to calls or unused) should be typed
+  // `Clock`. A `U1` "clock" is an ordinary data bit: registers silently bind
+  // the implicit clock instead.
   struct Port {
     TSNode      node;
-    std::string type;  // "U1", "Bool" or "Reset"
-    size_t      total = 0, hardcoded = 0, structural = 0;
+    std::string type;  // as written: "U1", "Bool", "Reset", "Clock" or legacy "u1"/"bool"
+    size_t      total = 0, hardcoded = 0, structural = 0, clock_pins = 0, forwarded = 0;
   };
+
+  // Lower-case '_'-separated words of a name.
+  static std::vector<std::string> name_words(std::string_view name) {
+    std::vector<std::string> words(1);
+    for (const char c : name) {
+      if (c == '_') {
+        if (!words.back().empty()) {
+          words.emplace_back();
+        }
+      } else {
+        if (c != '`') {  // a backticked `reset` is still named reset
+          words.back() += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+      }
+    }
+    if (words.back().empty()) {
+      words.pop_back();
+    }
+    return words;
+  }
+  // The clock/reset word must END the name, before an optional polarity/index
+  // suffix (`clk_i`, `rst_ni`, `clock_0`): a long bundle name that merely
+  // contains it (`tl_slave_clock_xing_out_a_ready`) is data.
+  static std::string last_word(std::string_view name) {
+    auto words = name_words(name);
+    while (words.size() > 1) {
+      const auto& w = words.back();
+      if (w == "i" || w == "in" || w == "n" || w == "ni" || w == "p" || std::all_of(w.begin(), w.end(), digit)) {
+        words.pop_back();
+      } else {
+        break;
+      }
+    }
+    return words.empty() ? std::string{} : words.back();
+  }
+  static bool clock_like(std::string_view name) {
+    const auto w = last_word(name);
+    return w == "clk" || w == "clock" || (w.size() <= 6 && (w.ends_with("clk") || w.ends_with("clock")));
+  }
+  static bool reset_like(std::string_view name) {
+    static constexpr std::array<std::string_view, 10> resets{"rst",   "rstn",   "nrst",   "arst",   "srst",
+                                                             "reset", "resetn", "nreset", "areset", "sreset"};
+    const auto w = last_word(name);
+    return std::find(resets.begin(), resets.end(), w) != resets.end();
+  }
   struct RegInfo {
     std::string type;  // declared type text; empty when untyped
     bool        has_attributes = false;
@@ -915,17 +969,20 @@ class Detector {
       if (kind_of(a) != "typed_identifier") {
         return;
       }
-      const auto id = field(a, "identifier"), ty = field(field(a, "type"), "type");
+      const auto id = field(a, "identifier");
+      auto       ty = field(field(a, "type"), "type");
+      if (kind_of(ty) == "expression_type" && ts_node_named_child_count(ty) == 1) {
+        ty = ts_node_named_child(ty, 0);  // `x:u1`: a plain name in a type position
+      }
       if (ts_node_is_null(id) || ts_node_is_null(ty)) {
         return;
       }
+      // The legacy lower-case spellings (`u1`, `bool`) parse as identifiers; the
+      // compiler rejects them (renamed-type), but translated sources still use them.
       const auto tk = kind_of(ty);
-      if (tk == "reset_type") {
-        ports.try_emplace(text(id), Port{a, "Reset"});
-      } else if (tk == "bool_type") {
-        ports.try_emplace(text(id), Port{a, "Bool"});
-      } else if (tk == "uint_type" && text(ty) == "U1") {
-        ports.try_emplace(text(id), Port{a, "U1"});
+      if (tk == "reset_type" || tk == "clock_type" || tk == "bool_type" || (tk == "uint_type" && text(ty) == "U1")
+          || (tk == "identifier" && (text(ty) == "u1" || text(ty) == "bool"))) {
+        ports.try_emplace(text(id), Port{a, std::string(text(ty))});
       }
     });
     if (ports.empty()) {
@@ -960,13 +1017,23 @@ class Detector {
       }
       if (k == "identifier") {
         if (const auto it = ports.find(text(n)); it != ports.end()) {
+          // `child(name=PORT)` / `child(PORT)`: the argument NAME is not a use;
+          // the value is forwarded unchanged.
+          const auto parent = ts_node_parent(n);
+          const auto pk     = kind_of(parent);
+          if (pk == "arg_assignment" && ts_node_eq(field(parent, "lvalue"), n)) {
+            return false;
+          }
           ++it->second.total;
+          if (pk == "arg_tuple" || (pk == "arg_assignment" && ts_node_eq(field(parent, "rvalue"), n))) {
+            ++it->second.forwarded;
+          }
         }
         return false;
       }
       if (k == "scope_statement") {
         scopes.push_back(n);
-      } else if (k == "assignment") {
+      } else if (k == "assignment" || k == "declaration_statement") {  // `reg r:T = v` or a bare `reg r:T`
         const auto decl = field(n, "decl");
         const auto lv   = field(n, "lvalue");
         if (!ts_node_is_null(decl) && kind_of(field(decl, "storage")) == "reg_decl" && !ts_node_is_null(lv)) {
@@ -1007,9 +1074,13 @@ class Detector {
         }
       } else if (k == "attribute_assignment") {
         const auto lv = field(n, "lvalue"), rv = field(n, "rvalue");
-        if (!ts_node_is_null(lv) && !ts_node_is_null(rv) && text(lv) == "reset_pin" && kind_of(rv) == "identifier") {
+        if (!ts_node_is_null(lv) && !ts_node_is_null(rv) && kind_of(rv) == "identifier") {
           if (const auto it = ports.find(text(rv)); it != ports.end()) {
-            ++it->second.structural;
+            if (text(lv) == "reset_pin") {
+              ++it->second.structural;
+            } else if (text(lv) == "clock_pin") {
+              ++it->second.clock_pins;
+            }
           }
         }
       }
@@ -1027,9 +1098,16 @@ class Detector {
         analyze_reset_if(stmts, i, regs, ports, found);
       }
     }
+    // Name-based evidence (forwarding, no use at all) only in a `mod`: a `comb`
+    // has no registers, so a reset-named input there is ordinary data.
+    const bool stateful   = kind_of(field(lambda, "func_type")) != "comb_lambda";
+    const auto reset_uses = [&](std::string_view name) {
+      const auto& p = ports.at(name);
+      return p.hardcoded + p.structural + (stateful && reset_like(name) ? p.forwarded : 0);
+    };
     const auto pure = [&](std::string_view name) {
       const auto& p = ports.at(name);
-      return p.total > 0 && p.total == p.hardcoded + p.structural;
+      return p.total > 0 && p.total == reset_uses(name);
     };
     for (auto& r : found) {
       if (!pure(r.port)) {
@@ -1070,22 +1148,70 @@ class Detector {
       candidates.push_back(std::move(f));
     }
     for (const auto& [name, port] : ports) {
-      if (port.type == "Reset" || !pure(name) || port.hardcoded + port.structural == 0) {
+      if (port.type == "Reset" || port.type == "Clock") {
+        continue;
+      }
+      const auto uses = reset_uses(name);
+      // Functional (only reset uses), or a reset-named port that is never read.
+      const bool functional = pure(name) && port.hardcoded + port.structural > 0;
+      const bool by_name    = stateful && reset_like(name) && port.total == uses && port.clock_pins == 0;
+      if (!functional && !by_name) {
         continue;
       }
       Finding f{};
       f.rule    = Rule::ResetPortType;
       f.range   = range(port.node, port.node);
-      f.message = std::format("'{}' only acts as a reset but is declared '{}'", name, port.type);
-      f.hint    = std::format(
+      f.message = port.total == 0 ? std::format("'{}' is named like a reset but is declared '{}' (and never read)", name, port.type)
+                  : functional    ? std::format("'{}' only acts as a reset but is declared '{}'", name, port.type)
+                                  : std::format("'{}' is named like a reset and only forwarded to calls, but is declared '{}'",
+                                                name,
+                                                port.type);
+      f.hint = std::format(
           "declare it as '{}:Reset': clocks and resets bind by type, not by name; polarity stays per register (negreset=true)",
           name);
       f.attributes = {
           {         "port",        std::string(name)},
           {"declared_type",                port.type},
-          {   "reset_uses", std::to_string(port.hardcoded + port.structural)}
+          {   "reset_uses",   std::to_string(uses)},
+          {    "forwarded", std::to_string(port.forwarded)}
       };
-      f.score = 1 + port.hardcoded + port.structural;
+      f.score = 1 + uses;
+      // A port named like a reset, or already a structural reset_pin, is almost
+      // surely a reset: warn. A hand-cleared data control (`clear`, `flush`)
+      // stays an info suggestion.
+      f.warning = reset_like(name) || port.structural > 0;
+      candidates.push_back(std::move(f));
+    }
+    for (const auto& [name, port] : ports) {
+      if (port.type == "Reset" || port.type == "Clock") {
+        continue;
+      }
+      const bool functional = port.clock_pins > 0 && port.total == port.clock_pins;
+      const bool by_name    = stateful && clock_like(name) && port.total == port.clock_pins + port.forwarded;
+      if (!functional && !by_name) {
+        continue;
+      }
+      Finding f{};
+      f.rule    = Rule::ClockPortType;
+      f.range   = range(port.node, port.node);
+      f.message = port.total == 0      ? std::format("'{}' is named like a clock but is declared '{}' (and never read)", name, port.type)
+                  : port.forwarded == 0 ? std::format("'{}' only acts as a clock but is declared '{}'", name, port.type)
+                                        : std::format("'{}' is named like a clock and only drives clock pins or calls, but is declared '{}'",
+                                                      name,
+                                                      port.type);
+      f.hint = std::format(
+          "declare it as '{}:Clock': clocks bind by type, not by name; a '{}' input is a data bit, so the registers use the "
+          "implicit clock instead",
+          name,
+          port.type);
+      f.attributes = {
+          {         "port",              std::string(name)},
+          {"declared_type",                      port.type},
+          {   "clock_pins", std::to_string(port.clock_pins)},
+          {    "forwarded",  std::to_string(port.forwarded)}
+      };
+      f.score   = 1 + port.clock_pins + port.forwarded;
+      f.warning = true;
       candidates.push_back(std::move(f));
     }
   }
@@ -1524,7 +1650,55 @@ class Detector {
 public:
   Detector(std::string_view src, const Options& opts) : source(src), options(opts) {}
 
+  // ``clock`` / ``reset`` were reserved before the upper-case type rule; now the
+  // types are `Clock`/`Reset` and `clock`/`reset` are ordinary names, so the
+  // backticks are old style. One finding per word, at its first use.
+  void unneeded_backticks(TSNode root) {
+    std::map<std::string_view, std::vector<TSNode>> uses;
+    descend(root, [&](TSNode n) {
+      const auto k = kind_of(n);
+      if (k == "ERROR") {
+        return false;
+      }
+      if (k == "identifier") {
+        const auto t = text(n);
+        if (t == "`clock`" || t == "`reset`") {
+          uses[t].push_back(n);
+        }
+        return false;
+      }
+      return true;
+    });
+    for (const auto& [word, nodes] : uses) {
+      const auto bare = word.substr(1, word.size() - 2);
+      Finding    f{};
+      f.rule    = Rule::UnneededBacktick;
+      f.range   = range(nodes.front(), nodes.front());
+      f.message = std::format("'{}' does not need backticks ({} use{}): '{}' is an ordinary name",
+                              word,
+                              nodes.size(),
+                              nodes.size() == 1 ? "" : "s",
+                              bare);
+      f.hint    = std::format(
+          "write '{}': only the type words '{}' are reserved since the upper-case type rule; backticked '{}' is old style",
+          bare,
+          bare == "clock" ? "Clock" : "Reset",
+          bare);
+      f.attributes = {
+          {"name", std::string(bare)},
+          {"uses", std::to_string(nodes.size())}
+      };
+      for (size_t i = 1; i < nodes.size() && i <= 8; ++i) {
+        related(f, nodes[i], "another backticked use");
+      }
+      f.score   = nodes.size();
+      f.warning = true;
+      candidates.push_back(std::move(f));
+    }
+  }
+
   Report run(TSNode root) {
+    unneeded_backticks(root);
     std::unordered_map<std::string_view, size_t> io_names;
     track_ios(root, io_names);
     if (!ts_node_has_error(root)) {
@@ -1540,6 +1714,9 @@ public:
       });
     }
     std::sort(candidates.begin(), candidates.end(), [](const Finding& a, const Finding& b) {
+      if (a.warning != b.warning) {
+        return a.warning;  // --max-findings never hides a warning behind suggestions
+      }
       if (a.score != b.score) {
         return a.score > b.score;
       }
@@ -1587,6 +1764,8 @@ std::string_view rule_name(Rule rule) {
     case Rule::SingleDestinationConditional: return "single-destination-conditional";
     case Rule::HardcodedReset              : return "hardcoded-reset";
     case Rule::ResetPortType               : return "reset-port-type";
+    case Rule::ClockPortType               : return "clock-port-type";
+    case Rule::UnneededBacktick            : return "unneeded-backtick";
     case Rule::NarrowScopedMut             : return "narrow-scoped-mut";
     case Rule::CompactBitPacking           : return "compact-bit-packing";
   }

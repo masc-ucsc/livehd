@@ -182,7 +182,10 @@ int run_style(const lhd::Options& opts) {
         b.emit();
       }
       for (const auto& f : report.findings) {
-        auto b = livehd::diag::Builder(livehd::diag::Severity::info, "lhd.pyrope.style", style::rule_name(f.rule), "syntax");
+        auto b = livehd::diag::Builder(f.warning ? livehd::diag::Severity::warning : livehd::diag::Severity::info,
+                                       "lhd.pyrope.style",
+                                       style::rule_name(f.rule),
+                                       "syntax");
         // Every hint ends with the exact tag that silences the finding.
         const auto silence = std::format("silence with '// prp-style-allow {}'", style::rule_name(f.rule));
         if (f.rule != style::Rule::RepeatedCode && f.rule != style::Rule::LikelyUnrolledLoop) {

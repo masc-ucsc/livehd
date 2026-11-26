@@ -1,0 +1,16 @@
+/*
+:name: style_clock_reset_clean
+:type: style
+:style: none
+*/
+// Near-misses: typed Clock/Reset ports, and clock/reset-looking names that are
+// data (`clk_en` feeds logic, `reset_vector` is an address, a `comb` has no
+// registers so its `rst` input is data).
+pub mod m(clk:Clock, rst:Reset, clk_en:U1, reset_vector:U1, din:U8) -> (dout:U8@[]) {
+  reg q:U8 = 0
+  dout = q
+  if clk_en != 0 { q = din ^ reset_vector }
+}
+pub comb f(rst:U1, din:U8) -> (o:U8) {
+  o = din
+}

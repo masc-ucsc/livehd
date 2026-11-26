@@ -506,15 +506,21 @@ class PrpRunner:
                 print('{} - style - FAILED: unparsable diagnostic line: {}'.format(name, line))
                 return 1
         # A style fixture must be clean input: a partial parse or an infrastructure
-        # error would hide missing findings behind a "skipped region".
-        bad = [r for r in records if r.get('severity') in ('error', 'warning')]
+        # error would hide missing findings behind a "skipped region". The
+        # port-type rules (clock-port-type, reset-port-type) are warnings, so a
+        # warning is a finding when it names its silencing tag.
+        def is_finding(r):
+            return r.get('code') != 'style-summary' and (
+                r.get('severity') == 'info'
+                or (r.get('severity') == 'warning' and '// prp-style-allow {}'.format(r.get('code')) in r.get('hint', '')))
+        bad = [r for r in records if r.get('severity') in ('error', 'warning') and not is_finding(r)]
         if bad or proc.returncode not in (0, 2):
             print('{} - style - FAILED: expected a clean analysis, got rc={} and {}'.format(
                 name, proc.returncode, ' || '.join(r.get('message', '') for r in bad) or '(no diagnostic)'))
             print(proc.stderr)
             return 1
 
-        findings = [r for r in records if r.get('severity') == 'info' and r.get('code') != 'style-summary']
+        findings = [r for r in records if is_finding(r)]
         found    = {r['code'] for r in findings}
         if found != expected:
             print('{} - style - FAILED: expected rule(s) {} but got {}'.format(

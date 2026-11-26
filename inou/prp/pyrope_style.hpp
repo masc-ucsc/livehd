@@ -29,6 +29,8 @@ enum class Rule {
   SingleDestinationConditional,
   HardcodedReset,
   ResetPortType,
+  ClockPortType,
+  UnneededBacktick,
   NarrowScopedMut,
   CompactBitPacking
 };
@@ -52,6 +54,9 @@ struct Finding {
   std::string                                      hint;
   std::vector<std::pair<std::string, std::string>> attributes;
   std::vector<RelatedLocation>                     related;
+  // Severity: most findings are info suggestions; a clock/reset port that is not
+  // typed Clock/Reset is a warning (likely wrong hardware; to become an error).
+  bool                                             warning = false;
 };
 
 struct Report {

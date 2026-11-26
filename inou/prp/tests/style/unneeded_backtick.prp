@@ -1,0 +1,13 @@
+/*
+:name: style_unneeded_backtick
+:type: style
+:style: unneeded-backtick
+:message: does not need backticks
+:help: only the type words
+*/
+// Old style from before the upper-case type rule: `clock`/`reset` were reserved
+// then. Now the types are Clock/Reset and the words are ordinary names.
+pub mod m(clk:Clock, rst:Reset, din:U8) -> (dout:U8@[]) {
+  const `reset` = din#[0]  // locate_style_unneeded-backtick
+  dout = din ^ `reset`
+}
