@@ -47,6 +47,10 @@ documents every option; in short:
   (`compactBlocker`: `checkDesign`, `addrError`, `imgRootError`, `wordError`; otherwise the
   summary says why not, and nothing is compacted). The summary's `compactions` line then ends
   in `automatic`.
+* The design hash (`Ckpt.designHash`, fnv1a64 of the certificate's DCERT4 rendering: 3.9 s and
+  800 MB on SoomRV's SoC) is computed only when a checkpoint is read or written. A compaction's
+  checkpoint never leaves memory and `restore` ignores its design field (`compacted_outputs`
+  holds for any hash), so compaction writes 0 there.
 * A stimulus file's inputs come from a table built once (`StimTab`), with `inputAt`'s rules.
 * The route runs as an engine (`HDLProof/Run/Engine`'s `EngineSelector`, from `Knobs`): ir staged, vc
   optimized and event-driven with its memories as tables, fp with shared tails. `inc:off` runs
@@ -222,8 +226,9 @@ abbrev TraceH := IO.FS.Handle × IO.FS.Handle × IO.FS.Handle × Option IO.FS.Ha
 /-- Cycles from `st` until a status stops the run: checkpoints due, the limit, compaction, one
 `cycleStep`, the traces, lockstep (engine `L` on state `s2`). A recursive function rather than a
 loop over a mutable variable, so each cycle holds the only reference to the engine's state
-(`Compiler/Engine`'s loop rule); a self tail call, compiled as a jump. -/
-partial def runLoop {σ σ2 : Type} (o : Opts) (ctx : Ctx) (io : IoMeta) (hash c0 : Nat)
+(`Compiler/Engine`'s loop rule); a self tail call, compiled as a jump. A compaction's checkpoint
+carries design hash 0: `restore` ignores it, and `compacted_outputs` holds for any hash. -/
+partial def runLoop {σ σ2 : Type} (o : Opts) (ctx : Ctx) (io : IoMeta) (c0 : Nat)
     (E : Engine σ) (L : Option (Engine σ2)) (traceH : Option TraceH) (vcd : Option Vcd)
     (saveTo : String → LoopState σ → IO Unit) (st : LoopState σ) (s2 : Option σ2) (t : Tally) :
     IO (LoopState σ × Tally) := do
@@ -233,11 +238,11 @@ partial def runLoop {σ σ2 : Type} (o : Opts) (ctx : Ctx) (io : IoMeta) (hash c
   if k ≥ c0 + o.max then return (st, { t with status := "limit" })
   let compactNow := o.compact > 0 && k > c0 && (k - c0) % o.compact == 0
   let st := if compactNow then
-      { st with s := E.reload st.s (Ckpt.restore (Ckpt.save ctx.D hash k #[] (E.view st.s))) }
+      { st with s := E.reload st.s (Ckpt.restore (Ckpt.save ctx.D 0 k #[] (E.view st.s))) }
     else st
   let s2 := if compactNow then
       match L, s2 with
-      | some l, some q2 => some (l.reload q2 (Ckpt.restore (Ckpt.save ctx.D hash k #[] (l.view q2))))
+      | some l, some q2 => some (l.reload q2 (Ckpt.restore (Ckpt.save ctx.D 0 k #[] (l.view q2))))
       | _, s2 => s2
     else s2
   let t := if compactNow then { t with compactions := t.compactions + 1 } else t
@@ -277,11 +282,12 @@ partial def runLoop {σ σ2 : Type} (o : Opts) (ctx : Ctx) (io : IoMeta) (hash c
     | .error () => return (co.next, { t with status := "lockstep" })
     | .ok s2 =>
       if let some why := co.status then return (co.next, { t with status := why })
-      runLoop o ctx io hash c0 E L traceH vcd saveTo co.next s2 t
+      runLoop o ctx io c0 E L traceH vcd saveTo co.next s2 t
 
-/-- The run proper on engine `E` (and lockstep engine `L`): the sinks, the loop, the summary. -/
+/-- The run proper on engine `E` (and lockstep engine `L`): the sinks, the loop, the summary.
+`hash` is the design hash, computed on its first use (a checkpoint written). -/
 def runWith {σ σ2 : Type} (o : Opts) (D : DesignCert) (io : IoMeta) (bind : Bind)
-    (edges : EdgeSpec) (hash : Nat) (ctx : Ctx) (s0 : RuntimeState) (h0 : HostState) (c0 : Nat)
+    (edges : EdgeSpec) (hash : Thunk Nat) (ctx : Ctx) (s0 : RuntimeState) (h0 : HostState) (c0 : Nat)
     (E : Engine σ) (L : Option (Engine σ2)) : IO UInt32 := do
   -- sinks
   let traceH ← match o.trace with
@@ -303,11 +309,11 @@ def runWith {σ σ2 : Type} (o : Opts) (D : DesignCert) (io : IoMeta) (bind : Bi
   let saveTo (p : String) (st : LoopState σ) : IO Unit := do
     let exts := if bind.regions.isEmpty && bind.buses.isEmpty then #[]
       else #[{ name := extName, bytes := (st.host.encode).toList : Ckpt.Ext }]
-    IO.FS.writeBinFile p (Ckpt.render (Ckpt.save D hash st.cycle exts (E.view st.s)))
+    IO.FS.writeBinFile p (Ckpt.render (Ckpt.save D hash.get st.cycle exts (E.view st.s)))
   say s!"cert_run: route {E.name}, {D.flops.size} flops, {D.memories.size} memories, \
 {bind.buses.size} buses, {bind.regions.size} regions; start cycle {c0}"
   let t0 ← IO.monoNanosNow
-  let (st, t) ← runLoop o ctx io hash c0 E L traceH vcd saveTo
+  let (st, t) ← runLoop o ctx io c0 E L traceH vcd saveTo
     { s := E.load s0, host := h0, cycle := c0 } (L.map fun l => l.load s0) {}
   let t1 ← IO.monoNanosNow
   if let some p := o.ckptOut then saveTo p st
@@ -342,8 +348,9 @@ def runWith {σ σ2 : Type} (o : Opts) (D : DesignCert) (io : IoMeta) (bind : Bi
 checkpoint cycles, the compaction policy and the lockstep engine; then `runWith`. -/
 def runFrom {σ : Type} (o : Opts) (D : DesignCert) (io : IoMeta) (bind : Bind) (stim : Option Stim)
     (edges : EdgeSpec) (E : Engine σ) : IO UInt32 := do
-  -- the start: power-on (or zero), or a checkpoint (with its host section)
-  let hash := Ckpt.designHash D
+  -- the start: power-on (or zero), or a checkpoint (with its host section); the design hash
+  -- only when a checkpoint is read or written
+  let hash : Thunk Nat := Thunk.mk fun _ => Ckpt.designHash D
   let mut s0 := if o.zero then zeroState D else resetState D
   let mut h0 := HostState.fresh bind
   let mut c0 := 0
@@ -351,7 +358,7 @@ def runFrom {σ : Type} (o : Opts) (D : DesignCert) (io : IoMeta) (bind : Bind) 
     match Ckpt.parse (← IO.FS.readBinFile p) with
     | .error e => IO.eprintln s!"{p}: {e}"; say "RESULT: refused"; return 3
     | .ok c =>
-      if let some e := Ckpt.validate D hash c then
+      if let some e := Ckpt.validate D hash.get c then
         IO.eprintln s!"{p}: {e}"; say "RESULT: refused"; return 3
       s0 := Ckpt.restore c
       c0 := c.cycle
