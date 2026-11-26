@@ -141,7 +141,7 @@ git_repository(
 # hlop (Dlop value type + slop/dlop execution layer)
 git_repository(
     name = "hlop",
-    commit = "6211e014300789204e750a11b0b19e80cc4e3773",
+    commit = "ecac05e67a6567bba77464d0d1016938dca0a58b",
     remote = "https://github.com/masc-ucsc/hlop.git",
 )
 # For local co-development swap the git_repository above for:
@@ -195,7 +195,7 @@ http_archive(
 
 git_repository(
     name = "hhds",
-    commit = "161469ef7d8f263b7b5238350ee7573558eaec1b",
+    commit = "de050d2805f37594bb7a8d776893d125d68048b2",
     remote = "https://github.com/masc-ucsc/hhds.git",
 )
 # For local co-development swap the git_repository above for:
@@ -221,7 +221,7 @@ http_archive(
 # LiveHD's core diag.hpp / parser.hpp); see //packages:prpparse.BUILD.
 # To bump the pin, recompute integrity via:
 #   curl -sL https://github.com/masc-ucsc/tree-sitter-pyrope/archive/<commit>.zip | openssl dgst -sha256 -binary | base64
-# The pinned archive (pin 64a015dc; parser and formatter share it) keeps
+# The shared parser and formatter archive keeps
 # livehd self-contained: a fresh clone builds with no sibling checkout. For
 # parser co-development the http_archive is swapped for a new_local_repository
 # on the ../tree-sitter-pyrope working tree, and the build then depends on that
@@ -230,9 +230,9 @@ http_archive(
 http_archive(
     name = "prpparse",
     build_file = "//packages:prpparse.BUILD",
-    integrity = "sha256-0AGEab01h7WgvOfguvT2sQNuqTQxvItZgqsAP4g3xqM=",
-    strip_prefix = "tree-sitter-pyrope-439c9bbbaf0b812189bec9d146ec20da224f5924/prpparse",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/439c9bbbaf0b812189bec9d146ec20da224f5924.zip"],
+    integrity = "sha256-m+9iLe3HanfzQoLIk1Ja92ro5ZyMrtfb8vBwxCOM3CI=",
+    strip_prefix = "tree-sitter-pyrope-26f5df978d9139257ea84a3c8df67d2d80c8a34d/prpparse",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/26f5df978d9139257ea84a3c8df67d2d80c8a34d.zip"],
 )
 
 # Local co-development swap (replace the archive above):
@@ -272,9 +272,9 @@ http_archive(
 http_archive(
     name = "tree_sitter_pyrope",
     build_file = "//packages:prpfmt.BUILD",
-    integrity = "sha256-0AGEab01h7WgvOfguvT2sQNuqTQxvItZgqsAP4g3xqM=",
-    strip_prefix = "tree-sitter-pyrope-439c9bbbaf0b812189bec9d146ec20da224f5924",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/439c9bbbaf0b812189bec9d146ec20da224f5924.zip"],
+    integrity = "sha256-m+9iLe3HanfzQoLIk1Ja92ro5ZyMrtfb8vBwxCOM3CI=",
+    strip_prefix = "tree-sitter-pyrope-26f5df978d9139257ea84a3c8df67d2d80c8a34d",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/26f5df978d9139257ea84a3c8df67d2d80c8a34d.zip"],
 )
 
 # Local co-development swap (replace the archive above):
@@ -287,9 +287,7 @@ http_archive(
 # OpenTimer: the masc-ucsc fork provides its own BUILD.bazel.
 git_repository(
     name = "opentimer",
-    patch_args = ["-p1"],
-    patches = ["//packages:opentimer-spef-ports.patch"],
-    commit = "19afda206aeeb712a330e3447f214ba4e8667f8b",
+    commit = "b0a3ae58dadbf631687ead67b3427fbacb732b3b",
     remote = "https://github.com/masc-ucsc/OpenTimer.git",
 )
 # For local co-development swap the git_repository above for:

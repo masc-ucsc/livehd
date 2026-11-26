@@ -4989,19 +4989,17 @@ void uPass_constprop::process_tuple_get() {
     const auto dotted_prefix = [](std::string_view outer, std::string_view inner) {
       return inner.size() > outer.size() && inner.starts_with(outer) && inner[outer.size()] == '.';
     };
-    // sub_output_names are unquoted; a field spelled by a backticked type
-    // word (`` c.`S4` ``) names the output `S4`.
-    std::string_view fseg = first_seg;
-    if (fseg.size() >= 2 && fseg.front() == '`' && fseg.back() == '`') {
-      fseg = fseg.substr(1, fseg.size() - 2);
-    }
+    const auto unquote = [](std::string_view name) {
+      return name.size() >= 2 && name.front() == '`' && name.back() == '`' ? name.substr(1, name.size() - 2) : name;
+    };
+    const auto fseg = unquote(first_seg);
     if (const auto on = st().sub_output_names.find(src);
         on != st().sub_output_names.end() && std::none_of(on->second.begin(), on->second.end(), [&](const std::string& o) {
-          return o == fseg || dotted_prefix(fseg, o) || dotted_prefix(o, fseg);
+          return unquote(o) == fseg || dotted_prefix(fseg, o) || dotted_prefix(o, fseg);
         })) {
       std::string outs;
       for (const auto& o : on->second) {
-        outs += outs.empty() ? o : ", " + o;
+        absl::StrAppend(&outs, outs.empty() ? "" : ", ", unquote(o));
       }
       // A compiler-temp handle is an unnamed call result (a destructure slot
       // that matches no output): name the call and the `slot=field` rename.

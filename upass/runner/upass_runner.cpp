@@ -6265,9 +6265,8 @@ void uPass_runner::stash_sub_instance_port_facts(std::string_view handle, const 
   auto& names = symbol_table_.sub_output_names[std::string(handle)];
   names.clear();
   for (const auto& oe : outs) {
-    // Unquoted, as a field read spells it (a Verilog port rides `` `rsp.data` ``).
-    const bool quoted = oe.name.size() >= 2 && oe.name.front() == '`' && oe.name.back() == '`';
-    names.push_back(quoted ? oe.name.substr(1, oe.name.size() - 2) : oe.name);
+    // Preserve quoting: a literal `rsp.data` is one port, not a composite rsp.
+    names.push_back(oe.name);
     if (auto alt = unwrapped(oe.name); !alt.empty()) {
       names.push_back(std::move(alt));
     }
@@ -9814,14 +9813,14 @@ bool uPass_runner::try_resolve_tuple_get() {
       return false;
     }
   }
-  // An instance's composite output has ABI leaf facts but no runtime tuple
-  // object. Materialize its selected bundle as ordinary leaf reads, so whole
-  // assignments and subsequent nested calls use the same tuple-value path.
-  if (const auto pending = symbol_table_.pending_keys_by_root.find(src); pending != symbol_table_.pending_keys_by_root.end()) {
-    const std::string        prefix = src + "." + key + ".";
+  // An instance carries its composite outputs on separate pins. The declared
+  // port names give the complete shape even for signed or unbounded fields
+  // and after constprop has consumed a field's pending type facts.
+  if (const auto ports = symbol_table_.sub_output_names.find(src); ports != symbol_table_.sub_output_names.end()) {
+    const std::string        prefix = key + ".";
     std::vector<std::string> leaves;
-    for (const auto& candidate : pending->second) {
-      if (candidate.starts_with(prefix) && symbol_table_.pending_decl_facts.contains(candidate)) {
+    for (const auto& candidate : ports->second) {
+      if (candidate.starts_with(prefix)) {
         leaves.push_back(candidate.substr(prefix.size()));
       }
     }
@@ -16381,7 +16380,9 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
       pd.kind        = field.type.kind;
       pd.decl_max    = field.type.max;
       pd.decl_min    = field.type.min;
-      const auto key = dst_name + "." + output.name + "." + field.name;
+      const auto port = output.name + "." + field.name;
+      symbol_table_.sub_output_names[dst_name].push_back(port);
+      const auto key = dst_name + "." + port;
       symbol_table_.pending_decl_facts.insert_or_assign(key, pd);
       symbol_table_.pending_keys_by_root[dst_name].push_back(key);
     }

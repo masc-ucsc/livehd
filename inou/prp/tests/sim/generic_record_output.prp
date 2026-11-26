@@ -1,0 +1,24 @@
+// Forward a whole instance output through a second module. A field's
+// existence is independent of its signedness or the size of its bound.
+mod packet<W>(x:Unsigned(bits=W), err:S8) -> (r:(tag:U3, data:Unsigned(bits=W), error:S8)@[0]) {
+  r = (tag=5, data=x, error=err)
+}
+mod forward<W>(x:Unsigned(bits=W), err:S8) -> (r:(tag:U3, data:Unsigned(bits=W), error:S8)@[0]) {
+  const child = packet<W>(x=x, err=err)
+  r = child.r
+}
+pub mod generic_record_output(x:U64, err:S8) -> (a:U32@[0], b:U64@[0], tag:U3@[0], e:S8@[0]) {
+  const n = forward<32>(x=x#[0..<32], err=err)
+  const w = forward<64>(x=x, err=err)
+  a = n.r.data
+  b = w.r.data
+  e = w.r.error
+  tag = n.r.tag
+}
+test generic_record_output.copy {
+  mut d = generic_record_output
+  d.x = 0x8000000100000002
+  d.err = -19
+  step
+  assert(d.a == 2 and d.b == 0x8000000100000002 and d.e == -19 and d.tag == 5)
+}
