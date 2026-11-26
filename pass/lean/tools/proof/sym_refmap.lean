@@ -68,11 +68,13 @@ Warnings when the file is read: an observed word whose payload and guard are rea
 cycles, and an `xfer` that reads an output at a cycle the slot never observes it at.
 
 The simulator route (`sim:`), each with its theorem relating it to `interpretDesign`:
-`fp` the projection's specialized residual (`runMemSim`, `runMemSim_correct`), `ir`
-the post-lowering IR stepped directly (`directStepRaw` after one `checkDesign`,
-`directStepRaw_correct`), `vc` the verified compiler's straight-line program (`sim:tv` is the
-old name and is still accepted)
-(`compileDesign` once, `denoteResidual` every step, `compileDesign_correct`; the default). `ir`
+`fp` the projection's specialized residual (`runMemSim`, `runMemSim_correct`); `ir` and `vc`
+are the engines `HDLProof/Run/Engine`'s `EngineSelector` builds with `inc:off`, whose state is
+the runtime state itself, since the search steps from many states: `ir` the post-lowering IR
+stepped directly (the staged step after one `checkDesign`, `EngineSelector_ir_sound`), `vc` the
+verified compiler's straight-line program after its optimizer (`compileDesign` once,
+`denoteResidual` of the optimized program every step, `EngineSelector_vc_sound` and
+`compileOpt_correct`; the default; `sim:tv` is the old name and is still accepted). `ir`
 and `vc` need a memory-free certificate; without `sim:` a certificate with memories uses `fp`. With `ir` or `vc` every run is also cross-checked against `fp` on its
 first `check:` steps (default 4; outputs and next state), and a NO MATCH (of the search, or of a
 positive control) is re-run on `fp` alone before it is reported: two proved routes must agree,
@@ -122,6 +124,8 @@ import HDLProof.Check.RefMapCompose
 import HDLProof.Kit.Driver
 import HDLProof.Kit.Judge
 import HDLProof.Kit.SymRoute
+-- the judge's ir and vc routes: EngineSelector's engines whose state is the runtime state
+import HDLProof.Run.Engine
 import LeanSemanticPrimitives.Compiler.DirectSemantics
 import LeanSemanticPrimitives.Compiler.CompileDesignDefs
 -- the vc judge runs `denoteResidual`'s fast spelling (`@[csimp]`, equal by proof)
@@ -986,6 +990,14 @@ the map refines the spec with stuttering from the first refined cycle on"
 
 
 /-! ## The judge: one concrete run, every stuttering alignment -/
+
+/-- The judge's step (on fp's state, `Judge.Sim`) on a memory-free design from an engine whose
+state is the runtime state it stands for: the step from the state's runtime form; the memories
+stay empty; a refused step gives none. -/
+def judgeSimOf {σ : Type} (D : DesignCert) (E : Engine σ) : Judge.Sim := fun i st =>
+  match E.step (edgesAll D) i (E.load (StateM.denote st)) with
+  | .ok (o, q') => some { nextState := { flops := (E.view q').flops, mems := #[] }, outputs := o }
+  | .error _ => none
 
 /-- The judge's contract from a `.refmap`: the one channel, the one slot, `xfer`, `maxstall`.
 `NI` names the implementation's ports. A control (`ctrl`) runs D0 as the implementation: its
@@ -1856,22 +1868,18 @@ def judgeMain (path : String) (rest : List String) : IO UInt32 := do
   if (opt "sim").isNone then
     say s!"  route sim:{route} ({if memFree then "the default" else "a certificate has memories: the concrete ir and vc steps are memory-free"})"
   let check := ((opt "check").bind (·.toNat?)).getD 4
-  let ofRT (r : RuntimeResult) : StateM.ResultM := { nextState := { flops := r.nextState.flops, mems := #[] }, outputs := r.outputs }
   let mkRoute (D : DesignCert) (fp : Judge.Sim) : IO (Option Judge.Sim) := do
     if route == "fp" then return some fp
     unless D.memories.size == 0 do say s!"  route {route} needs a memory-free certificate"; return none
-    if route == "ir" then
-      match Compiler.Direct.checkDesign D with
-      | .error _ => say "  route ir: checkDesign refused the certificate"; return none
-      | .ok _ => return some fun i st =>
-          match Compiler.Direct.checkRuntime D (edgesAll D) i (StateM.denote st) with
-          | .ok _ => some (ofRT (Compiler.Direct.directStepRaw D (edgesAll D) i (StateM.denote st)))
-          | .error _ => none
-    if route == "vc" then
-      match compileDesign D with
-      | .error e => say s!"  route vc: compileDesign refused the certificate: {repr e}"; return none
-      | .ok R => return some fun i st => some (ofRT (denoteResidual R (edgesAll D) i (StateM.denote st)))
-    say s!"  sim:{route} is not one of fp | ir | vc"; return none
+    let some r := (if route == "ir" then some Run.Route.ir else if route == "vc" then some Run.Route.vc else none)
+      | say s!"  sim:{route} is not one of fp | ir | vc"; return none
+    -- the search steps from many states, so an engine whose state is the runtime state (`inc:off`)
+    match Run.EngineSelector D { route := r, vcInc := .off } with
+    | .error e =>
+      if r == .ir then say "  route ir: checkDesign refused the certificate"
+      else say s!"  route vc: compileDesign refused the certificate: {e.detail}"
+      return none
+    | .ok b => return some (judgeSimOf D b.engine)
   let tr0 ← IO.monoMsNow
   let some stepS ← mkRoute DS fpS | return 2
   let some stepI ← mkRoute DI fpI | return 2
