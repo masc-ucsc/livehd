@@ -32,6 +32,7 @@ enum class Rule {
   ClockPortType,
   UnneededBacktick,
   NarrowScopedMut,
+  RedundantAlias,
   CompactBitPacking
 };
 

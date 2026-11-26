@@ -32,7 +32,7 @@ source-only style hints: every `*.prp` here auto-generates a `prp-style-<name>`
 
 One fixture per rule (`repeated-code`, `likely-unrolled-loop`, `whole-tuple-copy`,
 `flattened-bundle-arguments`, `single-destination-conditional`, `hardcoded-reset`,
-`reset-port-type`, `clock-port-type`, `unneeded-backtick`, `narrow-scoped-mut`, `compact-bit-packing`), the
+`reset-port-type`, `clock-port-type`, `unneeded-backtick`, `narrow-scoped-mut`, `redundant-alias`, `compact-bit-packing`), the
 forwarded clock/reset shape (`clock_reset_forwarded`) and its near-misses
 (`clock_reset_clean`), the `match` form of `single-destination-conditional`
 (`single_destination_match`), plus the reset near-miss (`reset_clean`), the active-low hint, the "all three hints" shape

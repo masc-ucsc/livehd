@@ -14,7 +14,7 @@ is the final judge. Check each edit with `lhd` using the [CLI reference](../live
   `wire` / `reg`; lambda: `comb` / `pipe` / `mod` / `fluid`. Prefix modifiers:
   `comptime`, `pub`. Assignment prefixes: `wrap`, `sat`. `stage[N]` is a
   `mod`-only declaration modifier.
-* Every data declaration needs `= value`:
+* Use an explicit initializer to show the intended value:
     - a concrete value (`0`, `false`, `""`, `(x=1)`) — the normal case
     - `nil` — invalid / "no value yet"; *reading* it is an error; the default
       for tuples; `reg x = nil` declares a register with **no reset**;
@@ -301,8 +301,10 @@ lane widths. There is no `concat`/`{a,b}` form.
   language). All gating — comptime or runtime — uses an `if` block:
   `if DEBUG { assert(x) }`, `if enable { count += 1 }`. A comptime-false
   condition folds the block away entirely.
-* Loops `for i in 0..<N {}`, `while`, `loop` are fully unrolled — bounds must
-  be comptime. `break`/`continue` work. Iterate tuples
+* Design loops have compile-time iteration counts and behave as if unrolled.
+  The compiler can retain a compact `for i in 0..<N` for lowering. A loop
+  that writes a memory or register array unrolls, with one write site per
+  source write per iteration. `break`/`continue` work. Iterate tuples
   (`for (i, v) in t` — a pair binding is the enumerate; `for (i, v, key) in t`
   adds the field name; there is no `.enumerate()`), mutate via `for x in ref t { x += 1 }`.
   Build tuples by accumulating: `mut acc:[] = nil` … `acc ++= v` (there are no
@@ -679,9 +681,15 @@ formal cnt.bounded {
 * A fully typed `pipe`/`mod` lowers to a module; an untyped one is a per-call
   template (every actual feeding it must have a declared type). Generated
   module names are `file.entity` (e.g. `cnt.counter`).
-* Do not instantiate conditionally to "save hardware": a lambda called inside
-  `if`/`match` behaves as if inlined there with valid-gated inputs. Structure
-  the design with unconditional calls and mux the results.
+* A compile-time false branch omits its child instance. A runtime
+  `if en { result = child(...) }` activates a stateful instance on enabled
+  cycles. Its state holds while inactive outside reset. An unconditional call
+  followed by an output mux lets the child advance on inactive cycles. Give
+  caller-visible results an explicit idle value when the protocol requires one.
+* Reset still applies to a conditional call. A synchronous reset reopens its
+  clock domain, so other state on that clock can advance during reset. An
+  asynchronous reset acts directly. Independent synchronous resets on a single
+  gated child clock are ambiguous and diagnosed.
 
 ## Canonical patterns
 
@@ -854,48 +862,21 @@ Checking a comptime-only `.prp` (no `pub mod`/`pub comb` hardware entity) needs
 lowering and invents `tolg-error: unresolved reference '%self_0'` /
 `tuple-store-unsupported` on programs that contain no hardware.
 
-## Known limitations (re-test before applying a workaround)
+## Checking a suspected lowering limitation
 
-The compiler moves fast: reproduce the exact pattern on the current build
-before carrying a workaround into new code, and drop workarounds whose need you
-cannot reproduce. Historically reported patterns:
+Keep the smallest example that still crosses the failing boundary. For a
+specialization problem that may mean a typed caller and two calls at different
+widths. For a memory problem it may mean a read and a write to the same
+address in the same cycle. Compile the reproducer, then simulate the values
+and cycles that distinguish the expected behavior. These fixtures show the
+relevant source shapes:
 
-* A PARENT value of a hierarchical enum (`Animal.bird`, not a leaf such as
-  `Animal.bird.parrot`) does not lower to hardware yet: storing it in a typed
-  local, comparing a port with it, or passing it to a port fails
-  (assign-type-mismatch or an unresolved reference). Use leaf values.
-* A registered output declared `@[1]` makes any caller that mixes it with
-  same-cycle values fail ("mixes values at different cycles"), including the
-  same-cycle generated test harnesses; on such tops declare it `@[]` with a comment.
-* In a generic lambda that has any `mut`, `U1(<Bool input>)` failed
-  ("undefined function 'u1'" before the type-word migration); cast a local
-  const instead (`const b = in; U1(b)`).
-* An import const named like its own file (`const pc = import(...)` in
-  `pc.prp`) breaks generic calls through it; rename the const or the file.
-* `lhd sim` may report a false dependency cycle ("occurrence-wide color
-  scheduler") for one rolled loop computing both a request and the ready that
-  comes back through another module; split the loop.
-* Generic array PORTS have not been rechecked in this pass; distinguish them
-  from generic-width register arrays, whose current focused compile passed.
-* Bit-assign into an array element inside nested loops
-  (`m[i]#[j] = ...`) → "array index is negative (range [-4, 3])". Build the
-  row in a scalar local and assign `m[i] = row`.
-* An unparenthesized expression as a generic argument (`m<W=2*N - 1>`) does
-  not parse; write `m<W=(2*N - 1)>`.
-* Unverified since the fix pass: `lhd sim` reading a `wire` back-edge one
-  cycle late inside a `for` loop (silent, LEC still proved it). Back loop
-  refactors with a full-length simulation.
-* An instance handle named like a `reg` in the body of a non-`pub` child
-  (`const c = cnt8(...)` when `cnt8` declares `reg c`) fails ("call to
-  undefined function 'cnt8'"); rename the handle.
-* `U1()`/`Bool()` on a DESTRUCTURED or auto-unwrapped `Bool` output
-  (`const (f, g) = child(...); U1(f)`) or on a `Bool` tuple field failed
-  ("call to undefined function 'u1'" before the migration): read it through
-  the instance, `const c = child(...); U1(c.f)`.
-* A named tuple `type` as a `mod` port type, `.[bits]` on a tuple field, and
-  a tuple output from a typed `comb` fail; use inline tuple port types and
-  `mod`.
-* The documented `pipe` state-output idiom `pipe[1] c(en:Bool) -> (reg
-  count:U8) { if en { wrap count += 1 } }` fails ("state register 'count' …
-  homes at stage 0 but its declared landing cycle 1 requires home 1"); use the
-  `mod` form `-> (reg count:U8@[0] = 0)` (`counter2` pattern).
+* [Untyped inputs at two widths](../../../inou/prp/tests/sim/comb_untyped_bits_two_widths.prp)
+* [Nested configuration records forwarded to a child](../../../inou/prp/tests/sim/generic_config_record.prp)
+* [Indexed record storage and a whole-record selection](../../../inou/prp/tests/sim/record_memory_extent.prp)
+* [Loop writes and read ordering](../../../inou/prp/tests/sim/loop_reg_array_write.prp)
+* [Conditional child state and reset](../../../inou/prp/tests/sim/conditional_call_lane.prp)
+
+Check the language reference when observed behavior differs. Preserve the
+source idiom and use the reproducer to fix a compiler defect. Resolve an
+ambiguity in intended semantics with the caller before changing the language.

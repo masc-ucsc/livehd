@@ -2,18 +2,22 @@
 
 Turn machine-emitted or legacy Pyrope (from a Verilog/Chisel translation, an
 emitter, or older code) into idiomatic Pyrope a person would write from the
-design's intent. The external behavior must not change; how it is expressed
-should.
+design's intent. Establish which interfaces, timings and configurations the
+translation must preserve and which changes the caller requested.
 
 ## 1. Before editing
 
 * Identify the top, its external interface and who instantiates it
   (testbench, harness, parent design), the supported parameter
   configurations, existing checks, and known equivalence gaps.
-* Pick the reference: the original Verilog/Chisel RTL elaborated with the same
-  parameters and defines, or, with no external reference, the original Pyrope.
-  Record its provenance.
-* Run the baseline first (compile, LEC against the reference, simulation) so
+* For a Chisel generator, trace the top through its parameters, optional
+  children, bundle definitions and replication counts. An emitted module
+  describes one elaboration. Check a second configuration to identify which
+  widths, counts and choices belong in the generator.
+* For equivalence checks, record the reference revision, top and parameters.
+  Use the pre-edit Pyrope for a Pyrope refactor, or the matching RTL
+  elaboration for a translation whose observable behavior must match.
+* Run the applicable baseline checks before editing so
   pre-existing failures are not mistaken for regressions. Machine-emitted
   Pyrope can itself be LEC-inconclusive against its source; a cleaner rewrite
   often proves where the original could not.
@@ -28,11 +32,21 @@ should.
 ## 2. Find the repetition
 
 ```sh
+lhd pyrope fmt --verify -i file.prp
 lhd pyrope style file.prp --diag-fmt pretty
 lhd pyrope style dir/*.prp --emit diagnostics:style.jsonl
 ```
 
-Start with the highest-ranked findings: repeated statement blocks (with
+Format changed sources and testbenches after each edit pass. Run style on
+those files and their affected callers.
+For clock and reset findings, trace the port to the state it controls. Use
+`Clock` and `Reset` for timing signals, keep ordinary names such as `clock`
+and `reset` unquoted, and preserve the original edge, reset priority and
+polarity. A clear driven by a transaction, exception or flush may be a normal
+data-path operation. Check that case in simulation before retyping it.
+Rerun style over the full source set after local fixes.
+
+Also inspect repeated statement blocks (with
 strides in literals and numbered identifiers) and flattened bundle arguments.
 The style command exits 2 for suggestions and 1 for input failure. Check
 the diagnostics for a partial parse even when it exits 0.
@@ -47,22 +61,24 @@ findings says nothing about naming, types, structure or correctness.
   unrelated register declarations at the top of a file.
 * Collapse numbered variants (`foo`, `foo_p1`, `foo_p2`) that differ only in
   widths or configuration into one generic (`mod foo<N=8>(a:Unsigned(bits=N))`).
-  Update callers and delete the obsolete files; a shared body behind a family
-  of thin wrappers is not finished.
-* Delete what elaborates to nothing: assertion-only checker modules, tie-off
-  and unused-signal sinks, and the ports and calls that only fed them.
+  Use an untyped input when its shape follows the actual argument and the
+  operation is the same at each width. Keep explicit types for architectural
+  widths, signed arithmetic, clocks and resets. Update callers together and
+  retain concrete wrappers only for entry points that consumers use.
+* Check other tops, tests and formal properties before removing an apparently
+  unused module. An assertion-only module can still observe protocol errors.
 * Inline trivial helpers (one-hot mux, encoders, a one-stage delay) when a loop,
   reduction or single register says it more clearly. Keep a helper that has a
   real name in the design's vocabulary and more than one caller.
-* Keep one module per file where the source did, with the same names, so
-  imports, harnesses and hierarchical proofs keep pairing.
+* Keep public names that imports, harnesses or proofs depend on. Group private
+  logic by ownership, independently of how an emitter split it into files.
 * One short comment per module saying what it does; comments at non-obvious
   logic saying why (priority order, reset intent, supported configuration).
   Do not narrate syntax.
 
 **Interfaces and bundles**
 
-* Preserve the external top interface exactly: port names, widths and types,
+* For a drop-in translation preserve the external port names, widths and types,
   including `U1` ports a harness drives with integers (convert to `Bool` inside:
   `x == 1`, `U1(flag)`). Two required repairs:
   - a physical clock port must be typed `Clock` (and a reset `Reset` where it
@@ -70,8 +86,8 @@ findings says nothing about naming, types, structure or correctness.
     which every register needs `clock_pin=`.
   - a purely combinational top whose `clk`/`rst` drive no state becomes a
     `comb` without those ports (a `comb` cannot take `Clock`/`Reset`). An
-    unconnected clock is not an equivalence difference; regenerate or adjust
-    the harness accordingly.
+    interface change like this needs a compatible wrapper if existing callers
+    still use the original ports.
 * Reserved-word port names keep their backticks.
 * Internal interfaces may change. Pass related signals as tuples instead of
   flattened escaped arguments; reuse an existing tuple (`child(io_in=next)`) or
@@ -137,14 +153,41 @@ findings says nothing about naming, types, structure or correctness.
 
 **Configuration**
 
-* Generics or `comptime const` for configuration; keep the concrete entry
-  modules the flow needs. Mark unsupported configurations with `cassert` and a
-  comment. Do not add features.
+* Pass related choices as one compile-time record. For example, a child declared
+  with `<C>` can use `Unsigned(bits=C.width)` at a port and `C.depth` for a
+  register array extent. Forward the record as `child<C=C>(...)`. Give a
+  public entry point its usual default binding and check legal combinations
+  with `cassert` where the constraints are defined.
+* Translate structural replication into `for i in 0..<N` over lanes or records.
+  Preserve index direction, priority and read/write ordering. Check the index
+  range for singleton and non-power-of-two dimensions. A bit mask implements
+  wraparound only for a power-of-two depth.
+* Put optional calls inside `if C.enabled { ... }` so the disabled
+  specialization omits the child. For a runtime enable, put the stateful
+  call inside `if active { ... }` only when the instance may hold state.
+  A pipelined or handshaked child may need to drain accepted work, consume a
+  response, or observe a wakeup after the initiating request goes away.
+  Derive the guard from those obligations and define visible idle outputs.
+
+For example, a caller can express both the configured presence of a child and
+the cycles on which it may advance. Here the interface specifies zero when idle:
+
+```pyrope
+comptime const profile = (const enabled=true, const width=8, const depth=4)
+mod wrapper<C=profile>(active:Bool, d:Unsigned(bits=C.width))
+    -> (v:Unsigned(bits=4*C.width)@[0]) {
+  v = 0
+  if C.enabled {
+    if active { v = lane_bank<C=C>(en=true, d=d) }
+  }
+}
+```
 
 ## 4. Verify each step
 
-* **LEC after every significant edit**, against the latest verified snapshot
-  (compile both with `--set compile.upass.inline=false --emit-dir lg:DIR`). On a
+* **Behavior-preserving edits** can be checked against the latest verified snapshot
+  (compile each with `--set compile.upass.inline=false` and its own
+  `--emit-dir lg:DIR`). On a
   proof, the new version becomes the snapshot. Keep the original reference for
   the baseline and final checks.
 * **Verdicts**: `proven` (check `bounded`/`bound`), `refuted` (a failure, never
@@ -155,18 +198,24 @@ findings says nothing about naming, types, structure or correctness.
   granularity when you can; repacked state cannot be paired.
 * **Simulation**: run the existing testbench on the original and the cleaned
   source past reset into useful work and compare. Make sure the stimulus
-  exercises the design (a handshake tied to a constant, or a checksum of 0,
-  makes the comparison vacuous); add random stimulus in a scratch harness when
-  needed. Simulation cannot see clock-domain mistakes when all clocks are tied
-  together; multi-clock designs need LEC.
-* **Suspected compiler bug**: cross-check with an independent tool (a
-  Yosys-based equivalence check on the original sources). Keep the reproducer
-  and both verdicts when they disagree.
-* **Final checks**: `lhd pyrope fmt -i`, prove formatted vs pre-format, prove
-  the final source against the external reference at the unchanged top, rerun
-  simulation, and exercise the parameter combinations the cleanup touched. For
-  a Verilog-backed cleanup also emit Verilog from the final Pyrope and check it
-  against the original sources with an independent tool.
+  exercises the design by checking accepted transactions and their payloads.
+  For multiple clocks, vary the edges independently and check which domain
+  advances while another is idle or in reset.
+* **Configuration and interface changes.** Compile through the actual parent
+  with default and alternate bindings. Exercise an enabled and disabled
+  feature, and two differently specialized instances together when applicable.
+  Simulate a transaction that distinguishes the promised behavior. For
+  example, hold the first response until two requests have been accepted,
+  and check their tags and data. For runtime activation, check idle,
+  reactivation and reset while idle.
+* **Suspected compiler bug.** Reduce the failing path while preserving what
+  triggers it (for example, an imported config forwarded to a generic child).
+  Pin the expected behavior in a regression at that stage. A simulator bug
+  needs an observable value or timing check.
+* Check the final formatting with the same formatter mode. For example, run
+  `lhd pyrope fmt --verify file.prp -o "$tmpdir/check.prp" && cmp file.prp "$tmpdir/check.prp"`
+  using a scratch directory. Repeat the behavioral checks on the formatted sources. Compare unchanged behavior at a common boundary. Use
+  the new interface and its expected timing when testing a requested redesign.
 * Never weaken assertions, change the reference, or alter the reference setup to
   get a pass. Translate checks on a changed internal interface to the new
   representation, keeping their assertions and stimulus.
@@ -177,9 +226,11 @@ findings says nothing about naming, types, structure or correctness.
   verification issues, each with the smallest reproducer, expected behavior,
   command, diagnostic, and compiler identity. Separate real defects from source
   mistakes and from untested historical workarounds.
-* Code size against the starting Pyrope and the reference, same counting
-  method on both, helpers added or removed included; separate formatter-only
-  changes from real simplification.
+* For code size, list corresponding source blocks, tops and configurations.
+  Record the formatter mode and measure final formatted sources.
+  Use the same line-count convention, count each shared generator definition
+  once, and report harnesses and tests separately. Measure build time and
+  simulation throughput independently when reporting a performance change.
 * Per design: final verdict against the reference, `formal.lec.match` pairs
   used, simulation comparison, landing-cycle changes, unsupported
   configurations, and workarounds left in the source.

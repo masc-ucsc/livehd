@@ -283,6 +283,10 @@ The additional rules are enabled by default and do not use `--min-repeats`:
   suggestion, so `--max-findings` never hides one. Like every rule they are
   silenced with `// prp-style-allow`.
 
+- **`redundant-alias`** suggests reading a source name or dotted field directly
+  when a local alias has one or two reads, or when its name is longer than the
+  source path. The diagnostic includes the path, read count, and use sites.
+  Explicitly typed copies and snapshots of modified values are preserved.
 - **`narrow-scoped-mut`** finds a local `mut` initialized with a literal, assigned
   once in a narrower scope, and read only after that assignment within the same
   scope and lambda. It suggests deleting the outer declaration and declaring a
