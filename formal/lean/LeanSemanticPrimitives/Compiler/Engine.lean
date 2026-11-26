@@ -123,6 +123,103 @@ theorem Engine.run_sound {σ : Type} {E : Engine σ} {ref : RefStep} (h : E.Soun
   have := Engine.run_inv h.step ticks (E.load s) os (h.load s).1 hr
   rwa [(h.load s).2] at this
 
+/-! ## Replays: a whole run's results, or its last state
+
+A replay (`lgraph-sim`'s trace, `ckpt_reach`'s witness) needs the run's states, not only its
+outputs. `Engine.trace` gives each step's result (the outputs and the runtime state the next
+route state stands for: `view` after every step, which costs nothing for an engine whose state
+is the runtime state); `Engine.runFinal` only the last state. -/
+
+/-- `ref`'s results, step after step, from `s`, and the state after the last step. -/
+def refRun (ref : RefStep) : RuntimeState → List (ClockEdges × RuntimeInput) →
+    List RuntimeResult × RuntimeState
+  | s, [] => ([], s)
+  | s, (e, i) :: rest =>
+    let r := ref e i s
+    let t := refRun ref r.nextState rest
+    (r :: t.1, t.2)
+
+/-- The engine's result at every step from `q` (its outputs, and the view of its state after the
+step) and its state after the last step; the first refusal stops the run. -/
+def Engine.trace {σ : Type} (E : Engine σ) : σ → List (ClockEdges × RuntimeInput) →
+    Except String (List RuntimeResult × σ)
+  | q, [] => .ok ([], q)
+  | q, (e, i) :: rest =>
+    match E.step e i q with
+    | .error (err, _) => .error err
+    | .ok (o, q') =>
+      match E.trace q' rest with
+      | .error err => .error err
+      | .ok (rs, qf) => .ok ({ outputs := o, nextState := E.view q' } :: rs, qf)
+
+/-- The engine's state after the steps from `q`; the first refusal stops the run. -/
+def Engine.runFinal {σ : Type} (E : Engine σ) : σ → List (ClockEdges × RuntimeInput) → Except String σ
+  | q, [] => .ok q
+  | q, (e, i) :: rest =>
+    match E.step e i q with
+    | .error (err, _) => .error err
+    | .ok (_, q') => E.runFinal q' rest
+
+theorem Engine.trace_inv {σ : Type} {E : Engine σ} {ref : RefStep} {Inv : σ → Prop}
+    (hstep : ∀ q, Inv q → ∀ e i o q', E.step e i q = .ok (o, q') →
+      Inv q' ∧ o = (ref e i (E.view q)).outputs ∧ E.view q' = (ref e i (E.view q)).nextState) :
+    ∀ (ticks : List (ClockEdges × RuntimeInput)) (q : σ) (rs : List RuntimeResult) (qf : σ), Inv q →
+      E.trace q ticks = .ok (rs, qf) →
+      rs = (refRun ref (E.view q) ticks).1 ∧ E.view qf = (refRun ref (E.view q) ticks).2
+  | [], q, rs, qf, _, h => by simp only [Engine.trace] at h; cases h; exact ⟨rfl, rfl⟩
+  | (e, i) :: rest, q, rs, qf, hq, h => by
+    simp only [Engine.trace] at h
+    split at h
+    · cases h
+    · rename_i o q' hs
+      split at h
+      · cases h
+      · rename_i rs' qf' hr
+        cases h
+        obtain ⟨hq', ho, hv⟩ := hstep q hq e i o q' hs
+        obtain ⟨hrs, hvf⟩ := Engine.trace_inv hstep rest q' rs' qf hq' hr
+        rw [hv] at hrs hvf
+        refine ⟨?_, ?_⟩
+        · simp only [refRun]
+          rw [hrs, ho, hv]
+        · simp only [refRun]
+          exact hvf
+
+theorem Engine.runFinal_inv {σ : Type} {E : Engine σ} {ref : RefStep} {Inv : σ → Prop}
+    (hstep : ∀ q, Inv q → ∀ e i o q', E.step e i q = .ok (o, q') →
+      Inv q' ∧ o = (ref e i (E.view q)).outputs ∧ E.view q' = (ref e i (E.view q)).nextState) :
+    ∀ (ticks : List (ClockEdges × RuntimeInput)) (q qf : σ), Inv q →
+      E.runFinal q ticks = .ok qf → E.view qf = (refRun ref (E.view q) ticks).2
+  | [], q, qf, _, h => by simp only [Engine.runFinal] at h; cases h; rfl
+  | (e, i) :: rest, q, qf, hq, h => by
+    simp only [Engine.runFinal] at h
+    split at h
+    · cases h
+    · rename_i o q' hs
+      obtain ⟨hq', _, hv⟩ := hstep q hq e i o q' hs
+      have := Engine.runFinal_inv hstep rest q' qf hq' h
+      rw [hv] at this
+      simp only [refRun]
+      exact this
+
+/-- **A replay of a sound engine is the reference's run** from the state it was loaded with: its
+results step after step and its last state. -/
+theorem Engine.trace_sound {σ : Type} {E : Engine σ} {ref : RefStep} (h : E.Sound ref)
+    (s : RuntimeState) (ticks : List (ClockEdges × RuntimeInput)) (rs : List RuntimeResult) (qf : σ)
+    (hr : E.trace (E.load s) ticks = .ok (rs, qf)) :
+    rs = (refRun ref s ticks).1 ∧ E.view qf = (refRun ref s ticks).2 := by
+  obtain ⟨Inv, h⟩ := h
+  have := Engine.trace_inv h.step ticks (E.load s) rs qf (h.load s).1 hr
+  rwa [(h.load s).2] at this
+
+/-- **The last state of a sound engine's run is the reference's.** -/
+theorem Engine.runFinal_sound {σ : Type} {E : Engine σ} {ref : RefStep} (h : E.Sound ref)
+    (s : RuntimeState) (ticks : List (ClockEdges × RuntimeInput)) (qf : σ)
+    (hr : E.runFinal (E.load s) ticks = .ok qf) : E.view qf = (refRun ref s ticks).2 := by
+  obtain ⟨Inv, h⟩ := h
+  have := Engine.runFinal_inv h.step ticks (E.load s) qf (h.load s).1 hr
+  rwa [(h.load s).2] at this
+
 /-! ## Engines whose state is the runtime state -/
 
 /-- The engine of a step on runtime states. -/
@@ -202,4 +299,6 @@ theorem refEngine_sound (D : DesignCert) : (refEngine D).Sound (interpretDesign 
 end Compiler
 
 #print axioms Compiler.Engine.run_sound
+#print axioms Compiler.Engine.trace_sound
+#print axioms Compiler.Engine.runFinal_sound
 #print axioms Compiler.irEngine_sound
