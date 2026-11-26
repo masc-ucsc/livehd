@@ -155,14 +155,14 @@ run('clock_balanced', ['--set', 'synth.place.pcrs.clock=true'], default_balance=
 decision = json.loads((root / 'clock_balanced/synth/place/pcrs_clock.json').read_text())['useful_skew']['balance_decision']
 assert decision in ('accepted', 'accepted_unverified', 'clock_offset', 'timing_regression', 'lower_ranked', 'no_timing_gain'), decision
 assert (root / 'clock/synth/place/pcrs_clock.json').read_bytes() == (root / 'clock_repeat/synth/place/pcrs_clock.json').read_bytes()
-# synth.place.pcrs.initial=false: no first tree, so the steps before the final rebuild time an ideal clock; the one tree
-# built from the optimized positions is still there and exported.
-run('clock_late', clock_opts + ['--set', 'synth.place.pcrs.initial=false'])
-assert (root / 'clock/synth/place/clock_initial').is_dir()
-assert not (root / 'clock_late/synth/place/clock_initial').exists()
-late = json.loads((root / 'clock_late/synth/place/pcrs_clock.json').read_text())
-assert late['mode'] == 'tree' and late['networks'], late
-assert (root / 'clock_late/synth/place/pcrs_clock.sdc').is_file()
+# No first tree by default: the steps before the final rebuild time an ideal clock, and the one tree built from the
+# optimized positions is there and exported. synth.place.pcrs.initial=true builds the first tree as well.
+assert not (root / 'clock/synth/place/clock_initial').exists()
+assert (root / 'clock/synth/place/pcrs_clock.sdc').is_file()
+run('clock_early', clock_opts + ['--set', 'synth.place.pcrs.initial=true'])
+assert (root / 'clock_early/synth/place/clock_initial').is_dir()
+early = json.loads((root / 'clock_early/synth/place/pcrs_clock.json').read_text())
+assert early['mode'] == 'tree' and early['networks'], early
 structure = json.loads((root / 'clock/synth/pcrs_clock_structure.json').read_text())
 assert [(d['root'], d['flop_clock_pins']) for d in structure['domains']] == [('clk', 48)], structure
 assert structure['unresolved_clock_pins'] == 0 and structure['items'] == [], structure
@@ -258,8 +258,8 @@ for field in ('baseline', 'selected', 'trials'):
     assert full['useful_skew'][field] == search[field], field
 assert full['networks'] == network['networks']
 
-# Timing placement sees the realized tree and its clock RC before the final rebuild.
-run('round_clock', ['--set', 'synth.place.pcrs.clock=true'], timing_driven=True)
+# With the first tree, timing placement sees the realized tree and its clock RC before the final rebuild.
+run('round_clock', ['--set', 'synth.place.pcrs.clock=true', '--set', 'synth.place.pcrs.initial=true'], timing_driven=True)
 round_dir = root / 'round_clock/synth/place'
 assert (round_dir / 'clock_initial/final/input.def').is_file()
 round_tree = json.loads((round_dir / 'pcrs_clock.json').read_text())

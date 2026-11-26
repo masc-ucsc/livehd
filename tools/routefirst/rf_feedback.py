@@ -9,6 +9,8 @@ import json
 import os
 import math
 import re
+import shutil
+import subprocess
 from pathlib import Path
 import time
 import sys
@@ -17,7 +19,7 @@ import sys
 # Import the coordinator beside the invoked script in the runfiles directory.
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 
-from rf_chunks import CONN, POSE, ROUTE, WIRE, feedback, records, route, section, worker_command, worker_options
+from rf_chunks import CONN, POSE, ROUTE, WIRE, die_with_parent, feedback, records, route, section, worker_command, worker_options
 
 
 def localized_seed(
@@ -213,20 +215,6 @@ def timing_eco(args):
     print(json.dumps(result))
 
 
-def die_with_parent():
-    """Stop when the lhd that started this coordinator is killed, so that no worker is left running."""
-    try:
-        import ctypes
-        import signal
-
-        parent = os.getppid()
-        ctypes.CDLL(None).prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
-        if os.getppid() != parent:
-            raise SystemExit(1)
-    except (OSError, AttributeError):
-        pass
-
-
 def main():
     die_with_parent()
     p = argparse.ArgumentParser(description=__doc__)
@@ -305,6 +293,26 @@ def main():
     start = time.monotonic()
     with (args.previous / "feedback.tsv").open() as src:
         failed = [r for r in csv.DictReader(src, delimiter="\t") if r["status"] != "routed"]
+    report = args.previous / "findings.tsv"
+    if not failed:
+        # A worker reports only the nets in its cohort. Read back the whole DEF with
+        # the supplied LEFs before deciding that this checkpoint needs no work.
+        report = folder / "findings.tsv"
+        readback = subprocess.check_output(
+            [*args.worker, "--verify-report", report, args.previous / "routed.def", "-", *args.lefs], text=True
+        )
+        counts = {name: int(value) for name, value in (line.split() for line in readback.splitlines())}
+    findings = []
+    if report.is_file():
+        known = {r["net"] for r in failed}
+        with report.open() as src:
+            for row in csv.DictReader(src, delimiter="\t"):
+                if row["kind"] == "no-wires":
+                    if row["nets"] not in known:
+                        failed.append({"net": row["nets"], "fail_pin": "", "status": "unattempted", "why": "outside-cohort"})
+                        known.add(row["nets"])
+                elif row["kind"] not in ("cell-off-site", "cell-overlap"):
+                    findings.append(row)
     previous = failed
     if args.targets:
         targets = set(args.targets.read_text().splitlines())
@@ -312,34 +320,17 @@ def main():
         if not targets or unknown:
             p.error(f"expected open net names from the previous report; unknown names: {sorted(unknown)[:5]}")
         failed = [r for r in previous if r["net"] in targets]
-    findings = []
-    report = args.previous / "findings.tsv"
-    if report.is_file():
-        with report.open() as src:
-            findings = [
-                r
-                for r in csv.DictReader(src, delimiter="\t")
-                if r["kind"] not in ("no-wires", "cell-off-site", "cell-overlap")
-                and (not args.targets or targets.intersection(r["nets"].partition(" (")[0].split()))
-            ]
+        findings = [r for r in findings if targets.intersection(r["nets"].partition(" (")[0].split())]
     if not failed and not findings:
-        # Nothing to repair is a result, not an error: publish the previous checkpoint again, so that a
-        # repair-until-complete loop ends cleanly.
-        kinds = {}
-        if report.is_file():
-            with report.open() as src:
-                for r in csv.DictReader(src, delimiter="\t"):
-                    if r["kind"] != "no-wires":
-                        kinds[r["kind"]] = kinds.get(r["kind"], 0) + 1
-        for name in ("routed.def", "feedback.tsv", "findings.tsv", "stats.json"):
-            if (args.previous / name).is_file():
-                try:
-                    os.link(args.previous / name, folder / name)
-                except OSError:
-                    (folder / name).write_bytes((args.previous / name).read_bytes())
-        (folder / "feedback.json").write_text(
-            json.dumps({"unrouted": 0, "violations": kinds, "released": 0, "note": "nothing to repair"}, indent=2)
-        )
+        for name in ("routed.def", "feedback.tsv"):
+            try:
+                os.link(args.previous / name, folder / name)
+            except OSError:
+                shutil.copyfile(args.previous / name, folder / name)
+        (folder / "stats.json").write_text(json.dumps(dict(counts, route_cpu_s=0)))
+        result = dict(feedback(folder), released=0, note="nothing to repair")
+        (folder / "feedback.json").write_text(json.dumps(result, indent=2))
+        print(json.dumps(result))
         return
     seed = folder / "seed.def"
     prior = {}

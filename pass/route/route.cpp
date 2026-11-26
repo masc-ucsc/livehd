@@ -11,7 +11,6 @@
 //   R4 cuts of one cut layer keep the Euclidean cut spacing.
 // A wire is legal when it is inserted, so the router never negotiates over shorts.
 #include "route.hpp"
-#include "pass/route/route_identity.hpp"
 
 #include <algorithm>
 #include <array>
@@ -28,6 +27,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <numeric>
 #include <queue>
 #include <set>
 #include <sstream>
@@ -41,6 +41,7 @@
 #include "inou/lefdef/physical.hpp"
 #include "inou/lefdef/routing_connectivity.hpp"
 #include "inou/lefdef/routing_geometry.hpp"
+#include "pass/route/route_identity.hpp"
 
 namespace ph = livehd::physical;
 
@@ -371,7 +372,7 @@ struct Router {
       const bool wide     = phi - plo > ly.w;
       const int  clear    = wide ? ly.wide_clear : ly.w;  // minimum spacing equals the width on every routed layer
       // A standard wire centred on a track obeys the interval rules, so only that track is touched.
-      const int  on_track = wide ? -1 : find(ly.tc, (plo + phi) / 2);
+      const int  on_track = phi - plo == ly.w ? find(ly.tc, (plo + phi) / 2) : -1;
       if (on_track >= 0 && plo == ly.tc[on_track] - ly.w / 2) {
         block(int(l), on_track, alo, ahi, net);
         return;
@@ -486,16 +487,31 @@ struct Router {
       }
       const int plo = int(ly.horiz ? r.yl : r.xl), phi = int(ly.horiz ? r.yh : r.xh);
       const int alo = int(ly.horiz ? r.xl : r.yl), ahi = int(ly.horiz ? r.xh : r.yh);
-      const int reach = std::max(ly.wide_clear, ly.cs);
+      const auto taken = [&](size_t track) {
+        for (const auto& sg : ly.tr[track].s) {
+          if (sg.net != id && !skipped(sg.net) && sg.hi > alo - ly.e2e - ly.cs && sg.lo < ahi + ly.e2e + ly.cs) {
+            return true;
+          }
+        }
+        return false;
+      };
+      // The same reading of the shape as obstacle() makes when it enters it: a bar of the standard width centred
+      // on a track is a wire of that track and meets only what is on it; other narrow metal keeps the minimum
+      // spacing, wide metal the wide one. With the wide spacing for every shape, the M2 bars of a flop were
+      // refused beside the M2 power rail of every row, 27 nm away (NVDLA O: 1,046 floating flops without a site).
+      const bool wide     = phi - plo > ly.w;
+      const int  on_track = phi - plo == ly.w ? find(ly.tc, (plo + phi) / 2) : -1;
+      if (on_track >= 0 && plo == ly.tc[on_track] - ly.w / 2) {
+        return !taken(size_t(on_track));
+      }
+      const int reach = std::max(wide ? ly.wide_clear : ly.w, ly.cs);
       auto      b     = std::lower_bound(ly.tc.begin(), ly.tc.end(), plo - reach - ly.w);
       for (; b != ly.tc.end() && *b <= phi + reach + ly.w; ++b) {
         if (std::max(plo - (*b + ly.w / 2), (*b - ly.w / 2) - phi) >= reach) {
           continue;
         }
-        for (const auto& sg : ly.tr[b - ly.tc.begin()].s) {
-          if (sg.net != id && !skipped(sg.net) && sg.hi > alo - ly.e2e - ly.cs && sg.lo < ahi + ly.e2e + ly.cs) {
-            return false;
-          }
+        if (taken(size_t(b - ly.tc.begin()))) {
+          return false;
         }
       }
     }
@@ -847,6 +863,10 @@ struct Router {
         cinfo[i].w = gap->second;  // a stretch of a row no cell may use
       }
       def_place[i]     = c.place;
+      if (const auto row = row_orient.find(int(c.place.y)); row != row_orient.end()) {
+        cinfo[i].flipped = c.place.orientation == mirrored(row->second)
+                           && ph::orientation_allowed(m, c.place.orientation);  // the input may hold mirrored cells already
+      }
       cinfo[i].settled = !opt.prelegal || c.place.status != ph::Status::PLACED || cinfo[i].fixed_wire || off_rows(int(i));
     }
     if (opt.prelegal) {
@@ -903,7 +923,11 @@ struct Router {
           if (row == row_span.end() || x < row->second.first || end > row->second.second || (x - row->second.first) % 54) {
             continue;
           }
-          cinfo[i].settled = reserve_site(ci);
+          const auto& c = fp.components[i];
+          if (c.place.orientation == site_orientation(int(i), y)
+              && ph::orientation_allowed(tech.macros.at(c.macro.str()), c.place.orientation)) {
+            cinfo[i].settled = reserve_site(ci);
+          }
         }
       }
     }
@@ -1083,24 +1107,49 @@ struct Router {
         }
       }
     }
+    // Route-first: a floating cell asks its row for the room its pins need, not only for its own width, so cells with
+    // many pins on few sites do not settle side by side (NVDLA O: the pins the router cannot reach sit where the pins
+    // alone take most of the M3 tracks). The extra room is on the right of the cell. If the rows cannot hold the
+    // design that way, the plan is made again with the plain widths.
+    std::vector<std::pair<int, int>> roomy;  // cell, its own width
+    if (opt.prelegal && opt.pin_footprint > 0) {
+      for (size_t c = 0; c < cinfo.size(); ++c) {
+        const auto m = tech.macros.find(fp.components[c].macro.str());
+        if (cinfo[c].settled || !cinfo[c].movable || m == tech.macros.end() || !m->second.klass.starts_with("CORE")
+            || gap_width.contains(int(c))) {
+          continue;
+        }
+        const auto   pins    = std::count_if(m->second.pins.begin(), m->second.pins.end(), [](const auto& pin) {
+          return pin.second.use != "POWER" && pin.second.use != "GROUND";
+        });
+        const double site_um = 54.0 / fp.dbu, row_um = m->second.height;
+        const double requested = std::ceil(pins / (opt.pin_footprint * site_um * row_um)) * 54;
+        const int    need      = int(std::min(requested, double(cinfo[c].w) + 8 * 54));
+        if (need > cinfo[c].w) {
+          roomy.emplace_back(int(c), cinfo[c].w);
+          cinfo[c].w = need;
+        }
+      }
+    }
+    spread_targets();
     plan_rows();
+    if (!roomy.empty() && stat["plan_cells_left_out"] > 0) {
+      for (const auto& [c, w] : roomy) {
+        cinfo[c].w = w;
+      }
+      roomy.clear();
+      stat["pin_footprint_given_up"] = 1;
+      stat.erase("plan_cells_without_row");
+      plan_rows();
+    }
+    stat["pin_footprint_cells"] = int64_t(roomy.size());
     // A cell with metal of its own above M1 cannot take a site under wires that are already there, so these take
     // their sites now, before anything is routed.
     for (size_t c = 0; c < cinfo.size(); ++c) {
       if (cinfo[c].settled) {
         continue;
       }
-      const auto& m     = tech.macros.at(fp.components[c].macro.str());
-      bool        upper = false;
-      for (const auto& o : m.obstructions) {
-        upper = upper || (o.layer != "M1" && (o.layer[0] == 'M' || o.layer[0] == 'V'));
-      }
-      for (const auto& [pn, pp] : m.pins) {
-        for (const auto& sh : pp.shapes) {
-          upper = upper || sh.layer != "M1";
-        }
-      }
-      if (upper || !cinfo[c].movable || cinfo[c].clock_sink) {
+      if (upper_metal(int(c)) || !cinfo[c].movable || cinfo[c].clock_sink) {
         stat["cells_settled_up_front"] += settle(int(c));
       }
     }
@@ -1535,6 +1584,7 @@ struct Router {
                       int off_hi = 0) {
     Site_pick  best;
     auto&      comp = fp.components[c];
+    const auto& master = tech.macros.at(comp.macro.str());
     const auto keep = comp.place;
     const int  w = cinfo[c].w, site = 54;
     const int  base = int(std::lower_bound(row_ys.begin(), row_ys.end(), ay) - row_ys.begin());
@@ -1548,7 +1598,10 @@ struct Router {
         if (dy >= best.cost || dy > max_dist) {
           continue;
         }
-        any_row        = true;
+        any_row = true;
+        if (!ph::orientation_allowed(master, site_orientation(c, ry))) {
+          continue;
+        }
         const auto& v  = row_cells[ry];
         const auto  sp = row_span.at(ry);
         const int   idx
@@ -1577,7 +1630,7 @@ struct Router {
           }
           comp.place.x           = x;
           comp.place.y           = ry;
-          comp.place.orientation = row_orient.at(ry);
+          comp.place.orientation = site_orientation(c, ry);
           if (comp_obstacles(c, false) && (!need_access || pins_reachable(c))) {
             best = {true, x, ry, cost};
           }
@@ -1590,11 +1643,25 @@ struct Router {
     comp.place = keep;
     return best;
   }
+  // The same row orientation seen in a mirror: the pins of the cell trade sides.
+  static ph::Orientation mirrored(ph::Orientation o) {
+    switch (o) {
+      case ph::Orientation::N : return ph::Orientation::FN;
+      case ph::Orientation::FN: return ph::Orientation::N;
+      case ph::Orientation::FS: return ph::Orientation::S;
+      case ph::Orientation::S : return ph::Orientation::FS;
+      default                 : return o;
+    }
+  }
+  ph::Orientation site_orientation(int c, int y) const {
+    const auto o = row_orient.at(y);
+    return cinfo[c].flipped ? mirrored(o) : o;
+  }
   void apply_site(int c, int x, int y) {
     auto& comp             = fp.components[c];
     comp.place.x           = x;
     comp.place.y           = y;
-    comp.place.orientation = row_orient.at(y);
+    comp.place.orientation = site_orientation(c, y);
     auto& v                = row_cells[y];
     v.insert(std::lower_bound(v.begin(), v.end(), x, [&](int a, int xx) { return fp.components[a].place.x < xx; }), c);
     comp_obstacles(c, true);
@@ -1644,6 +1711,121 @@ struct Router {
     }
     return (right >= 0 ? plan_pos[right] : int(it->second.size())) - (left >= 0 ? plan_pos[left] : -1) - 1;
   }
+  // Route-first: where a floating cell would like to go is its input pose, and the input has clouds with several
+  // times more cells than their rows hold. This moves the wishes, not the cells: tile boundaries shift from a tile
+  // that is over the target fill toward a neighbour that is under it, and the wishes inside move with them, first
+  // along x, then along y, a little each round (the cell shifting of FastPlace). A tile under the target counts as
+  // being at the target, so two sparse tiles do not trade and only the surroundings of a cloud are compressed. The
+  // row plan and the sites still decide the real places.
+  void spread_targets() {
+    if (!opt.prelegal || opt.spread <= 0) {
+      return;
+    }
+    const size_t        tiles = size_t(tnx) * tny;
+    std::vector<double> cap(tiles, 0.0);
+    for (int y : row_ys) {
+      const auto sp       = row_span.at(y);
+      const int  ty       = std::clamp((y + 135) / tile, 0, tny - 1);
+      int        at       = sp.first;
+      const auto free_run = [&](int lo, int hi) {
+        for (int tx = std::clamp(lo / tile, 0, tnx - 1); tx <= std::clamp((hi - 1) / tile, 0, tnx - 1) && hi > lo; ++tx) {
+          cap[size_t(ty) * tnx + tx] += 270.0 * std::max(0, std::min(hi, (tx + 1) * tile) - std::max(lo, tx * tile));
+        }
+      };
+      for (int k : row_cells[y]) {
+        free_run(at, std::min(sp.second, int(fp.components[k].place.x)));
+        at = std::max(at, int(fp.components[k].place.x) + cinfo[k].w);
+      }
+      free_run(at, sp.second);
+    }
+    std::vector<int>    cells;
+    std::vector<double> px, py, area;
+    for (size_t c = 0; c < cinfo.size(); ++c) {
+      if (!cinfo[c].settled) {
+        cells.push_back(int(c));
+        px.push_back(cinfo[c].gx + cinfo[c].w / 2.0);
+        py.push_back(cinfo[c].gy + 135.0);
+        area.push_back(cinfo[c].w * 270.0);
+      }
+    }
+    if (cells.empty()) {
+      return;
+    }
+    const double        xmax = double(tnx) * tile - 1, ymax = double(tny) * tile - 1, delta = 0.25;
+    const double        total = std::accumulate(area.begin(), area.end(), 0.0);
+    std::vector<double> fill(tiles);
+    // The share of the cell area that lies above the target fill of its tile.
+    const auto          measure = [&] {
+      std::fill(fill.begin(), fill.end(), 0.0);
+      for (size_t i = 0; i < cells.size(); ++i) {
+        fill[tile_of(int(px[i]), int(py[i]))] += area[i];
+      }
+      double over = 0;
+      for (size_t k = 0; k < tiles; ++k) {
+        over    += std::max(0.0, fill[k] - cap[k] * opt.spread);
+        // a tile with no free row length is full whatever it holds; under the target it reads as at the target
+        fill[k]  = cap[k] > 0 ? fill[k] / (cap[k] * opt.spread) : (fill[k] > 0 ? 8.0 : 1.0);
+        fill[k]  = std::max(1.0, std::min(fill[k], 8.0));
+      }
+      return over / total;
+    };
+    double first = measure(), worst = first;
+    int    rounds = 0;
+    for (; rounds < opt.spread_rounds && worst > 0.02; ++rounds) {
+      for (const bool along_x : {true, false}) {
+        const int           n = along_x ? tnx : tny, m = along_x ? tny : tnx;
+        std::vector<double> edge(size_t(n + 1) * m);  // new position of the boundary before tile i, per line
+        for (int j = 0; j < m; ++j) {
+          const auto at                 = [&](int i) { return along_x ? fill[size_t(j) * tnx + i] : fill[size_t(i) * tnx + j]; };
+          edge[size_t(j) * (n + 1)]     = 0;
+          edge[size_t(j) * (n + 1) + n] = double(n) * tile;
+          for (int i = 1; i < n; ++i) {
+            const double a = at(i - 1), b = at(i);  // the boundary between tiles i-1 and i moves toward the emptier one
+            edge[size_t(j) * (n + 1) + i]
+                = (double(i - 1) * tile * (b + delta) + double(i + 1) * tile * (a + delta)) / (a + b + 2 * delta);
+          }
+        }
+        for (size_t k = 0; k < cells.size(); ++k) {
+          auto&        v  = along_x ? px[k] : py[k];
+          const int    i  = std::clamp(int(v) / tile, 0, n - 1);
+          const int    j  = std::clamp(int(along_x ? py[k] : px[k]) / tile, 0, m - 1);
+          const double lo = edge[size_t(j) * (n + 1) + i], hi = edge[size_t(j) * (n + 1) + i + 1];
+          const double want = lo + (v - double(i) * tile) * (hi - lo) / tile;
+          v                 = std::clamp(v + 0.5 * (want - v), 0.0, along_x ? xmax : ymax);
+        }
+        worst = measure();
+      }
+    }
+    double moved = 0;
+    for (size_t k = 0; k < cells.size(); ++k) {
+      const int c  = cells[k];
+      const int gx = int(std::lround(px[k] - cinfo[c].w / 2.0)), gy = int(std::lround(py[k] - 135.0));
+      moved       += std::abs(gx - cinfo[c].gx) + std::abs(gy - cinfo[c].gy);
+      cinfo[c].gx  = gx;
+      cinfo[c].gy  = gy;
+    }
+    stat["spread_rounds"]              = rounds;
+    stat["spread_over_permille_start"] = int64_t(first * 1000);
+    stat["spread_over_permille_end"]   = int64_t(worst * 1000);
+    stat["spread_mean_shift_nm"]       = int64_t(moved / cells.size());
+  }
+  // Metal of its own above M1: such a cell cannot sit under a strap or a wire on those layers.
+  bool upper_metal(int c) const {
+    const auto& m = tech.macros.at(fp.components[c].macro.str());
+    for (const auto& o : m.obstructions) {
+      if (o.layer != "M1" && (o.layer[0] == 'M' || o.layer[0] == 'V')) {
+        return true;
+      }
+    }
+    for (const auto& [pn, pp] : m.pins) {
+      for (const auto& sh : pp.shapes) {
+        if (sh.layer != "M1") {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
   // Give every floating cell a row and a place in the left-to-right order of that row so that the widths between any
   // two placed cells always fit. This is fixed-order row legalization with the positions left open: a cell picks its
   // site when a net first needs it, and the cells that come later keep their room.
@@ -1675,6 +1857,7 @@ struct Router {
     for (int round = 0; round < 60 && !todo.empty(); ++round) {
       std::set<int> dirty;
       for (int c : todo) {  // nearest row with room that has not refused the cell
+        const auto& master = tech.macros.at(fp.components[c].macro.str());
         const int base = int(std::lower_bound(row_ys.begin(), row_ys.end(), cinfo[c].gy) - row_ys.begin());
         int       pick = INT32_MIN;
         for (int k = 0; k < int(row_ys.size()) && pick == INT32_MIN; ++k) {
@@ -1684,7 +1867,7 @@ struct Router {
               continue;
             }
             const int y = row_ys[ri];
-            if (row_free[y] >= cinfo[c].w && !banned[c].count(y)
+            if (row_free[y] >= cinfo[c].w && !banned[c].count(y) && ph::orientation_allowed(master, site_orientation(c, y))
                 && (best == INT32_MIN || std::abs(y - cinfo[c].gy) < std::abs(best - cinfo[c].gy))) {
               best = y;
             }
@@ -1803,7 +1986,7 @@ struct Router {
     const int  want        = std::clamp(x0 + (cinfo[c].gx - x0 + site / 2) / site * site, lo, hi);
     int        pick        = INT32_MIN;
     comp.place.y           = y;
-    comp.place.orientation = row_orient.at(y);
+    comp.place.orientation = site_orientation(c, y);
     for (int pass = 0; pass < 2 && pick == INT32_MIN; ++pass) {  // with pin access first, then any site that fits
       for (int k = 0; k <= (hi - lo) / site && pick == INT32_MIN && (pass == 1 || k <= 8); ++k) {
         for (int x : {want - k * site, want + k * site}) {
@@ -1819,13 +2002,17 @@ struct Router {
     }
     comp.place = keep;
     if (pick == INT32_MIN) {
+      if (opt.verbose && stat["settle_fail_fit"] < 12) {
+        std::cerr << "settle fit " << comp.name.str() << ' ' << comp.macro.str() << " row " << y << " room " << lo << ' ' << hi
+                  << " want " << want << " w " << cinfo[c].w << " pose " << cinfo[c].gx << ' ' << cinfo[c].gy << '\n';
+      }
       ++stat["settle_fail_fit"];
       return false;
     }
     apply_site(c, pick, y);
     cinfo[c].x0                 = pick;
     cinfo[c].y0                 = y;
-    const int64_t d             = std::abs(pick - cinfo[c].gx) + std::abs(y - cinfo[c].gy);
+    const int64_t d              = std::abs(pick - int64_t(def_place[c].x)) + std::abs(y - int64_t(def_place[c].y));
     stat["settle_cells"]       += 1;
     stat["settle_disp_nm"]     += d;
     stat["settle_disp_max_nm"]  = std::max<int64_t>(stat["settle_disp_max_nm"], d);
@@ -2446,6 +2633,7 @@ struct Router {
     int                              moves = 0, x0 = 0, y0 = 0, w = 0;
     std::vector<std::pair<int, int>> pins;  // net, pin index
     bool                             settled = true, reserved = false;
+    bool                             flipped       = false;  // mirrored about its vertical axis against the orientation of its row
     int                              reserve_tries = 0;
     int                              gx = 0, gy = 0;  // pose of the input DEF
   };
@@ -3293,33 +3481,34 @@ struct Router {
     const int x    = int(comp.place.x);
     const int site = 54;
     int       best = 0, best_score = 0;
-    for (int k = 1; k <= opt.shift_reach; ++k) {
+    // A position is as good as its worst pin: the fewest access points any pin of the cell keeps there.
+    const auto score_here = [&] {
+      if (!comp_obstacles(c, false)) {
+        return 0;
+      }
+      int score = INT32_MAX;
+      for (const auto& [n2, pi] : cinfo[c].pins) {
+        Pin tmp = nets[n2].pins[pi];
+        pin_access(tmp, tmp.lef);
+        int ok = 0;
+        for (const auto& cd : tmp.cands) {
+          ok += cand_usable(n2, cd);
+        }
+        score = std::min(score, ok);
+      }
+      return score;
+    };
+    for (int k = 1; k <= opt.shift_reach && best_score < 2; ++k) {
       for (int d : {-k, k}) {
         const int nx = x + d * site;
         if (nx < lo || nx + cinfo[c].w > hi || std::abs(nx - cinfo[c].x0) > cap * site) {
           continue;
         }
         comp.place.x = nx;
-        if (!comp_obstacles(c, false)) {
-          continue;
-        }
-        int score = INT32_MAX;
-        for (const auto& [n2, pi] : cinfo[c].pins) {
-          Pin tmp = nets[n2].pins[pi];
-          pin_access(tmp, tmp.lef);
-          int ok = 0;
-          for (const auto& cd : tmp.cands) {
-            ok += cand_usable(n2, cd);
-          }
-          score = std::min(score, ok);
-        }
-        if (score > best_score) {
+        if (const int score = score_here(); score > best_score) {
           best_score = score;
           best       = d;
         }
-      }
-      if (best_score >= 2) {
-        break;
       }
     }
     comp.place.x = x;
@@ -3911,7 +4100,9 @@ struct Router {
       }
       const auto parts = row_parts.find(int(c.place.y));
       bool       legal = false;
-      if (parts != row_parts.end()) {
+      if (parts != row_parts.end() && ph::orientation_allowed(m, c.place.orientation)
+          && (c.place.orientation == row_orient.at(int(c.place.y))
+              || c.place.orientation == mirrored(row_orient.at(int(c.place.y))))) {
         for (const auto& [lo, hi] : parts->second) {
           legal = legal || (c.place.x >= lo && c.place.x + w <= hi && (int(c.place.x) - parts->second.front().first) % 54 == 0);
         }
@@ -4158,6 +4349,12 @@ void parse_options(Settings& opt, const std::vector<std::string>& args, std::vec
       opt.pd_alpha = std::stod(next());
     } else if (a == "--pin-cost") {
       opt.pin_cost = std::stod(next());
+    } else if (a == "--pin-footprint") {
+      opt.pin_footprint = std::stod(next());
+    } else if (a == "--spread") {
+      opt.spread = std::stod(next());
+    } else if (a == "--spread-rounds") {
+      opt.spread_rounds = std::stoi(next());
     } else if (a == "--pin-tile") {
       opt.pin_tile = std::stoi(next());
     } else if (a == "--hi-cost") {
@@ -4243,10 +4440,20 @@ void run(Router& r, const livehd::routing::Frame& frame, const std::string& repo
       throw std::runtime_error("routing fractions and pd-alpha must be between 0 and 1");
     }
   }
+  if (r.opt.spread_rounds < 0) {
+    throw std::invalid_argument("spread-rounds must be nonnegative");
+  }
   if (r.opt.pin_tile < 1) {
     throw std::runtime_error("pin-tile must be at least one pin");
   }
-  for (double cost : {r.opt.m2_cost, r.opt.m3_cost, r.opt.hi_cost, r.opt.via_cost, r.opt.hweight, r.opt.pin_cost}) {
+  for (double cost : {r.opt.m2_cost,
+                      r.opt.m3_cost,
+                      r.opt.hi_cost,
+                      r.opt.via_cost,
+                      r.opt.hweight,
+                      r.opt.pin_cost,
+                      r.opt.pin_footprint,
+                      r.opt.spread}) {
     if (!std::isfinite(cost) || cost < 0) {
       throw std::runtime_error("routing costs and heuristic weight must be finite and nonnegative");
     }

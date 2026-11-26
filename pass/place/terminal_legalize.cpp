@@ -231,6 +231,7 @@ struct Model {
     installed.resize(count);
     critical.resize(count);
     compact.resize(count);
+    pin_pad.assign(count, 0);  // filled by pin_padding() once the critical cells are known
     wire_changed.resize(count);
     if (options.remainder_wire_weight > 0) {
       wire_incident.resize(count);
@@ -276,7 +277,6 @@ struct Model {
       std::sort(list.begin(), list.end());
       list.erase(std::unique(list.begin(), list.end()), list.end());
     }
-    pin_padding();
     double       total_area     = 0;
     const double total_capacity = grid.total_capacity();
     for (size_t i = 0; i < count; ++i) {
@@ -330,8 +330,10 @@ struct Model {
       });
     };
     const auto padded = [&](size_t i, const ph::Macro& m) {
-      return movable[i] && m.klass.starts_with("CORE") && !fixed_physical_cell(fp.components[i], m);
+      return movable[i] && (!critical[i] || options.pin_padding_critical) && m.klass.starts_with("CORE")
+             && !fixed_physical_cell(fp.components[i], m);
     };
+    const auto base_padding = [&](size_t i) { return critical[i] ? options.critical_padding_sites : options.padding_sites; };
     if (options.pin_footprint > 0) {
       for (size_t i = 0; i < fp.components.size(); ++i) {
         const auto& m = tech.macros.at(fp.components[i].macro);
@@ -340,7 +342,7 @@ struct Model {
         }
         const double site_um = tech.sites.at(m.site).width, row_um = double(original[i].height) / fp.dbu;
         const double need = signal_pins(m) / (options.pin_footprint * site_um * row_um);  // sites
-        const double have = std::ceil(original[i].width / (site_um * fp.dbu)) + 2 * options.padding_sites;
+        const double have = std::ceil(original[i].width / (site_um * fp.dbu)) + 2 * base_padding(i);
         if (need > have) {
           pin_pad[i] = uint8_t(std::min<double>(pad_limit, std::ceil((need - have) / 2)));
         }
@@ -379,7 +381,7 @@ struct Model {
         continue;
       }
       const double  step  = tech.sites.at(m.site).width * fp.dbu;
-      const double  sites = std::ceil(original[i].width / step) + 2 * options.padding_sites;
+      const double  sites = std::ceil(original[i].width / step) + 2 * base_padding(i);
       const uint8_t extra = uint8_t(std::min<double>(pad_limit, std::ceil(sites * excess / 2)));
       pin_pad[i]          = std::max(pin_pad[i], extra);
     }
@@ -1696,6 +1698,7 @@ struct Model {
     }
     report.supporting_cells = selected.size() - primary_cells;
     report.critical_cells   = selected.size();
+    pin_padding();
     std::vector<Satlegalize_alignment> proposals;
     for (size_t n = 0; n < report.critical_nets && proposals.size() < options.critical_pair_limit; ++n) {
       // A two-terminal net is a single tree edge. Multi-terminal trees need

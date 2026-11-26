@@ -3,14 +3,18 @@
 
 import argparse
 import concurrent.futures
+from contextlib import contextmanager
 import csv
+import fcntl
 import hashlib
 from http.server import BaseHTTPRequestHandler
 import json
 import os
 from pathlib import Path
 import re
+import socket
 from socketserver import UnixStreamServer
+import stat
 import subprocess
 import tempfile
 import time
@@ -174,6 +178,35 @@ def contained(paths, box):
     return bool(paths)
 
 
+@contextmanager
+def socket_directory_lock(path):
+    # Serialize probing, binding and removal by coordinators sharing this directory.
+    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(directory, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(directory)
+
+
+def check_socket_path(path, *, remove_stale=False):
+    try:
+        entry = path.lstat()
+    except FileNotFoundError:
+        return
+    if not stat.S_ISSOCK(entry.st_mode):
+        raise ValueError(f"agent socket path already exists and is not a socket: {path}")
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+        probe.settimeout(1)
+        try:
+            probe.connect(str(path))
+        except ConnectionRefusedError:
+            if remove_stale and os.path.samestat(entry, path.lstat()):
+                path.unlink()
+            return
+    raise ValueError(f"a resident router already serves {path}")
+
+
 def socket_commands(process, path):
     """Use the same local POST /agent protocol as tools/lhd_gui.py."""
     ready = process.stdout.readline()
@@ -234,17 +267,25 @@ def socket_commands(process, path):
     # Bind without unlinking an existing socket. Make it private before
     # listening and remove only our own socket at shutdown.
     with UnixStreamServer(str(path), Handler, bind_and_activate=False) as server:
-        server.server_bind()
-        try:
+        with socket_directory_lock(path):
+            check_socket_path(path, remove_stale=True)
+            server.server_bind()
+            owned = path.lstat()
             path.chmod(0o600)
             server.server_activate()
+        try:
             server.timeout = 1
             while not finished:
                 if process.poll() is not None:
                     raise RuntimeError(f"resident router exited with status {process.returncode}")
                 server.handle_request()
         finally:
-            path.unlink(missing_ok=True)
+            with socket_directory_lock(path):
+                try:
+                    if os.path.samestat(owned, path.lstat()):
+                        path.unlink()
+                except FileNotFoundError:
+                    pass
 
 
 def worker_options(parser):
@@ -442,22 +483,13 @@ def main():
     args.agent = args.agent or args.agent_socket is not None
     if args.agent_socket is not None:
         # Find out now, not after every worker has run, that the socket cannot be served.
-        import socket
-
         if len(os.fsencode(str(args.agent_socket))) > 107:
             p.error(f"agent socket path is longer than a Unix socket address allows: {args.agent_socket}")
-        if args.agent_socket.exists():
-            probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            try:
-                probe.connect(str(args.agent_socket))
-            except ConnectionRefusedError:
-                args.agent_socket.unlink()  # left by a coordinator that was killed
-            except OSError as exc:
-                p.error(f"cannot use agent socket {args.agent_socket}: {exc}")
-            else:
-                p.error(f"a resident router already serves {args.agent_socket}")
-            finally:
-                probe.close()
+        try:
+            with socket_directory_lock(args.agent_socket):
+                check_socket_path(args.agent_socket)
+        except (OSError, ValueError) as exc:
+            p.error(f"cannot use agent socket {args.agent_socket}: {exc}")
     if not 0 <= args.pd_alpha <= 1 or not 0 <= args.crit_frac <= 1 or (args.crit_frac and not args.timing):
         p.error("pd-alpha and crit-frac must be in [0,1], with timing supplied for critical-net priority")
     args.costs = list(ROUTE)

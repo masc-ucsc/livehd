@@ -24,7 +24,7 @@ for number in range(1, 8):
 TECH += "END LIBRARY\n"
 CELLS = """VERSION 5.8 ;
 MACRO BUF
- CLASS CORE ; ORIGIN 0 0 ; SIZE 0.054 BY 0.270 ;
+ CLASS CORE ; ORIGIN 0 0 ; SIZE 0.054 BY 0.270 ; SYMMETRY X ;
  PIN A
   DIRECTION INPUT ; PORT LAYER M1 ; RECT 0.009 0.001 0.045 0.055 ; END
  END A
@@ -213,6 +213,56 @@ class RouteTest(unittest.TestCase):
         stats = self.run_router(frame, "--verify")
         self.assertEqual((stats["nets_routed"], stats["pin_access_retries"]), (1, 1))
         self.assertEqual({k: v for k, v in stats.items() if k.startswith("verify_") and v}, {})
+
+    def test_mirrored_cell_settles_on_a_compatible_row(self):
+        (self.root / "cells.lef").write_text(CELLS.replace("SYMMETRY X ;", "SYMMETRY Y ;"))
+        frame = self.frame(["- hold BUF + FIXED ( 0 270 ) N ;", "- move BUF + PLACED ( 0 270 ) FN ;"], sites=1)
+        frame = frame.replace("720 720", "720 1200").replace("ROW row", "ROW r2 core 0 540 FS DO 1 BY 1 STEP 54 0 ;\n"
+                              "ROW r3 core 0 810 N DO 1 BY 1 STEP 54 0 ;\nROW row")
+        stats = self.run_router(frame, "--prelegal", "--limit", "0", "--verify")
+        self.assertIn("- move BUF + PLACED ( 0 810 ) FN", (self.root / "out.def").read_text())
+        self.assertEqual(stats["verify_cell_off_site"], 0)
+        illegal = frame.replace("( 0 270 ) FN", "( 0 540 ) S")
+        self.assertEqual(self.run_router(illegal, "--limit", "0", "--verify")["verify_cell_off_site"], 1)
+
+    def test_floating_cells_keep_room_for_their_pins(self):
+        # Two one-site cells with two signal pins each, dropped on the same spot. At 60 pins per um2 a cell needs three
+        # sites of row, so the second settles three sites from the first; without the option it takes the next site.
+        cells = ["- a BUF + PLACED ( 216 270 ) N ;", "- b BUF + PLACED ( 230 270 ) N ;"]
+        frame = self.frame(cells, ["- n ( a Z ) ( b A ) ;"])
+        for options, gap, roomy in ([], 54, 0), (["--pin-footprint", "60"], 162, 2), (["--pin-footprint", "5"], 54, 0), (["--pin-footprint", "1e-100"], 54, 0):
+            stats = self.run_router(frame, "--prelegal", "--limit", "0", *options)
+            out = (self.root / "out.def").read_text()
+            xs = sorted(int(x) for x in re.findall(r"- [ab] BUF \+ PLACED \( (\d+) 270 \)", out))
+            self.assertEqual((xs[1] - xs[0], stats.get("pin_footprint_cells", 0)), (gap, roomy), options)
+        self.assertEqual(stats["pin_footprint_given_up"], 1)  # a ten-site row cannot give each cell its eight extra sites
+
+    def test_spread_moves_the_wishes_of_a_cloud_apart(self):
+        # Forty cells overlapping within 300 nm, in a frame four tiles wide. The plan alone packs them around that
+        # spot; with the spread their wished places move apart and into the next tiles first, so they settle over more
+        # rows and a larger area.
+        tracks = [line.replace("DO 20", "DO 130") for line in TRACKS]
+        cells = [f"- c{i} BUF + PLACED ( {400 + 7 * i} {270 * (1 + i % 2)} ) N ;" for i in range(40)]
+        frame = self.frame(cells, ["- n ( c0 Z ) ( c1 A ) ;"], tracks=tracks, sites=80)
+        frame = frame.replace("DIEAREA ( 0 0 ) ( 720 720 )", "DIEAREA ( 0 0 ) ( 4608 2304 )")
+        frame = frame.replace("ROW row core 0 270 N DO 80 BY 1 STEP 54 0 ;", "\n".join(
+            f"ROW r{k} core 0 {270 * (k + 1)} {'N' if k % 2 == 0 else 'FS'} DO 80 BY 1 STEP 54 0 ;" for k in range(4)))
+        extent = {}
+        for name, options in ("plain", []), ("spread", ["--spread", "0.3"]):
+            stats = self.run_router(frame, "--prelegal", "--limit", "0", *options)
+            at = re.findall(r"- c\d+ BUF \+ PLACED \( (\d+) (\d+) \)", (self.root / "out.def").read_text())
+            self.assertEqual(len(at), 40)
+            placed = re.findall(r"- c(\d+) BUF \+ PLACED \( (\d+) (\d+) \)", (self.root / "out.def").read_text())
+            distances = [abs(int(x) - (400 + 7 * int(i))) + abs(int(y) - 270 * (1 + int(i) % 2)) for i, x, y in placed]
+            self.assertEqual(stats["settle_disp_nm"], sum(distances))
+            self.assertEqual(stats["settle_disp_max_nm"], max(distances))
+            xs = [int(x) for x, _ in at]
+            extent[name] = (max(xs) - min(xs) + 54) * len({y for _, y in at})  # sites of row the cells spread over
+        self.assertNotIn("spread_rounds", self.run_router(frame, "--prelegal", "--limit", "0"))
+        self.assertGreater(stats["spread_over_permille_start"], 300)
+        self.assertLess(stats["spread_over_permille_end"], stats["spread_over_permille_start"] // 2)
+        self.assertGreater(stats["spread_mean_shift_nm"], 0)
+        self.assertGreater(extent["spread"], extent["plain"], extent)
 
     def test_macro_edge_pin_is_reached_through_a_stub(self):
         # The pin is an off-track M3 bar at the bottom edge, under a blockage that covers the macro on M1 to M3.
@@ -422,6 +472,34 @@ class RouteTest(unittest.TestCase):
         self.assertEqual((result["targeted_unrouted"], result["previous_unrouted"]), (1, 2))
         self.assertEqual(result["violations"], {"verify_nets_without_wires": 1})
         self.assertEqual([r["net"] for r in result["first_failures"]], ["later"])
+
+    def test_repair_reads_back_nets_omitted_from_worker_report(self):
+        self.with_vias()
+        (self.root / "cohort").write_text("")
+        self.run_router(self.two_cells(), "--only", "cohort", "--report", "feedback.tsv", output="routed.def")
+        self.assertEqual(len((self.root / "feedback.tsv").read_text().splitlines()), 1)
+        for previous, folder in ((".", "fixed"), ("fixed", "rechecked")):
+            run = subprocess.run([FEEDBACK, "--lhd", ROUTER, "--out", folder, previous, "tech.lef", "cells.lef"],
+                                 cwd=self.root, capture_output=True, text=True, check=True, timeout=10)
+            summary = json.loads(run.stdout)
+            self.assertEqual(summary["violations"], {})
+            if previous == ".":
+                self.assertEqual(summary["previous_unrouted"], 1)
+            else:
+                self.assertEqual(summary["released"], 0)
+                self.assertEqual((self.root / folder / "routed.def").read_bytes(),
+                                 (self.root / previous / "routed.def").read_bytes())
+
+    def test_agent_socket_preserves_existing_file(self):
+        (self.root / "in.def").write_text(self.two_cells())
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
+            path = pathlib.Path(tmp) / "agent.sock"
+            path.write_text("keep")
+            run = subprocess.run([CHUNKS, "--lhd", ROUTER, "--agent-socket", path, "--out", "trial",
+                                  "in.def", "tech.lef", "cells.lef"], cwd=self.root, capture_output=True, text=True, timeout=5)
+            self.assertNotEqual(run.returncode, 0)
+            self.assertEqual(path.read_text(), "keep")
+            self.assertFalse((self.root / "trial").exists())
 
     def test_pin_access_release_preserves_upper_tracks(self):
         self.with_vias()

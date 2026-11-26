@@ -181,6 +181,26 @@ TEST(TerminalLegalize, PinFootprintPadsEachCellByItsOwnPins) {
   }
 }
 
+TEST(TerminalLegalize, CriticalPinFootprintAccountsForItsOwnBasePadding) {
+  for (const unsigned base : {0u, 2u}) {
+    Fixture f(60, 1);
+    f.options.bins_x = f.options.bins_y = 1;
+    f.options.critical_padding_sites    = base;
+    f.options.pin_footprint             = .4;  // two pins need five sites including the one-site cell
+    f.options.pin_padding_critical      = true;
+    f.options.pin_padding_rows          = 40;
+    const auto a                        = f.cell(10, 0);
+    const auto b                        = f.cell(30, 0);
+    f.net(a, b, -10);
+    const auto report = terminal_legalize(f.tech, f.fp, f.timing, f.options);
+    ASSERT_EQ(report.critical_cells, 2u);
+    for (const auto& cell : report.cells) {
+      EXPECT_EQ(cell.padding_sites, 2u);
+    }
+    EXPECT_EQ(report.pin_padded_cells, base == 0 ? 2u : 0u);
+  }
+}
+
 TEST(TerminalLegalize, NeighborhoodBoundsHoldOutsideCellsAndConstrainOriginNotFootprint) {
   Fixture f(12, 2);
   f.options.padding_sites = 0;

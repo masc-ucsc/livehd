@@ -16,7 +16,7 @@ inline constexpr int           flat_route       = static_cast<int>(Route_mode::f
 inline constexpr int           chunk_route      = static_cast<int>(Route_mode::chunk);
 inline constexpr int           repair_route     = static_cast<int>(Route_mode::repair);
 inline constexpr Route_setting route_settings[] = {
-    {            "trace",                              flat_route,    Route_value::path,                                                       "Trace routing of this net."},
+    {            "trace",     flat_route,    Route_value::path,"Trace routing of this net."                                                                                        },
     {         "aim_tree",                              flat_route,    Route_value::flag,                              "Aim each branch search at the existing routed tree."},
     {         "prelegal",                              flat_route,    Route_value::flag,                       "Legalize movable cells on demand from their initial poses."},
     {        "tile_move",                              flat_route,    Route_value::flag,                      "Move blocked cells to legal sites in a nearby routing tile."},
@@ -38,6 +38,7 @@ inline constexpr Route_setting route_settings[] = {
     {            "chain",                              flat_route, Route_value::integer,                               "Maximum neighboring cells in a site-clearing push."},
     {     "final_passes",                              flat_route, Route_value::integer,                                    "Extra routing passes over the remaining nets."},
     {          "explain",                              flat_route, Route_value::integer,                                               "Number of failed pins to diagnose."},
+    {    "spread_rounds",                              flat_route, Route_value::integer,                                      "Most rounds of the spread of wished places."},
     {         "pin_tile",                              flat_route, Route_value::integer,                            "Pins in a 32-track tile above which pin_cost applies."},
     {    "space_min_len",                              flat_route, Route_value::integer,                             "Minimum wire length for extra spacing, in DEF units."},
     {  "space_min_layer",                              flat_route, Route_value::integer,                                         "Minimum routing layer for extra spacing."},
@@ -48,6 +49,12 @@ inline constexpr Route_setting route_settings[] = {
     {          "hweight",                              flat_route,  Route_value::number,                                                  "A-star search heuristic weight."},
     {          "hi_cost",                              flat_route,  Route_value::number,                                                    "Relative M6 and M7 wire cost."},
     {         "via_cost",                              flat_route,  Route_value::number,                                                        "Cost of a via transition."},
+    {    "pin_footprint",
+     flat_route,  Route_value::number,
+     "With prelegal: signal pins per um2 a floating cell asks room for in its row."                                                                                        },
+    {           "spread",
+     flat_route,  Route_value::number,
+     "With prelegal: tile fill above which the wished places of floating cells spread out."                                                                                },
     {         "pin_cost",                              flat_route,  Route_value::number,               "Extra M2 and M3 wire cost over tiles with more pins than pin_tile."},
     {        "long_frac",                              flat_route,  Route_value::number,                                      "Fraction of longest data nets routed first."},
     {       "space_frac",                              flat_route,  Route_value::number,                      "Fraction of worst-slack data nets given extra wire spacing."},
