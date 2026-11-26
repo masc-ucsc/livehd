@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 3p-pnrflow — one place and route flow, one legalization</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">3p-pnrflow</strong> One place and route flow, one legalization</h1>
+<p><span class="status">Plan of 2026-11-26. Nothing is built. Today placement and routing are two commands joined
+by a DEF on disk, three legalizers run, and the router never sees the positions global placement wished for.</span></p>
+
+<p>The goals, in order: a clean, consistent LiveHD flow; then efficiency and room to explore options. The flow as
+it is today is on <a href="../../docs/placer.html">the place and route page</a>; the router's own list is
+<a href="3r-routefirst.html">3r-routefirst</a>.</p>
+
+<h2 id="rules">The rules</h2>
+<ol>
+<li><strong>Routing is a stage of <code>lhd synth</code>.</strong> It is enabled by an option and needs placement:
+routing with placement off is a usage error.</li>
+<li><strong>Route-first is the only mode when routing is on.</strong> Placement hands the router wished positions and
+which cells may move. The router gives cells their sites while it routes, and may move them well beyond the nearest
+site.</li>
+<li><strong>Handoffs are in memory</strong>, as synthesis to placement is today. A stage can be saved and restarted
+from the work directory, but a file is not the interface between two LiveHD stages.</li>
+<li><strong>Nothing legalizes unless it is explicitly called.</strong> Two things call it: the router, and writing a
+placed DEF. Global placement, the optimization steps and legroute work on wished positions, which may overlap. A
+legalization ahead of the router moves cells off their wished positions, which is what route-first exists to avoid.</li>
+<li><strong>One DEF at the end, always legal</strong>: routed when routing is on, placed when it is off. A placement
+with overlapping cells is never a deliverable, only a debug snapshot.</li>
+<li><strong>The clock tree comes before routing.</strong> Enabling routing turns the native clock tree on, with the
+power grid and taps; setting it off with routing on is a usage error. A frame read from an OpenROAD post-CTS result
+keeps the tree it has.</li>
+<li><strong>The standalone <code>lhd route</code> stays for a legal DEF from another tool.</strong> Cells start on
+their sites, <code>FIXED</code> cells and macros stay, and options decide whether <code>PLACED</code> cells may move.
+It refuses a DEF with overlapping cells.</li>
+<li><strong>Clock tree and routing stay together in one run</strong>, because they will have to iterate: build the
+tree, route quickly, improve the tree from what the route measured, route again.</li>
+</ol>
+
+<h2 id="today">What happens today</h2>
+<ul>
+<li><strong>Three legalizers.</strong> Native legalization and detailed placement right after final global placement,
+because sizing, buffering and the resynthesis steps time legal positions and place each edit with a legal local
+move. Terminal legalization and tile spread at the end. The router's own, when <code>route.prelegal</code> is on.</li>
+<li><strong>The route-first runs so far did not start from wished positions.</strong> They read legroute's round DEF.
+Round 0 is the placement the optimization steps left, already legalized; on one ASAP7 Eyeriss run it was the
+selected round and 99.5% of its cells were on sites. Only a later round, which resumes global placement, has
+continuous positions again.</li>
+<li><strong>The handoff is a file.</strong> <code>lhd route</code> reads the DEF and LEFs again and writes its result
+by patching wires into the text of the input DEF. Route-first therefore needs a DEF with overlapping cells, written
+only with <code>synth.place.snapshots=true</code> and picked by hand.</li>
+<li><strong>No clock tree by default.</strong> <code>synth.place.pcrs.clock=false</code> leaves the clock as one net
+with every flop on it.</li>
+</ul>
+<table>
+<thead><tr><th>DEF of the Eyeriss run (582,144 components)</th><th>Cells off the site grid</th><th>Cells overlapping in their row</th></tr></thead>
+<tbody>
+<tr><td><code>legroute_plan0/input.def</code></td><td>3,331</td><td>2,725</td></tr>
+<tr><td><code>legroute_plan1/input.def</code></td><td>292,115</td><td>14,083 (same-row check only: an undercount)</td></tr>
+<tr><td><code>out.def</code></td><td>1,040 (not identified)</td><td>0</td></tr>
+</tbody>
+</table>
+
+<h2 id="stages">Stages</h2>
+<ol>
+<li><strong>The router as a stage, in memory.</strong>
+  <ul>
+  <li>An entry point that takes the floorplan and technology the placer already holds, and returns the routed
+  floorplan and its statistics. Today the router is file based.</li>
+  <li>It is a session, not one call: route a set of nets, release nets, report what it measured per net (length,
+  layers, vias), finish. The clock loop of rule 8 needs exactly this, and the resident router of
+  <code>lhd route chunk</code> already has release and retry.</li>
+  <li>A <code>synth.route</code> option in the driver, with the placement and clock rules. It starts from whatever
+  positions placement has at that point, so it can be measured against the two-command flow before anything else
+  changes.</li>
+  <li>Done when: the same placement routes to the same result through the stage and through the command, on the
+  router tests and on two HighTide designs.</li>
+  </ul></li>
+<li><strong>Optimization on wished positions.</strong>
+  <ul>
+  <li>Audit first: every place where sizing, buffering, wirelength, cone and color resynthesis assume a legal
+  placement (the legal local move of each edit, the legality checks, the trials that place and then time).</li>
+  <li>Remove native legalization after final global placement. An edit gets a wished position, such as the mean of
+  what it connects to. Density is absorbed by global placement; the repair loop already re-places after each round.</li>
+  <li>One step at a time, each compared on HighTide against today's flow: final timing, cells, and routed result.</li>
+  <li>Done when: no step legalizes, and the routed results are no worse than with native legalization on the
+  designs that route today.</li>
+  </ul></li>
+<li><strong>Placement-only path.</strong> Terminal legalization becomes the step that writes a placed DEF and runs
+only then. A run that asks for no DEF reports timing on wished positions and no legality.</li>
+<li><strong>The clock loop.</strong> Build the tree, route the clock nets quickly, feed the routed lengths and RC
+back into the tree, route again. The measured limits of the current tree are in
+<a href="2p-pcrs-review.html">2p-pcrs-review</a>.</li>
+<li><strong>Defaults and the page.</strong> Switch the defaults once stages 1 to 3 hold on the HighTide ASAP7 and
+Sky130HD designs, and rewrite stage 5 of the place and route page as part of one flow.</li>
+</ol>
+
+<h2 id="open">Open</h2>
+<ul>
+<li>How an imported frame is recognized as post-CTS, so that the native tree is not built for it.</li>
+<li>Legroute's role once the router is in the same run: it stays the routability estimate that feeds back into
+global placement, but its rounds and the router's first pass measure related things.</li>
+<li>How far the router may move a cell by default, and which <code>route.*</code> options expose it (the nearest
+site rule, spreading out of dense tiles, room around pin-dense cells, the displacement caps).</li>
+<li>What the final timing is measured on after routing: the router's positions with the placement wire estimate,
+until LiveHD has its own extraction.</li>
+</ul>
+</main>
+<footer>LiveHD TODO</footer>
+</body>
+</html>
