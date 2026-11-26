@@ -764,11 +764,12 @@ class Detector {
     return std::find(resets.begin(), resets.end(), w) != resets.end();
   }
   struct RegInfo {
-    std::string type;  // declared type text; empty when untyped
+    TSNode      scope{};  // A reset_pin is active throughout this declaration's scope.
+    std::string type;     // declared type text; empty when untyped
     bool        has_attributes = false;
     // Arrays (a memory) and latches are not flop resets: clearing a whole array
     // in one cycle changes the hardware, and a latch has no clock for a sync reset.
-    bool        eligible = true;
+    bool        eligible       = true;
     // A register that already has a reset (`reset_pin=`, or any initial value
     // other than `nil`, which binds the implicit reset) is not "missing" one: a
     // later conditional write to it is ordinary next-state logic.
@@ -943,6 +944,11 @@ class Detector {
     } else {
       return;  // both arms constant (a data mux of constants) or neither
     }
+    for (const auto reg : r.regs) {
+      if (!ts_node_eq(regs.at(reg).scope, ts_node_parent(node))) {
+        return;  // lifting a nested clear onto an outer register would discard its guard
+      }
+    }
     for (size_t i = idx + 1; i < stmts.size(); ++i) {
       if (writes_any(stmts[i], r.regs)) {
         return;  // a later write wins over the clear, so it is not a priority reset
@@ -1003,7 +1009,7 @@ class Detector {
           last_reg = {};
           if (reg_next && !ts_node_is_null(field(a, "identifier"))) {
             last_reg = text(field(a, "identifier"));
-            regs.try_emplace(last_reg);
+            regs[last_reg].scope = code;
           }
           reg_next = false;
         }
@@ -1038,6 +1044,7 @@ class Detector {
         const auto lv   = field(n, "lvalue");
         if (!ts_node_is_null(decl) && kind_of(field(decl, "storage")) == "reg_decl" && !ts_node_is_null(lv)) {
           RegInfo info;
+          info.scope = ts_node_parent(n);
           auto    id = lv;
           if (kind_of(lv) == "typed_identifier") {
             id             = field(lv, "identifier");
@@ -1125,25 +1132,28 @@ class Detector {
       f.range   = range(r.node, r.node);
       f.message = std::format("'{}' is cleared to a constant by an 'if' on '{}', which is used only as a reset", names, r.port);
       f.hint    = std::format(
-          "make the reset structural: declare the register with ':[{}] = {}' and delete the clearing arm, keeping the "
-          "other arm as the normal next-state logic; reset_pin has priority over later writes and a sync reset is the default "
-          "(async=true for an asynchronous one)",
-          attr,
-          r.value);
+          "use ':[{}]' on each register with its own reset value from the clearing arm; keep guards on other writes and "
+          "side effects. The default reset is synchronous",
+          attr);
       const auto reg = regs.at(r.regs.front());
       if (r.regs.size() == 1 && !reg.type.empty() && !reg.has_attributes) {
         f.hint += std::format("; e.g. 'reg {}:{}:[{}] = {}'", names, reg.type, attr, r.value);
       }
       f.attributes = {
-          {     "reset",                  std::string(r.port)},
-          {"registers",                                 names},
-          { "polarity",                              polarity},
-          {     "value",                  std::string(r.value)},
-          {"port_type",            ports.at(r.port).type}
+          {    "reset",   std::string(r.port)},
+          {"registers",                 names},
+          { "polarity",              polarity},
+          {"port_type", ports.at(r.port).type}
       };
-      f.score = r.removable;
+      bool uniform_value = true;
+      f.score            = r.removable;
       for (auto a : r.assigns) {
-        related(f, a, "register cleared to a constant");
+        const auto value  = text(field(a, "rvalue"));
+        uniform_value    &= value == r.value;
+        related(f, a, std::format("register reset value: {}", value));
+      }
+      if (uniform_value) {
+        f.attributes.emplace_back("value", r.value);
       }
       candidates.push_back(std::move(f));
     }

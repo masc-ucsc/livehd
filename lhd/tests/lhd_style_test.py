@@ -351,6 +351,8 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
                "  if rst { a = 0; b = 1 } else { a = din; b = a }\n}\n"
     findings, _, _ = run(two_regs, rule=hard)
     assert len(findings) == 1 and findings[0]["attrs"]["registers"] == "a, b", findings
+    assert "value" not in findings[0]["attrs"]
+    assert [n["message"] for n in findings[0]["notes"]] == ["register reset value: 0", "register reset value: 1"]
     # A Reset-typed port still gets the structural suggestion but not the type one.
     assert len(run(mod("  if rst { q = 0 } else { q = din }\n", "rst:Reset"), rule=hard)[0]) == 1
     assert run(mod("  if rst { q = 0 } else { q = din }\n", "rst:Reset"), rule=rtype)[0] == []
@@ -361,6 +363,13 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
     structural = "pub mod m(clk:Clock, rst:U1, din:U7) -> (dout:U7@[]) {\n  reg q:U7:[reset_pin=rst] = 0\n  dout = q\n  q = din\n}\n"
     assert run(structural, rule=hard)[0] == [] and len(run(structural, rule=rtype)[0]) == 1
     assert run(structural.replace("rst:U1", "rst:Reset"), rule=rtype)[0] == []
+    # A qualified exception is sampled only while the transaction is completing.
+    # A reset_pin on q would also act when the outer condition is false.
+    qualified = mod("  if din == 1 { if fault { q = 1 } else { q = din } }\n", "fault:Bool")
+    assert run(qualified, rule=hard)[0] == [] and run(qualified, rule=rtype)[0] == []
+    # State declared locally still admits a structural reset in its own scope.
+    local = mod("  if din == 1 { reg local_q:U7 = nil; if fault { local_q = 1 }; dout = local_q }\n", "fault:Bool")
+    assert len(run(local, rule=hard)[0]) == 1
     hard_negatives = [
         mod("  if rst { q = 0 } else { q = din }\n  dout = q + rst\n"),        # also used as data
         mod("  if rst { q = 0 } else { q = din }\n", "rst:U8"),                 # not a 1-bit control
