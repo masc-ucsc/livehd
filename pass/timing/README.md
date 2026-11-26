@@ -131,14 +131,16 @@ next top-level command.
 | `set_false_path -from` points `-to` points | An endpoint exclusion when nothing else reaches those endpoints, a cut when the start points reach nothing else, otherwise a launch group for those ports. |
 | `set_max_delay D [-from ..] [-to ..] [-ignore_clock_latency]` | The paths may take `D` from their launch edge, in place of the time to the capture edge; the setup time or the output delay and the uncertainty still come off, an input delay is part of the arrival, hold is unchanged. Between clocks it is their relation; to ports, pins or cells it is the relation of those endpoints; from ports it is the relation of a launch group of those ports. An output port without an output delay becomes an endpoint of such a path. A false path or clock groups win over it; of two delays the smaller. A block with no clock at all is reported under a virtual clock named `set_max_delay`. |
 | `set_disable_timing` ports, pins | No path through them. |
-| `set_input_delay / set_output_delay [-clock] [-min] [-max] [-add_delay]` | Late and early launch of an input; the requirement of an output (`-max`). |
+| `set_input_delay / set_output_delay [-clock] [-min] [-max] [-add_delay]` | Late and early launch of an input; separate setup and hold requirements at an output. A negative minimum output delay reserves external hold time. |
 | `set_input_transition`, `set_driving_cell -lib_cell -pin [-input_transition_rise/fall]` | The slew of an input, or the driving cell: its delay at the load of the port's net less its delay without load, and its output slew. |
 | `set_load` on output ports | The load of the port. |
 | `set_clock_transition`, `set_clock_uncertainty [-setup]` | The slew at clock pins; the setup uncertainty. |
+| `set_timing_derate -clock -early/-late [ -cell_delay / -net_delay ] factor` | Multiplies propagated clock cell or wire delay. Omitting the delay type selects both. The default factor is 1. Data, check, transition-specific and object-scoped derates are reported as unsupported. |
+| `set_propagated_clock [get_clocks ...]` | Propagates clock insertion delay and transition for setup and hold. Setup credit follows the shared clock path for each competing launch. A launch from an external input gets zero common-path credit. |
 | `set_max_fanout N [current_design]` | The fanout limit, counted with the electrical violations. |
 | `get_ports`, `get_pins`, `get_nets`, `get_cells`, `get_clocks` (`-quiet`, `-regexp`, `-nocase`, `-hierarchical`), `all_inputs [-no_clocks]`, `all_outputs`, `all_clocks`, `current_design` | Object queries; an object in a Tcl value compares by its name. |
-| `current_design`, `set_ideal_network`, `set_ideal_latency`, `set_ideal_transition`, `set_propagated_clock`, `set_wire_load_*`, `set_units`, `set_operating_conditions`, `group_path`, `set_dont_touch`, `set_dont_use` | Accepted without effect (the clocks are ideal; the `ideal` commands have no effect in OpenSTA either). |
-| `set_multicycle_path`, `set_min_delay`, `set_max_delay` with `-through`, without `-from` and `-to`, or from a register to some of its endpoints, `set_case_analysis`, `set_clock_latency`, `set_timing_derate`, `set_max_transition`, `set_max_capacitance`, edge-specific options (`-rise_from`, `-clock_fall`, ..), `-through` together with `-from`/`-to`, a false path from a register to some of its endpoints, `set_load` on a net, hold at output ports | Listed as unsupported. |
+| `current_design`, `set_ideal_network`, `set_ideal_latency`, `set_ideal_transition`, `set_wire_load_*`, `set_units`, `set_operating_conditions`, `group_path`, `set_dont_touch`, `set_dont_use` | Accepted without effect. |
+| `set_multicycle_path`, `set_min_delay`, `set_max_delay` with `-through`, without `-from` and `-to`, or from a register to some of its endpoints, `set_case_analysis`, `set_clock_latency`, `set_max_transition`, `set_max_capacitance`, edge-specific options (`-rise_from`, `-clock_fall`, ..), `-through` together with `-from`/`-to`, a false path from a register to some of its endpoints, `set_load` on a net | Listed as unsupported. |
 
 Names. A port is a bit (`d[3]`); a bus name or a pattern selects its bits. A pin is `instance/PIN`, with the
 flattened instance name of the graph (`u_core.u_fifo.count[2]`). A file written against a Yosys netlist names
@@ -175,3 +177,24 @@ driving cells, the fanout limit, two launch groups under what-if edits),
 structural change or a cell swap, cuts). End to end: `//lhd/tests:lhd_fast_timing_sdc_smoke` runs a two-clock design
 constrained like the benchmark files through `lhd synth` with placement on both timers (`synth.timing.engine=compare`,
 then `fast`), and `//pass/opentimer:pass_opentimer_test` reads the same forms into OpenTimer.
+
+
+### Timing a saved clock tree
+
+Run the native timer directly on a post-CTS DEF, its LEFs, Liberty corner, SDC and extracted SPEF.
+
+```sh
+bazel run //tools:clock_timing_report -- --def "$PWD/final.def" \
+  --lef "$PWD/tech.lef" --lef "$PWD/cells.lef" --liberty "$PWD/cells.lib" \
+  --sdc "$PWD/final.sdc" --spef "$PWD/final.spef" > clock-timing.json
+```
+
+Repeat `--liberty` for macro views in the same corner. Omitting `--spef` gives a comparison with Liberty pin loads and zero wire RC. A LiveHD placement RC file can be supplied with `--parasitics`. The report uses picoseconds. Each entry in `propagated_clock_sinks` gives the insertion delay, slew and `source_edge` for rising and falling transitions at both early and late arrival. For a generated clock, the source edge is relative to its declared waveform. Its insertion delay includes the propagated master path. `endpoint_slacks` lists the setup and hold checks the engine could time.
+
+The SPEF input uses extracted resistor trees with wire-only capacitances. Coupling capacitance is grounded at each local plate with a factor of one. The reader checks pin membership against the DEF and checks connectivity before timing.
+
+For propagated hold checks, the timer removes the early/late arrival difference along the shared clock path. It checks the two earliest competing launch clocks and conservatively bounds any additional launches.
+
+For an unrouted checkpoint, supply `--wire-rc <platform setRC.tcl>` to estimate net parasitics from DEF positions and LEF pins with the same directional RC and Steiner-tree model as placement. The report applies the platform clock RC to DEF nets marked `USE CLOCK` and signal RC to data nets. It identifies this model as `placement_steiner`. Use exactly one of `--wire-rc`, `--spef` and `--parasitics` when supplying wire delay.
+
+A propagated clock on an input port starts with its SDC input transition or the loaded Liberty waveform of its SDC driving cell. External drive adds the cell delay at the clock net load relative to zero load. Input data delays and ideal clock transitions apply to their respective data and ideal-network analyses.

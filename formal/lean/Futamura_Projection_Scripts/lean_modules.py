@@ -13,7 +13,7 @@ HDLProof/Run/Y), every module after the modules it imports. Exits 1, naming the 
 an imported local file is missing, when the imports form a cycle, or when anything imports
 Mathlib (these builds are Mathlib-free).
 
-Only a file's header is read: comments, then `prelude` and `import` commands, up to the first
+Only a file's header contributes dependencies: comments, optional `module` and `prelude`, then imports up to the first
 other command (an `import` inside a comment is text, not an import).
 
 Used by .build-proj.sh and Futamura_Projection_Scripts/build-opt.sh, so their module lists are
@@ -37,6 +37,8 @@ def strip_comments_prefix(text):
     i, n, depth = 0, len(text), 0
     while i < n:
         if text.startswith('/-', i):
+            if depth == 0:
+                out.append(' ')  # a comment between tokens is whitespace
             depth += 1
             i += 2
         elif depth > 0 and text.startswith('-/', i):
@@ -58,16 +60,22 @@ def header_imports(path):
     with open(path, encoding='utf-8') as f:
         text = f.read()
     words = strip_comments_prefix(text).split()
-    mods, k = [], 0
+    mods = []
+    k = 1 if words and words[0] == 'module' else 0
     while k < len(words):
         w = words[k]
         if w == 'prelude':
             k += 1
-        elif w == 'import' and k + 1 < len(words):
-            mods.append(words[k + 1])
-            k += 2
         else:
-            break
+            while k < len(words) and words[k] in ('public', 'meta'):
+                k += 1
+            if k + 1 >= len(words) or words[k] != 'import':
+                break
+            k += 1
+            if words[k] == 'all' and k + 1 < len(words):
+                k += 1
+            mods.append(words[k])
+            k += 1
     return mods
 
 
