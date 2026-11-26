@@ -1256,6 +1256,7 @@ class Detector {
         const auto pk     = kind_of(parent);
         // Field names and named-argument labels are not reads of a local.
         const bool label  = (pk == "dot_expression" && !contains(field(parent, "item"), n))
+                            || (pk == "typed_field" && ts_node_eq(field(parent, "identifier"), n))
                             || ((pk == "arg_assignment" || pk == "attribute_assignment" || pk == "generic_assignment")
                                 && contains(field(parent, "lvalue"), n));
         if (!label) {
@@ -1458,6 +1459,115 @@ class Detector {
       ++reads;
     }
     return reads > 0;
+  }
+
+  // Replacing a snapshot is safe only if both names keep their meanings. Reject
+  // writes (including to a field), reference escapes, and loop/callable bindings.
+  static bool ordinary_value_use(TSNode use, bool replacing) {
+    for (auto item = use, p = ts_node_parent(use); !ts_node_is_null(p); item = p, p = ts_node_parent(p)) {
+      const auto kind = kind_of(p);
+      if (kind == "scope_statement") {
+        break;
+      }
+      // A bare argument can bind by name. Substitution could select a different
+      // formal, including in a generic call or a typed tuple constructor.
+      if (replacing && (kind == "arg_tuple" || kind == "generic_type_list" || kind == "tuple")) {
+        if (ts_node_start_byte(item) == ts_node_start_byte(use) && ts_node_end_byte(item) == ts_node_end_byte(use)) {
+          return false;
+        }
+      }
+      if (kind == "ref_identifier" || kind == "attribute_read" || kind == "typed_identifier" || kind == "timed_identifier"
+          || kind == "function_definition_decl" || kind == "lambda"
+          || (kind == "assignment" && contains(field(p, "lvalue"), use))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool stable_source(const LocalValue& v) const {
+    if (ts_node_is_null(v.declaration)) {
+      const auto arg = ts_node_parent(v.id), args = ts_node_parent(arg);
+      const auto sig      = ts_node_parent(args);
+      auto       modifier = ts_node_prev_sibling(arg);
+      while (kind_of(modifier) == "comment") {
+        modifier = ts_node_prev_sibling(modifier);
+      }
+      if ((!ts_node_eq(field(sig, "input"), args) && kind_of(args) != "typed_identifier_list") || kind_of(modifier) == "ref"
+          || kind_of(modifier) == "reg") {
+        return false;
+      }
+    } else {
+      const auto storage = text(field(v.declaration, "decl"));
+      if (storage != "const" && storage != "mut") {
+        return false;
+      }
+    }
+    return std::ranges::all_of(v.uses, [&](TSNode use) { return ts_node_eq(use, v.id) || ordinary_value_use(use, false); });
+  }
+
+  void redundant_aliases(TSNode lambda) {
+    // Reuse the def/use index, but count independently in sibling modules.
+    // Nested lambdas stay in the index so captures and shadowing disqualify a name.
+    index_values(lambda);
+    std::unordered_map<std::string_view, bool> stable;
+    for (const auto& [name, v] : local_values) {
+      if (v.bindings != 1 || ts_node_is_null(v.declaration) || !ts_node_is_null(v.cast) || v.uses.size() < 2) {
+        continue;
+      }
+      const auto decl = v.declaration, scope = ts_node_parent(decl), rhs = field(decl, "rvalue");
+      const auto storage = text(field(decl, "decl"));
+      if ((storage != "const" && storage != "mut") || kind_of(scope) != "scope_statement" || name.starts_with('`')
+          || !ts_node_eq(field(decl, "lvalue"), v.id) || text(field(decl, "operator")) != "="
+          || (kind_of(rhs) != "identifier" && kind_of(rhs) != "dot_expression")) {
+        continue;
+      }
+      Path parts;
+      if (!path(rhs, parts)) {
+        continue;
+      }
+      auto root = rhs;
+      while (kind_of(root) == "dot_expression") {
+        root = field(root, "item");
+      }
+      const auto source_value = value(root);
+      const auto original     = spelling(parts, parts.size());
+      const auto reads        = v.uses.size() - 1;
+      if (!source_value || (reads > 2 && name.size() <= original.size()) || !later_reads(v, scope, decl, {})
+          || !std::ranges::all_of(v.uses, [&](TSNode use) { return ts_node_eq(use, v.id) || ordinary_value_use(use, true); })) {
+        continue;
+      }
+      auto [entry, inserted] = stable.try_emplace(text(root));
+      if (inserted) {
+        entry->second = !local_values.contains(std::format("`{}`", text(root))) && stable_source(*source_value);
+      }
+      if (!entry->second || local_values.contains(std::format("`{}`", name))) {
+        continue;
+      }
+      Finding f{};
+      f.rule       = Rule::RedundantAlias;
+      f.range      = range(decl, decl);
+      f.message    = std::format("'{}' aliases '{}' and is read {} time{}{}",
+                                 name,
+                                 original,
+                                 reads,
+                                 reads == 1 ? "" : "s",
+                                 name.size() > original.size() ? "; the alias is longer than its source" : "");
+      f.hint       = std::format("use '{}' directly at the reads and remove the declaration", original);
+      f.score      = tokens(decl);
+      f.attributes = {
+          { "alias",     std::string(name)},
+          {"source",              original},
+          { "reads", std::to_string(reads)}
+      };
+      for (auto use : v.uses) {
+        if (!ts_node_eq(use, v.id)) {
+          related(f, use, "read of the alias");
+        }
+      }
+      candidates.push_back(std::move(f));
+    }
+    local_values.clear();
   }
 
   void narrow_mut() {
@@ -1712,6 +1822,13 @@ public:
     std::unordered_map<std::string_view, size_t> io_names;
     track_ios(root, io_names);
     if (!ts_node_has_error(root)) {
+      descend(root, [&](TSNode n) {
+        if (kind_of(n) != "lambda") {
+          return true;
+        }
+        redundant_aliases(n);
+        return false;
+      });
       index_values(root);
       narrow_mut();
     }
@@ -1777,6 +1894,7 @@ std::string_view rule_name(Rule rule) {
     case Rule::ClockPortType               : return "clock-port-type";
     case Rule::UnneededBacktick            : return "unneeded-backtick";
     case Rule::NarrowScopedMut             : return "narrow-scoped-mut";
+    case Rule::RedundantAlias              : return "redundant-alias";
     case Rule::CompactBitPacking           : return "compact-bit-packing";
   }
   throw std::invalid_argument("unknown style rule");

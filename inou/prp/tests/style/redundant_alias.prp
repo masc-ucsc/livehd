@@ -1,0 +1,13 @@
+/*
+:name: style_redundant_alias
+:type: style
+:style: redundant-alias
+:message: read 3 times
+:help: use 'bus.opcode' directly
+*/
+comb decode(bus:(opcode:U3)) -> (a:U3, b:U3, c:U3) {
+  const copied_bus_opcode = bus.opcode // locate_style_redundant-alias
+  a = copied_bus_opcode
+  b = copied_bus_opcode
+  c = copied_bus_opcode
+}

@@ -1,0 +1,11 @@
+/*
+:name: style_redundant_alias_clean
+:type: style
+:style: none
+*/
+comb decode(bus:(opcode:U3)) -> (a:U3, b:U3, c:U3) {
+  const op = bus.opcode
+  a = op
+  b = op
+  c = op
+}

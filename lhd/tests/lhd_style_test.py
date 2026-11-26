@@ -29,7 +29,7 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
         assert proc.returncode in (0, 2), proc.stderr
         codes_all = {"likely-unrolled-loop", "repeated-code", "whole-tuple-copy", "flattened-bundle-arguments",
                      "single-destination-conditional", "hardcoded-reset", "reset-port-type", "clock-port-type", "unneeded-backtick",
-                     "narrow-scoped-mut", "compact-bit-packing"}
+                     "narrow-scoped-mut", "compact-bit-packing", "redundant-alias"}
         codes = {"likely-unrolled-loop", "repeated-code"}
         if rule == "all":
             codes |= {"whole-tuple-copy", "flattened-bundle-arguments", "single-destination-conditional"}
@@ -550,6 +550,46 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
     assert proc.returncode == 2, proc.stderr
     for message in ("matching field copies", "flattened named arguments", "exhaustive branches"):
         assert message in proc.stderr, proc.stderr
+
+    alias_rule = "redundant-alias"
+
+    def alias_case(body):
+        return f"comb decode(bus:(opcode:U4), data:U4) -> (out:U4) {{\n{body}\n}}\n"
+
+    cases = [
+        ("const x = bus.opcode; out = x", "x", 1),
+        ("const opcode = bus.opcode; out = opcode", "opcode", 1),
+        ("mut x = bus.opcode; out = x + x", "x", 2),
+        ("const copy_opcode = bus.opcode; out = copy_opcode + copy_opcode + copy_opcode", "copy_opcode", 3),
+        ("const x = bus.opcode; out = child(x=x, other=bus.x).out", "x", 1),
+    ]
+    for (body, name, count), (findings, _, _) in zip(cases, run_many([alias_case(c[0]) for c in cases], rule=alias_rule)):
+        assert len(findings) == 1, (body, findings)
+        attrs = findings[0]["attrs"]
+        assert (attrs["alias"], attrs["source"], int(attrs["reads"])) == (name, "bus.opcode", count), attrs
+    negatives = [
+        "const x = bus.opcode; out = data",
+        "const x = bus.opcode; out = x + x + x",
+        "const same = data; out = same + same + same",
+        "const x:U2 = data; out = x",
+        "const x = bus.opcode + 1; out = x",
+        "const x = bus.opcode#[0]; out = x",
+        "mut x = data; x += 1; out = x",
+        "mut src = bus; const x = src.opcode; src.opcode = 0; out = x",
+        "mut src = data; const x = src; child(ref src); out = x",
+        "mut src = data; const x = src; for src in 0..<4 { out = x }",
+        "const x = data; child(ref x); out = x",
+        "const x = data; out = child(x).out",  # bare actual can bind by name
+        "const x = data; out = child<x>().out",
+        "mut src = data; const x = src; `src` = 0; out = x",
+        "mut x = data; `x` = 0; out = x",
+        "const x = data; comb inner() -> (y) { y = x }; out = data",
+        "// prp-style-allow redundant-alias\nconst x = data; out = x",
+    ]
+    for body, (findings, _, _) in zip(negatives, run_many([alias_case(n) for n in negatives], rule=alias_rule)):
+        assert not findings, (body, findings)
+    siblings = alias_case("const x = data; out = x")
+    assert len(run(siblings + siblings.replace("decode(", "other("), rule=alias_rule)[0]) == 2
 
     # Single-assignment temps can become const only inside their actual home
     # scope, retaining explicit types and rejecting every escape/early read.
