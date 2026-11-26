@@ -88,6 +88,11 @@ cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<p
   already; its compaction rebuilds the tables from the restored checkpoint and keeps its slot
   environment (`Engine.reload`). cert_trace does the same, except that on its default `route:vc`
   step it skips automatic compaction.
+- The start state, the start checkpoint, the `ckpt-at` cycles, the checkpoint bytes and the
+  automatic compaction are `HDLProof/Run/Kit`'s, which cert_trace uses too. The design hash
+  (`Ckpt.designHash`, which renders the whole certificate: 3.9 s and about 800 MB on SoomRV's
+  SoC) is computed only when a checkpoint is read or written; a compaction's checkpoint carries
+  hash 0, which `Ckpt.restore` ignores.
 
 ## Output
 

@@ -47,7 +47,8 @@ documents every option; in short:
   (`compactBlocker`: `checkDesign`, `addrError`, `imgRootError`, `wordError`; otherwise the
   summary says why not, and nothing is compacted). The summary's `compactions` line then ends
   in `automatic`.
-* The design hash (`Ckpt.designHash`, fnv1a64 of the certificate's DCERT4 rendering: 3.9 s and
+* The start, the checkpoints and automatic compaction are `Run/Kit`'s, as in `cert_trace`. The
+  design hash (`Ckpt.designHash`, fnv1a64 of the certificate's DCERT4 rendering: 3.9 s and
   800 MB on SoomRV's SoC) is computed only when a checkpoint is read or written. A compaction's
   checkpoint never leaves memory and `restore` ignores its design field (`compacted_outputs`
   holds for any hash), so compaction writes 0 there.
@@ -66,6 +67,7 @@ The summary ends with `RESULT: <status>`. Exit code: 0 for `exit` with code 0, `
 statuses; 2 for usage; 3 when the design, an image or a checkpoint is refused.
 -/
 import HDLProof.Run.Engine
+import HDLProof.Run.Kit
 import HDLProof.Run.Vcd
 import LeanSemanticPrimitives.Compiler.Ckpt
 import LeanSemanticPrimitives.Compiler.CertIORoute
@@ -105,19 +107,6 @@ structure Opts where
   /-- the route's other knobs (`inc:`, `mem:`, `share:`, `loop:full`, `ir:raw`); route and `opt:off`
   are above -/
   knobs    : Knobs := {}
-
-/-- The period of automatic compaction, in cycles. Measured on the census designs: a
-compaction costs 14-70 ms, 3-15 cycles' worth, so every 256 cycles it adds 1.4-5% and keeps
-the time per cycle flat. -/
-def autoCompactK : Nat := 256
-
-/-- Why compaction is not covered by `compacted_outputs` on this certificate, or `none`: the
-theorem's hypotheses, checked (`checkDesign_sound` gives `DesignSemWF`). -/
-def compactBlocker (D : DesignCert) : Option String :=
-  match Compiler.Direct.checkDesign D with
-  | .error e => some s!"checkDesign: {e.render}"
-  | .ok _ => (MemAddr.addrError D).orElse fun _ =>
-      (Ckpt.imgRootError D).orElse fun _ => Ckpt.wordError D
 
 def parseOpts (args : List String) : Except String Opts := do
   let mut o : Opts := {}
@@ -309,7 +298,7 @@ def runWith {σ σ2 : Type} (o : Opts) (D : DesignCert) (io : IoMeta) (bind : Bi
   let saveTo (p : String) (st : LoopState σ) : IO Unit := do
     let exts := if bind.regions.isEmpty && bind.buses.isEmpty then #[]
       else #[{ name := extName, bytes := (st.host.encode).toList : Ckpt.Ext }]
-    IO.FS.writeBinFile p (Ckpt.render (Ckpt.save D hash.get st.cycle exts (E.view st.s)))
+    writeCkpt D hash p st.cycle exts (E.view st.s)
   say s!"cert_run: route {E.name}, {D.flops.size} flops, {D.memories.size} memories, \
 {bind.buses.size} buses, {bind.regions.size} regions; start cycle {c0}"
   let t0 ← IO.monoNanosNow
@@ -350,16 +339,14 @@ def runFrom {σ : Type} (o : Opts) (D : DesignCert) (io : IoMeta) (bind : Bind) 
     (edges : EdgeSpec) (E : Engine σ) : IO UInt32 := do
   -- the start: power-on (or zero), or a checkpoint (with its host section); the design hash
   -- only when a checkpoint is read or written
-  let hash : Thunk Nat := Thunk.mk fun _ => Ckpt.designHash D
-  let mut s0 := if o.zero then zeroState D else resetState D
+  let hash := designHashLazy D
+  let mut s0 := startState D o.zero
   let mut h0 := HostState.fresh bind
   let mut c0 := 0
   if let some p := o.ckptIn then
-    match Ckpt.parse (← IO.FS.readBinFile p) with
-    | .error e => IO.eprintln s!"{p}: {e}"; say "RESULT: refused"; return 3
+    match ← readCkpt D hash p with
+    | .error r => IO.eprintln r.msg; say "RESULT: refused"; return 3
     | .ok c =>
-      if let some e := Ckpt.validate D hash.get c then
-        IO.eprintln s!"{p}: {e}"; say "RESULT: refused"; return 3
       s0 := Ckpt.restore c
       c0 := c.cycle
       if let some ext := c.exts.find? (·.name == extName) then
@@ -400,17 +387,17 @@ def runFrom {σ : Type} (o : Opts) (D : DesignCert) (io : IoMeta) (bind : Bind) 
       | .ok h => h0 := h
       | .error e => IO.eprintln s!"{spec.path}: {e}"; return 3
       say s!"loaded {spec.path}: {img.segments.size} segments, entry 0x{hexS img.entry}"
-  for (k, p) in o.ckptAt do
-    unless c0 ≤ k && k ≤ c0 + o.max do
-      IO.eprintln s!"ckpt-at:{k}:{p}: cycle {k} is outside this run ({c0} .. {c0 + o.max})"; return 2
+  if let some m := ckptAtOutside o.ckptAt c0 o.max then
+    IO.eprintln m; return 2
   let ctx := Ctx.mk' D bind stim edges
   -- automatic compaction: on a run that may reach it, for a design with memories whose
   -- certificate meets `compacted_outputs`' hypotheses
   let mut o := o
-  if o.compactAuto && o.max > autoCompactK && D.memories.size > 0 then
-    match compactBlocker D with
-    | none => o := { o with compact := autoCompactK }
-    | some why => say s!"automatic compaction off: {why}"
+  if o.compactAuto then
+    match autoCompact D o.max with
+    | some (.ok k) => o := { o with compact := k }
+    | some (.error why) => say s!"automatic compaction off: {why}"
+    | none => pure ()
   match o.lockstep with
   | none => runWith o D io bind edges hash ctx s0 h0 c0 E (none : Option (Engine Unit))
   | some r =>
