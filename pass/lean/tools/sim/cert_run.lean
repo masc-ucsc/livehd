@@ -87,8 +87,6 @@ structure Opts where
   bind     : Option String := none
   stim     : Option String := none
   edges    : String := "edges:all"
-  route    : Route := .ir
-  opt      : Bool := true
   zero     : Bool := false
   ckptIn   : Option String := none
   loads    : Array String := #[]
@@ -104,9 +102,9 @@ structure Opts where
   compact  : Nat := 0
   /-- no `compact:` option: compact every `autoCompactK` cycles when the run and design allow -/
   compactAuto : Bool := true
-  /-- the route's other knobs (`inc:`, `mem:`, `share:`, `loop:full`, `ir:raw`); route and `opt:off`
-  are above -/
-  knobs    : Knobs := {}
+  /-- the route and its knobs (`route:`, `opt:off`, `inc:`, `mem:`, `share:`, `loop:full`, `ir:raw`),
+  read by `Knobs.apply?` as `cert_trace` reads them; the default route is `ir` -/
+  knobs    : Knobs := { route := .ir }
 
 def parseOpts (args : List String) : Except String Opts := do
   let mut o : Opts := {}
@@ -115,11 +113,6 @@ def parseOpts (args : List String) : Except String Opts := do
     if a.startsWith "bind:" then o := { o with bind := some (drop "bind:") }
     else if a.startsWith "stim:" then o := { o with stim := some (drop "stim:") }
     else if a.startsWith "edges:" then o := { o with edges := a }
-    else if a.startsWith "route:" then
-      match Route.parse? (drop "route:") with
-      | some r => o := { o with route := r }
-      | none => throw s!"unknown route {a}"
-    else if a == "opt:off" then o := { o with opt := false }
     else if a == "init:zero" then o := { o with zero := true }
     else if a == "init:reset" then o := { o with zero := false }
     else if a.startsWith "ckpt-in:" then o := { o with ckptIn := some (drop "ckpt-in:") }
@@ -151,7 +144,7 @@ def parseOpts (args : List String) : Except String Opts := do
       match (drop "compact:").toNat? with
       | some n => o := { o with compact := n, compactAuto := false }
       | none => throw s!"bad {a}"
-    else if ["inc:", "mem:", "share:", "loop:", "ir:"].any (fun (p : String) => a.startsWith p) then
+    else if ["route:", "opt:", "inc:", "mem:", "share:", "loop:", "ir:"].any (fun (p : String) => a.startsWith p) then
       match o.knobs.apply? a with
       | some (.ok k) => o := { o with knobs := k }
       | some (.error e) => throw e
@@ -192,8 +185,7 @@ def loadWords (D : DesignCert) (s : RuntimeState) (k : Nat) (ws : Array (Nat × 
   return { s with mems := s.mems.set! k (Ckpt.tableImage m.dw m.dflt t) }
 
 /-- The knobs of the run's route (`route:`, `opt:off` and the knob options). -/
-def Opts.runKnobs (o : Opts) : Knobs :=
-  { o.knobs with route := o.route, vcOpt := o.opt, fpShare := o.opt && o.knobs.fpShare }
+def Opts.runKnobs (o : Opts) : Knobs := o.knobs
 
 def escapeBytes (b : ByteArray) : String :=
   b.foldl (fun s c =>
