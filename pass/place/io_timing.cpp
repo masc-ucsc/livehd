@@ -265,6 +265,26 @@ std::map<std::string, synth::Io_environment> Io_timing_flow::harvest(const Resul
   return result;
 }
 
+int Io_timing_flow::target_history(uint32_t region_id) {
+  for (const auto& [module, graph] : regions(*source_)) {
+    const auto id = graph->get_input_node().attr(attrs::synth_region_id);
+    if (!id.has() || id.get() != region_id) {
+      continue;
+    }
+    const auto row = store_->rows.find(module);
+    if (row == store_->rows.end() || row->second.netlist != synth::mapped_identity(*graph)) {
+      return 0;
+    }
+    // The first synthesis has a delay hint but no measured boundary times: what it met or missed says nothing about
+    // what real arrival and required times can do. Only a body mapped with placement feedback has a history.
+    const auto& known = row->second;
+    if (known.used.inputs.empty() && known.used.required.empty()) {
+      return 0;
+    }
+    return known.failed_budget_ps > 0 ? 2 : known.requested_period_ps > 0 ? 1 : 0;
+  }
+  return 0;
+}
 bool Io_timing_flow::check(const std::string& stage, const std::map<std::string, synth::Io_environment>* measurements,
                            bool automatic) {
   const auto modules = regions(*source_);

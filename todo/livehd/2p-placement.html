@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2p-placement — whole-color resynthesis inside final placement</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2p-placement</strong> Whole-color resynthesis inside final placement</h1>
+<p><span class="status">Implemented and off: <code>--set synth.place.color_resynth=true</code> turns it on.
+The mechanism works end to end on colors of up to 17,000 cells. On the designs measured so far it keeps
+nothing, because every new body came out smaller and slower than the one it would replace. The work left is to
+make it accept: where it is called, how a new body is judged, and what the first synthesis is asked for.</span></p>
+
+<p>The flow is on <a href="../../docs/placer.html#color-resynth">the place and route page</a>, the code notes in
+<a href="../../pass/place/README.md">pass/place/README.md</a> (section "Whole-color resynthesis inside final").
+The cone step it complements is <code>synth.place.resynth</code>; the stage-boundary whole-color step is
+<a href="2is-incsynth.html">2is-incsynth</a>.</p>
+
+<h2 id="rules">What was agreed (2026-11-26)</h2>
+<ul>
+<li>Timing is first known in the final phase, so that is where the flow can decide how hard to push each color. A
+color only moves toward faster logic within one run. How far it was pushed is kept in the work directory, so the
+next run starts from it and does not push again unless its timing changed.</li>
+<li>A resynthesized color is placed again alone; the other colors keep their positions. The new body still goes
+through buffer trees and sizing.</li>
+<li><strong>Timing trigger.</strong> A body that never had timing feedback is called once it fails. A body that
+had feedback and missed its target is not called again, whatever the difference. A body that met its target is
+called only when a requirement has since moved to not met, by 5 to 10% of the period.</li>
+<li><strong>Area trigger.</strong> Cones replicate logic: faster to run, often better timing, more area, lower pin
+density. Their area matters only when the cells do not fit a fixed core. Then the colors with the most cone area
+are resynthesized, replacing their cones. A generated core grows instead.</li>
+<li><strong>Priority.</strong> Fitting and routing are hard requirements; timing is maximized within them. Order
+when the core does not fit: a smaller body with no timing loss, then drop the legalizer's padding, then a smaller
+body at any timing.</li>
+<li><strong>Caps.</strong> One call per cone. Per color and run: one timing call and one area call. No more
+cones on a color after its area call.</li>
+<li><strong>Mapping.</strong> ABC does the technology mapping. A color is tried with two flows and the better
+result is kept; a cone uses one.</li>
+</ul>
+
+<h2 id="state">What exists</h2>
+<ul>
+<li><code>resynthesize_colors</code> in <code>pass/place/resynthesize.cpp</code>: the replaceable cells of one
+placement block are cut from the placed, flat netlist, mapped against the measured arrival, required, load and
+wire lengths, rebuilt from the Liberty functions, proved by SAT, spliced in, and placed through the ECO path.</li>
+<li>Timing call in the driver after the first sizing and buffering, before the repair loop. Area call around
+<code>finalize_placement</code>, with <code>Options::terminal_unfit_keeps_padding</code> so that the legalizer
+reports the failure before it drops its padding.</li>
+<li>Cone rule: a root is tried once and the cells an accepted cone left are not cut again.</li>
+<li>Test <code>//lhd/tests:lhd_color_resynth_smoke</code>: both calls, the size limit, the policy freeze, the
+usage error.</li>
+</ul>
+
+<h2 id="measured">What the first runs showed</h2>
+<p>HighTide ASAP7, one binary, the option off against on. WNS is the harness's pre-CTS setup score.</p>
+<table>
+<thead><tr><th>Design</th><th>Synthesis budget</th><th>Colors tried (cells)</th><th>New body</th><th>Kept</th><th>WNS off / on</th></tr></thead>
+<tbody>
+<tr><td>minimax</td><td>40% of the period (default)</td><td>10,821 and 1,902</td><td>11% and 13% smaller, slower</td><td>0</td><td>+75 / +75 ps</td></tr>
+<tr><td>sha3</td><td>40%</td><td>17,062</td><td>6% smaller, slower</td><td>0</td><td>+142 / +142 ps</td></tr>
+<tr><td>litedram</td><td>40%</td><td>none qualified</td><td></td><td></td><td>+329 / +329 ps</td></tr>
+<tr><td>minimax</td><td>100% (area first)</td><td>1,527 and 10,816</td><td>1% and 11% smaller; one 27 ps faster on the worst path, still refused</td><td>0</td><td>&minus;295 / &minus;295 ps</td></tr>
+<tr><td>sha3</td><td>100%</td><td>15,267 and 338</td><td>5% smaller, 1% larger; slower</td><td>0</td><td>&minus;38 / &minus;38 ps</td></tr>
+</tbody>
+</table>
+<p>The step added 26 s to minimax and 42 s to sha3. liteeth could not be run: the harness needs HighTide build
+outputs that are missing.</p>
+
+<h3>Why nothing is kept</h3>
+<ul>
+<li><strong>The first synthesis is not area only.</strong> <code>synth.delay_frac=0.4</code> gives every region 40%
+of the clock period. Mapping against the real boundary times is then a relaxation, not a push.</li>
+<li><strong>The call is early.</strong> Before the repair loop, minimax was at &minus;296 ps where the loop then
+met timing. The step spends its time on colors that the cheaper repair fixes.</li>
+<li><strong>The comparison is uneven.</strong> A new body is timed before its own sizing and buffering, against an
+old body that has had both.</li>
+<li><strong>Cones are tiny today.</strong> At most four cones of 32 cells on the single worst path, and often zero
+attempts because <code>synth.place.eval_budget</code> is spent first. Their area is negligible, so ordering the
+area call by cone area orders almost nothing.</li>
+<li><strong>The two flows are one.</strong> ABC with and without area recovery gave the same mapping in every run.
+USYN cannot take an already mapped, flat body.</li>
+</ul>
+
+<h2 id="todo">What is left</h2>
+<ol>
+<li><strong>Call it after the repair loop.</strong> Only colors that still fail once sizing, buffering and the
+loop are done qualify. Measure how often that is on the HighTide designs before anything else.</li>
+<li><strong>Judge the new body after its own repair.</strong> Give the block's cells and nets one sizing and
+buffering pass before the timing comparison. This needs a block filter in the candidate scan of
+<code>repair_buffers</code> (<code>edits()</code> in <code>repair.cpp</code>), which has none today.</li>
+<li><strong>Make the mapping a push.</strong> Find out why ABC returns a slower body against tighter required
+times: its delay model against the placement timer on the same cut, the effect of the wire-load table, and the
+headroom (10% of the period today). One number to produce: ABC's own slack for the old and the new body.</li>
+<li><strong>Decide the first synthesis budget with data.</strong> Area first lost timing that this step did not
+win back (minimax +75 to &minus;295 ps). Sweep <code>synth.delay_frac</code> over 0.4, 0.6, 0.8 and 1.0 with the
+step off and on, once items 1 to 3 are in, and compare final WNS, TNS and cells.</li>
+<li><strong>A real second flow, or one flow.</strong> Either lift the cut back to logic that USYN can restructure
+before ABC maps it, or drop the second recipe and its second placement and timing run.</li>
+<li><strong>Cones large enough to matter.</strong> Give the cone step its own evaluation allowance, raise the four
+cone limit, and record the area each accepted cone removed and added per color. Only then does the area trigger
+have something to order by.</li>
+<li><strong>The area call on a real design.</strong> It has only run on the test frame. Find or build a
+fixed-core HighTide frame that does not fit, and check the order of "drop padding" and "accept timing loss"
+against routed results.</li>
+<li><strong>Carry the push across runs.</strong> The flat result is not written back to the color's body, so the
+next run starts from the measurement in <code>abc_cache/io_timing.json</code> and resynthesizes the definition at
+the start. Check that this reproduces what final accepted, per occurrence where a definition has several.</li>
+<li><strong>Colors above the size limit.</strong> <code>color_resynth.max_cells</code> is 20,000. Larger colors
+are skipped; decide whether to split them or to raise the limit after measuring mapping and proof time.</li>
+</ol>
+
+<h2 id="done">When it can be on by default</h2>
+<p>On the HighTide ASAP7 and Sky130HD designs that fail setup with the option off, it keeps a new body on at least
+a third of them, final WNS and TNS are no worse on any design, the cell count grows by less than the growth
+budget, and the routed results of two designs confirm the gain. Until then it stays off.</p>
+</main>
+<footer>LiveHD TODO</footer>
+</body>
+</html>

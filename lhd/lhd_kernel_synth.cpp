@@ -105,6 +105,7 @@
 #include "pass/place/repair.hpp"
 #include "pass/place/resize_engine.hpp"
 #include "pass/place/technology_rc.hpp"
+#include "pass/place/terminal_legalize.hpp"
 #include "pass/semdiff/semdiff.hpp"
 #include "pass/synth/sram_macro.hpp"
 #include "pass/timing/physical_rank.hpp"
@@ -2297,6 +2298,25 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   const bool  run_resize           = !isolated && truthy(synth_set(opts, "place.resize", optimization_default));
   bool        run_resynth          = !isolated && truthy(synth_set(opts, "place.resynth", optimization_default));
   place_options.wl_resynth         = truthy(synth_set(opts, "place.wl_resynth", optimization_default));
+  // Whole-color resynthesis inside the final phase: off unless asked for, and only where the cone step can run.
+  place_options.color_resynth               = !isolated && truthy(synth_set(opts, "place.color_resynth", "false"));
+  if (place_options.color_resynth) {
+    if (!run_place || !run_sta || !place_options.full) {
+      throw Lhd_error{"usage", "synth.place.color_resynth requires full placement with synth.timing", ""};
+    }
+    if (!livehd::synth::has_cone_provider("abc.color")) {
+      throw Lhd_error{"usage", "synth.place.color_resynth requires the ABC mapper", "build lhd with ABC"};
+    }
+    const double percent = std::stod(synth_set(opts, "place.color_resynth.percent", "5"));
+    const int    cells   = std::stoi(synth_set(opts, "place.color_resynth.max_cells", "20000"));
+    if (!(percent >= 0 && percent <= 100) || cells < 0) {
+      throw Lhd_error{"usage",
+                      "invalid synth.place.color_resynth.percent or max_cells",
+                      "percent is 0..100, max_cells is 0 or more"};
+    }
+    place_options.color_resynth_trigger   = percent / 100;
+    place_options.color_resynth_max_cells = static_cast<unsigned>(cells);
+  }
   // 2i-interact: the interactive session serves the whole run and keeps the process alive afterwards.
   std::shared_ptr<livehd::placement::gui::Session> gui_session;
   std::string                                      gui_video_out;
@@ -4523,6 +4543,38 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
           = [&] { return !place_options.mutation_policy().no_sizing && own_allowance(sizing_allowance); };
       const livehd::placement::Trial_admission admit_buffering
           = [&] { return !place_options.mutation_policy().no_buffer_edits && own_allowance(buffering_allowance); };
+      // Whole-color resynthesis (synth.place.color_resynth): its own few evaluations, like sizing and buffering, so that
+      // the trials before it cannot leave it none. Every flow of every color is one placement and one evaluation.
+      Own_allowance                            color_allowance;
+      const livehd::placement::Trial_admission admit_color
+          = [&] { return !place_options.mutation_policy().no_resynthesis && own_allowance(color_allowance); };
+      const std::vector<std::pair<std::string, livehd::synth::Cone_provider>> color_flows{
+          {      "abc",
+           [](const auto& logic, const auto& boundary, const auto& library) {
+ return livehd::synth::map_cone("abc.color", logic, boundary, library);
+ }},
+          {"abc.delay",
+           [](const auto& logic, const auto& boundary, const auto& library) {
+ return livehd::synth::map_cone("abc.color.delay", logic, boundary, library);
+ }},
+      };
+      unsigned                     color_serial = 0;
+      std::set<std::string>        color_area_done;  // occurrences that already gave area back in this run
+      // Set once the IO timing flow exists: whether a region's body was mapped with timing, and met it.
+      std::function<int(uint32_t)> color_history;
+      const auto                   color_request = [&](livehd::placement::Color_request::Goal goal) {
+        livehd::placement::Color_request request;
+        request.goal      = goal;
+        request.trigger   = place_options.color_resynth_trigger;
+        request.max_cells = place_options.color_resynth_max_cells;
+        request.serial    = color_serial;
+        if (goal != livehd::placement::Color_request::Goal::timing) {
+          request.done = color_area_done;
+        } else {
+          request.history = color_history;
+        }
+        return request;
+      };
       const livehd::placement::Trial_admission admit_refinement = [&] {
         // Leave room for sizing and buffer repair. Rejected placement trials
         // must not consume the entire shared allowance on overloaded designs.
@@ -4542,6 +4594,7 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         if (!place_options.mutation_policy().no_resynthesis) {
           (void)io_flow->before_placement();
         }
+        color_history             = [&io_flow](uint32_t region) { return io_flow->target_history(region); };
         place_options.after_stage = [&, io_log](auto stage, const auto& state) {
           Phase_timer   io_phase(res, "pass.place.io_resynth");
           Stdout_to_log io_redirect(io_log);
@@ -5146,6 +5199,28 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
             placed          = std::move(design_repaired.placed);
             res.recipe_steps.emplace_back("pass.place.repair");
           }
+          // Whole-color resynthesis, timing call. The first sizing and buffering pass has run, so each color's boundary
+          // times are real. A color on a failing path gets a new body mapped against them and is placed again alone;
+          // the repair loop below then re-places warm, sizes and buffers it like everything else.
+          if (place_options.color_resynth && terminal_resynth && !experimental_repair
+              && !place_options.mutation_policy().no_resynthesis) {
+            Phase_timer phase(res, "pass.place.color_resynth");
+            auto& carried  = terminal_resize ? (place_options.resize_engine == "new" ? repaired.timing : design_repaired.timing)
+                                             : timed_placement.timing;
+            auto  request  = color_request(livehd::placement::Color_request::Goal::timing);
+            auto  colored  = livehd::placement::resynthesize_colors(std::move(placed),
+                                                                  place_options,
+                                                                  evaluate,
+                                                                  color_flows,
+                                                                  request,
+                                                                  std::move(carried),
+                                                                  admit_color);
+            placed         = std::move(colored.placed);
+            carried        = std::move(colored.timing);
+            color_serial  += static_cast<unsigned>(colored.colors_tried.size()) * static_cast<unsigned>(color_flows.size());
+            repair_loop_keep.push_back(std::move(colored));
+            res.recipe_steps.emplace_back("pass.place.color_resynth");
+          }
           // Repair loop: buffers and sizes change the timing picture and, once they exist, the placement they were
           // computed for is stale. Re-place with the weights of the repaired result (a new buffer is a timed net, so
           // its slack rank pulls it to its loads), repair again, and keep the iteration only while it improves timing.
@@ -5322,13 +5397,68 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
         if (physical_clock_ready) {
           prior.reset();  // The pre-CTS timing excluded control paths.
         }
-        try {
-          finalized = livehd::placement::finalize_placement(placed, place_options, evaluate, std::move(prior));
-        } catch (const livehd::placement::Placement_area_restart&) {
-          throw;  // a generated core grows (synth_command)
-        } catch (const std::exception& e) {
+        // Whole-color resynthesis, area call: on a fixed core, cells that do not fit first get area back from the colors
+        // (smaller bodies, no timing loss), then the legalizer gives up its padding, and only then may a smaller body
+        // cost timing. Fitting comes before timing; a generated core grows instead (Placement_area_restart).
+        const bool color_area = place_options.color_resynth && !experimental_repair
+                                && !place_options.mutation_policy().no_resynthesis
+                                && !(place_options.allow_increase_area && place_options.generated_core);
+        std::string unfit;
+        const auto  finalize = [&](std::optional<livehd::placement::Timing_feedback> with) {
+          try {
+            finalized = livehd::placement::finalize_placement(placed, place_options, evaluate, std::move(with));
+            return true;
+          } catch (const livehd::placement::Placement_area_restart&) {
+            throw;  // a generated core grows (synth_command)
+          } catch (const livehd::placement::Terminal_legalize_unfit& e) {
+            if (!color_area) {
+              throw Lhd_error{"unsupported",
+                              std::string("final legalization failed: ") + e.what(),
+                              "see the final placement diagnostic in " + final_log};
+            }
+            unfit = e.what();
+            return false;
+          } catch (const std::exception& e) {
+            throw Lhd_error{"unsupported",
+                            std::string("final legalization failed: ") + e.what(),
+                            "see the final placement diagnostic in " + final_log};
+          }
+        };
+        const auto shrink = [&](livehd::placement::Color_request::Goal goal) {
+          auto request = color_request(goal);
+          auto smaller
+              = livehd::placement::resynthesize_colors(std::move(placed), place_options, evaluate, color_flows, request, {}, {});
+          placed        = std::move(smaller.placed);
+          color_serial += static_cast<unsigned>(smaller.colors_tried.size()) * static_cast<unsigned>(color_flows.size());
+          color_area_done.insert(smaller.colors_tried.begin(), smaller.colors_tried.end());
+          const bool any    = !smaller.colors.empty();
+          auto       timing = std::move(smaller.timing);
+          repair_loop_keep.push_back(std::move(smaller));
+          res.recipe_steps.emplace_back("pass.place.color_resynth.area");
+          return std::pair{any, std::move(timing)};
+        };
+        place_options.terminal_unfit_keeps_padding = color_area;
+        bool fits                                  = finalize(std::move(prior));
+        for (int round = 0; !fits && round < 3; ++round) {
+          auto [any, timing] = shrink(livehd::placement::Color_request::Goal::area);
+          if (!any) {
+            break;
+          }
+          fits = finalize(std::move(timing));
+        }
+        if (!fits) {
+          place_options.terminal_unfit_keeps_padding = false;
+          fits                                       = finalize({});
+        }
+        if (!fits) {
+          color_area_done.clear();  // a color that kept its timing may now give it up
+          auto [any, timing] = shrink(livehd::placement::Color_request::Goal::area_any);
+          fits               = any && finalize(std::move(timing));
+        }
+        place_options.terminal_unfit_keeps_padding = false;
+        if (!fits) {
           throw Lhd_error{"unsupported",
-                          std::string("final legalization failed: ") + e.what(),
+                          "final legalization failed: " + unfit,
                           "see the final placement diagnostic in " + final_log};
         }
         placed     = std::move(finalized.placed);

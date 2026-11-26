@@ -52,6 +52,8 @@ struct Repair_result {
   // timing_place: a round ran out of its GP continuation budget before the solve converged, so nothing was accepted. A
   // later round from nearly the same placement and weights runs the same budget and ends the same way.
   bool                                             gp_unconverged = false;
+  // resynthesize_colors: the occurrences it tried and the ones whose new body it kept.
+  std::vector<std::string>                         colors_tried, colors;
 };
 // Expand every recorded virtual buffer tree (options.virtual_buffer_trees) whose root net still has more loads than
 // options.virtual_buffer_fanout into a position-aware, fanout- and capacitance-bounded tree at the current
@@ -124,4 +126,24 @@ Repair_result repair_buffers(Result initial, const Options& options, const Evalu
 Repair_result resynthesize_cones(Result initial, const Options& options, const Evaluate& evaluate,
                                  const synth::Cone_provider& provider, std::optional<Timing_feedback> prior = std::nullopt,
                                  const Trial_admission& admit_trial = {});
+// Whole-color resynthesis inside the final phase. One call tries up to `max_colors` color occurrences (placement
+// blocks). A timing call takes the failing ones, worst slack first; an area call takes the ones with the most cone
+// area first and keeps a smaller body only without timing loss (area_any: whatever the timing).
+struct Color_request {
+  enum class Goal { timing, area, area_any };
+  Goal                  goal       = Goal::timing;
+  double                trigger    = 0.05;   // of the clock period: how far past its met target a color must be to be called again
+  unsigned              max_cells  = 20000;  // replaceable cells of one occurrence; 0: no limit
+  unsigned              max_colors = 4;
+  unsigned              serial     = 0;  // offset of the trial numbers, so that two calls do not share names
+  std::string           prover     = "abc";
+  // Occurrences this goal already took in this run.
+  std::set<std::string> done;
+  // What is known about the body a synthesis region id was mapped with: 0 no timing, 1 met its target, 2 missed it.
+  std::function<int(uint32_t)> history;
+};
+Repair_result resynthesize_colors(Result initial, const Options& options, const Evaluate& evaluate,
+                                  const std::vector<std::pair<std::string, synth::Cone_provider>>& providers,
+                                  const Color_request& request, std::optional<Timing_feedback> prior = std::nullopt,
+                                  const Trial_admission& admit_trial = {});
 }  // namespace livehd::placement

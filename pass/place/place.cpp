@@ -14699,7 +14699,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         try {
           return terminal_legalize(tech, frame, final_gp_timing, terminal_options);
         } catch (const Terminal_legalize_unfit& e) {
-          if ((options.allow_increase_area && options.generated_core) || terminal_options.padding_sites == 0) {
+          // With whole-color resynthesis on, the driver first tries to give area back (smaller bodies for the
+          // colors that carry cones) and asks for the padding to go only after that.
+          if ((options.allow_increase_area && options.generated_core) || terminal_options.padding_sites == 0
+              || options.terminal_unfit_keeps_padding) {
             throw;
           }
           livehd::diag::warn("pass.place", "terminal-padding-dropped", "unsupported")

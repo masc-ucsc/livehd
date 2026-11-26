@@ -18,6 +18,9 @@ public:
   // One-use handoff from an unchanged completed final stage to physical repair.
   std::optional<Timing_feedback> take_final_timing() { return std::exchange(final_timing_, std::nullopt); }
   std::string                    report() const;
+  // What the store knows about the body a synthesis region was mapped with: 0 no timing target, 1 a target it met,
+  // 2 a target it missed.
+  int                            target_history(uint32_t region_id);
 
 private:
   bool check(const std::string& stage, const std::map<std::string, synth::Io_environment>* measurements, bool automatic);

@@ -2876,6 +2876,17 @@ sh_test(
 )
 
 sh_test(
+    name = "lhd_color_resynth_smoke",
+    size = "small",
+    timeout = "moderate",
+    srcs = ["lhd_color_resynth_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
+sh_test(
     name = "lhd_user_cell_resynth_smoke",
     size = "small",
     timeout = "short",

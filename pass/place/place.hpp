@@ -366,6 +366,12 @@ struct Options {
     unsigned    buffers = 0;  // synthesis buffers the tree had
   };
   bool wl_resynth = true;
+  // synth.place.color_resynth: whole-color resynthesis inside the final phase (resynthesize_colors in repair.hpp).
+  bool     color_resynth                = false;
+  double   color_resynth_trigger        = 0.05;   // of the clock period
+  unsigned color_resynth_max_cells      = 20000;  // replaceable cells of one color occurrence; 0: no limit
+  // Terminal legalization reports cells that do not fit a fixed core before it gives up its padding.
+  bool     terminal_unfit_keeps_padding = false;
   bool     clock_tree             = false;
   // Pull (inverse microns, the unit of a centroid's strength) of the generated centroid around each clock leaf group; zero forms none.
   double   clock_leaf_pull        = 0;

@@ -423,6 +423,37 @@ restart, `wl_resynth/history.jsonl` retains the decisions for earlier attempts.
 Ordinary buffer counts are in
 `virtual_buffers/report.json`.
 
+### Whole-color resynthesis inside final (`synth.place.color_resynth`, opt-in)
+
+`resynthesize_colors` (`resynthesize.cpp`, declared in `repair.hpp`) is the coarse sibling of the cone step. It works on
+the placed, flat netlist, so the sizing, buffers and cones already accepted stay in place everywhere else. One *color
+occurrence* is a placement block (`gu::Placement_block`: instance prefix and color). Its replaceable cells (single-output
+Liberty combinational cells that are not fixed or protected) are cut with `extract_block`: no size limit, cut inputs
+carry the measured arrival and slew, cut outputs the measured required time and load. The cut is mapped through a
+`synth::Cone_provider` (`abc.color` with area recovery, `abc.color.delay` without; both in `pass/abc/abc_cone.cpp`) with
+the block's own wire-load table (`Cone_boundary::wire`: mean net length by fanout from `Result::parasitics`). The
+replacement is rebuilt from the Liberty functions, checked by random simulation, and proved against the cut by a
+registered `synth::Logic_prover` (`abc`: `Abc_NtkDarCec`); a 12-input cone can be proved exhaustively, a color cannot.
+New cells are named `__place_color_<trial>_<n>`, start at the mean position of what they connect to
+(`seed_positions`), and are placed through the same ECO path as a cone (`Options::previous` + `changed_cells`).
+
+Two calls from the driver (`lhd_kernel_synth.cpp`):
+
+- **Timing** (`Color_request::Goal::timing`), once, after the first sizing and buffering pass and before the repair
+  loop. Candidates are failing occurrences, worst slack first. `Io_timing_flow::target_history` gives what the store
+  knows about the region's body: never mapped with placement feedback (called once it fails), met a feedback target
+  (called only past `color_resynth.percent` of the period), missed one (not called). Kept only on `timing_improves`.
+- **Area** (`Goal::area`, then `Goal::area_any`), only when `finalize_placement` throws `Terminal_legalize_unfit` on a
+  fixed core. `Options::terminal_unfit_keeps_padding` makes the legalizer report the failure before it drops its
+  padding. Order: smaller bodies with no timing loss, the padding, smaller bodies at any timing.
+
+Reports: `color_resynth.json`, `color_resynth_area.json`, and one line per call in `color_resynth.jsonl`.
+
+Measured 2026-11-26 on ASAP7 with the default `synth.delay_frac=0.4`: minimax tried two occurrences (10,821 and 1,902
+cells), sha3 one (17,062 cells); every mapping was proved and placed, came out 6 to 13% smaller, and was slower than
+the body it would replace, so none was kept (+26 s and +42 s). The first synthesis already works against 40% of the
+period per region, so a mapping against the real boundary times is a relaxation, not a push.
+
 ### Virtual buffer trees (`synth.place.virtual_buffers`, default on)
 
 A fanout buffer tree built at mapping time groups loads before any position

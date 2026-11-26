@@ -2108,6 +2108,22 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "true",
      Synth_set_option::Kind::boolean,
      "try proved critical-cone resynthesis with local placement and timing acceptance in full timed placement"},
+    {"place.color_resynth",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "whole-color resynthesis inside the final phase: after the first sizing and buffering, a color (one placement block) "
+     "on a failing path is mapped again against the arrival and required times placement measured at its boundary, proved "
+     "equivalent, and placed again alone; and when the cells do not fit a fixed core, the colors with the most cone area "
+     "get a smaller body before the legalizer gives up its padding. At most one timing call and one area call per color"},
+    {"place.color_resynth.percent",
+     "5",
+     Synth_set_option::Kind::file,
+     "with color_resynth: a color whose body met a timing target at synthesis is called again only when it now fails by "
+     "more than this percent of the clock period; a body mapped without timing is called once it fails at all"},
+    {"place.color_resynth.max_cells",
+     "20000",
+     Synth_set_option::Kind::integer,
+     "with color_resynth: the most replaceable cells one color occurrence may have (0: no limit)"},
     {"place.io_resynth",
      "5",
      Synth_set_option::Kind::file,
