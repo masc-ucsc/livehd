@@ -1,0 +1,25 @@
+/*
+:name: array_lanes
+:type: simulation
+*/
+comb pick(ids:[3]U5, v:[3]Bool) -> (any:Bool) {
+  any = false
+  for i in 0..<3 {
+    if v[i] and ids[i] != 0 {
+      any = true
+    }
+  }
+}
+pub mod array_lanes(x:U3) -> (y:Bool@[0]) {
+  const flags:[3]Bool = [x#[0] != 0, x#[1] != 0, x#[2] != 0]
+  const ids:[3]U5 = [1, 2, 3]
+  y = pick(ids, v=flags)
+}
+test array_lanes.t {
+  mut dut = array_lanes
+  tick 8 {
+    dut.x = clock
+    step
+    assert(dut.y == (clock != 0))
+  }
+}

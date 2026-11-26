@@ -1,0 +1,39 @@
+/*
+:name: tuple_output_forward
+:type: simulation
+*/
+comb pair(x:U4) -> (payload:(low:U2, high:U2), zero:Bool) {
+  payload = (high=x#[2..<4], low=x#[0..<2])
+  zero = x == 0
+}
+
+comb pack(payload:(low:U2, high:U2)) -> (word:U4) {
+  word = (payload.high << 2) | payload.low
+}
+
+mod producer<N>(x:Unsigned(bits=N)) -> (payload:(low:U2, high:U2)@[0], zero:Bool@[0]) {
+  const decoded = pair(x)
+  payload = decoded.payload
+  zero = decoded.zero
+}
+
+pub mod tuple_output_forward<W=4>(x:Unsigned(bits=W)) -> (word:U4@[0], zero:Bool@[0]) {
+  wire packet:(low:U2, high:U2) = nil
+  wire direct:(low:U2, high:U2) = nil
+  word = pack(payload=packet) ^ pack(payload=direct)
+  const child = producer<W>(x)
+  const swapped = pair(x=(x#[0..<2] << 2) | x#[2..<4])
+  packet = child.payload
+  direct = swapped.payload
+  zero = child.zero
+}
+
+test tuple_output_forward.all_values {
+  mut dut = tuple_output_forward
+  tick 16 {
+    dut.x = clock
+    step
+    assert(dut.word == (clock ^ (((clock & 3) << 2) | (clock >> 2))))
+    assert(dut.zero == (clock == 0))
+  }
+}

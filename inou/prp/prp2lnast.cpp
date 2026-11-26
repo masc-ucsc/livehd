@@ -2138,6 +2138,7 @@ Lnast_nid prp_child_nid(const Lnast& src, const Lnast_nid& nid, int n) {
 
 void Prp2lnast::rewrite_decls_to_declare() {
   auto staging = std::make_shared<Lnast>(lnast->forest()->create_tree_temp("decl-merge"), lnast->get_top_module_name());
+  absl::flat_hash_set<Lnast_nid> copied_shape_seeds;
 
   // Recursive copy; at each `stmts` block, fold the declaration cluster
   // (attr_set(t,"type",K) [+ attr_set(t,"comptime")] [+ type_spec(t,TYPE)])
@@ -2148,6 +2149,9 @@ void Prp2lnast::rewrite_decls_to_declare() {
       = [&](const Lnast_nid& src_nid, const Lnast_nid& dst_parent) -> Lnast_nid {
     auto nn   = lnast->copy_node(src_nid, *staging, dst_parent);
     auto type = lnast->get_type(src_nid);
+    if (Lnast_ntype::is_store(type) && decl_shape_seed_stores_.contains(src_nid)) {
+      copied_shape_seeds.insert(nn);
+    }
     if (!Lnast_ntype::is_stmts(type)) {
       for (auto c : lnast->children(src_nid)) {
         copy_merge(c, nn);
@@ -2260,6 +2264,7 @@ void Prp2lnast::rewrite_decls_to_declare() {
     copy_merge(c, dst_root);
   }
   lnast->replace_body(staging);  // adopts staging's name pool with the body
+  decl_shape_seed_stores_ = std::move(copied_shape_seeds);
 }
 
 // True if `s` is a bare `return` (control_statement wrapping return_statement).

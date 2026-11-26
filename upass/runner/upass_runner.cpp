@@ -9227,21 +9227,20 @@ bool uPass_runner::try_inline_func_call() {
     // Multiple logical outputs form a named bundle, available both to a
     // whole-result binding and to a destructuring field pick.
     std::vector<std::pair<std::string, Lnast_node>>  fields;
-    std::vector<std::pair<std::string, std::string>> scalar_slot_refs;  // recorded AFTER emit
+    std::vector<std::pair<std::string, std::string>> output_slot_refs;  // recorded AFTER emit
     fields.reserve(logical_order.size());
     for (const auto& lname : logical_order) {
       auto& leaves = logical[lname];
       if (leaves.size() == 1 && leaves[0].first.empty()) {
         fields.emplace_back(lname, leaves[0].second);  // scalar logical output
         if (leaves[0].second.is_ref()) {
-          scalar_slot_refs.emplace_back(lname, std::string(leaves[0].second.get_name()));
+          output_slot_refs.emplace_back(lname, std::string(leaves[0].second.get_name()));
         }
       } else {
-        // A tuple-typed output among several: keep its dotted leaves so the
-        // destructure / `.lname.sub` read still resolves (rare; one level).
-        for (auto& [sub, ref] : leaves) {
-          fields.emplace_back(lname + "." + sub, ref);
-        }
+        const auto record = std::format("%out_record{}", ++inline_seq_);
+        emit_inline_tuple(record, leaves);
+        fields.emplace_back(lname, Lnast_node::create_ref(record));
+        output_slot_refs.emplace_back(lname, record);
       }
     }
     emit_inline_tuple(dst_name, fields);
@@ -9254,7 +9253,7 @@ bool uPass_runner::try_inline_func_call() {
     // into a direct copy `___2 = inl1_<out>`, the same path that makes a
     // single-output comb work. Comptime outputs still fold (the destructure's
     // tuple_get finds the trivial first; the slot_ref is the runtime fallback).
-    for (auto& [lname, src] : scalar_slot_refs) {
+    for (auto& [lname, src] : output_slot_refs) {
       symbol_table_.tuple_slot_ref[dst_name][lname] = src;
     }
   }
@@ -9851,6 +9850,10 @@ bool uPass_runner::try_resolve_tuple_get() {
   // (2) general tuple variable whose slot holds a runtime scalar ref — the key
   // may be a NESTED dotted path (`lo.hi`) re-homed by propagate_sub_slot_refs.
   if (auto rname = try_tuple_slot_ref(src, key)) {
+    if (const auto tuple = detuple_tuple_values_.find(*rname); tuple != detuple_tuple_values_.end()) {
+      auto value = tuple->second;
+      detuple_tuple_values_.insert_or_assign(dst, std::move(value));
+    }
     emit_inline_binding(dst, Lnast_node::create_ref(*rname));
     return true;
   }
@@ -13705,11 +13708,14 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
               // io_meta keeps the `[N]T` view. Read as a plain N*T-bit integer,
               // the lifted body's `b[i]` no longer indexes an array and
               // lnast.tolg cannot resolve it. Rebuild the same one-dimension
-              // integer-lane port the comp_type_array branch below produces.
+              // array port the comp_type_array branch below produces.
               if (io_port && Lnast_ntype::is_prim_type_int(tt)) {
                 const auto* ci = encl_input(std::string(wanted));
-                if (ci != nullptr && ci->array_size > 0 && ci->elem_bits > 0 && ci->inner_dims.empty() && !ci->elem_bool
-                    && ci->kind != Io_kind::boolean) {
+                if (ci != nullptr && ci->array_size > 0 && ci->elem_bits > 0 && ci->inner_dims.empty()) {
+                  if (ci->elem_bool) {
+                    sp = Spec_port{.inject = true, .kind = Io_kind::boolean, .array_size = ci->array_size};
+                    return true;
+                  }
                   const auto elem_max
                       = ci->elem_signed ? upass::signed_max_from_bits(ci->elem_bits) : upass::unsigned_max_from_bits(ci->elem_bits);
                   const auto elem_min = ci->elem_signed ? upass::signed_min_from_bits(ci->elem_bits) : *Dlop::from_pyrope("0");
@@ -13750,13 +13756,19 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
                 // (2-D) is not a packed lane array and does not roll.
                 auto elem_n = tree.get_first_child(type_n);
                 auto len_n  = elem_n.is_invalid() ? elem_n : tree.get_sibling_next(elem_n);
-                if (elem_n.is_invalid() || len_n.is_invalid() || !Lnast_ntype::is_prim_type_int(tree.get_type(elem_n))
-                    || !Lnast_ntype::is_const(tree.get_type(len_n))) {
+                if (elem_n.is_invalid() || len_n.is_invalid() || !Lnast_ntype::is_const(tree.get_type(len_n))) {
                   return false;
                 }
                 const auto lanes = upass::array_dim_lanes(tree.get_name(len_n));
                 if (!lanes) {
                   return false;  // a dim that did not fold to a literal (see array_dim.hpp)
+                }
+                if (Lnast_ntype::is_prim_type_bool(tree.get_type(elem_n))) {
+                  sp = Spec_port{.inject = true, .kind = Io_kind::boolean, .array_size = *lanes};
+                  return true;
+                }
+                if (!Lnast_ntype::is_prim_type_int(tree.get_type(elem_n))) {
+                  return false;
                 }
                 const int64_t       count_i = *lanes;
                 auto                max_n   = tree.get_first_child(elem_n);
@@ -13993,7 +14005,7 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
       }
     }
     const auto spec_range = [](const Spec_port& sp) -> std::optional<Lnast_range> {
-      if (sp.kind == Io_kind::boolean) {
+      if (sp.kind == Io_kind::boolean && sp.array_size == 0) {
         return Lnast_range::boolean();
       }
       if (sp.array_size != 0 || !sp.max || !sp.min || !sp.max->is_integer() || !sp.min->is_integer()
@@ -14300,6 +14312,25 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
     upass::mark_loop_index_port(*body, n);
   }
 
+  const auto add_value_type = [&](Lnast_nid parent, const Spec_port& p) {
+    auto slot = parent;
+    if (p.array_size > 0) {
+      slot = body->add_child(parent, Lnast_ntype::create_comp_type_array());
+    }
+    if (p.kind == Io_kind::boolean) {
+      body->add_child(slot, Lnast_ntype::create_prim_type_bool());
+    } else if (!p.type_name.empty()) {
+      body->add_child(slot, Lnast_node::create_ref(p.type_name));
+    } else {
+      auto pt = body->add_child(slot, Lnast_ntype::create_prim_type_int());
+      body->add_child(pt, Lnast_node::create_const(p.max ? std::string(p.max->to_pyrope()) : std::string("nil")));
+      body->add_child(pt, Lnast_node::create_const(p.min ? std::string(p.min->to_pyrope()) : std::string("nil")));
+    }
+    if (p.array_size > 0) {
+      body->add_child(slot, Lnast_node::create_const(std::format("[{}]", p.array_size)));
+    }
+  };
+
   // One io port declaration: store(ref(name), const(nil), <type>) [+ stages].
   const auto add_port = [&](const Lnast_nid& parent, const std::string& name, const Spec_port& p, bool is_output) {
     auto st = body->add_child(parent, Lnast_ntype::create_store());
@@ -14313,20 +14344,10 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
       body->add_child(st, Lnast_ntype::create_prim_type_clock());
     } else if (owner_port != nullptr && owner_port->sig == Io_sig::reset) {
       body->add_child(st, Lnast_ntype::create_prim_type_reset());
-    } else if (name == kLoopValid || name == kLoopNextActive || p.kind == Io_kind::boolean) {
+    } else if (name == kLoopValid || name == kLoopNextActive) {
       body->add_child(st, Lnast_ntype::create_prim_type_bool());
-    } else if (!p.type_name.empty()) {
-      body->add_child(st, Lnast_node::create_ref(p.type_name));
-    } else if (p.array_size > 0) {
-      auto at = body->add_child(st, Lnast_ntype::create_comp_type_array());
-      auto pt = body->add_child(at, Lnast_ntype::create_prim_type_int());
-      body->add_child(pt, Lnast_node::create_const(p.max ? std::string(p.max->to_pyrope()) : std::string("nil")));
-      body->add_child(pt, Lnast_node::create_const(p.min ? std::string(p.min->to_pyrope()) : std::string("nil")));
-      body->add_child(at, Lnast_node::create_const("[" + std::to_string(p.array_size) + "]"));
     } else {
-      auto pt = body->add_child(st, Lnast_ntype::create_prim_type_int());
-      body->add_child(pt, Lnast_node::create_const(p.max ? std::string(p.max->to_pyrope()) : std::string("nil")));
-      body->add_child(pt, Lnast_node::create_const(p.min ? std::string(p.min->to_pyrope()) : std::string("nil")));
+      add_value_type(st, p);
     }
     if (is_output) {
       auto stg = body->add_child(st, Lnast_ntype::create_stages());
@@ -14396,21 +14417,7 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
     const auto& p   = plan.types.at(n);
     auto        dcl = body->add_child(stmts, Lnast_ntype::create_declare());
     body->add_child(dcl, Lnast_node::create_ref(plan.registers.contains(n) ? n + std::string(kCarryNextSuffix) : n));
-    if (p.kind == Io_kind::boolean) {
-      body->add_child(dcl, Lnast_ntype::create_prim_type_bool());
-    } else if (!p.type_name.empty()) {
-      body->add_child(dcl, Lnast_node::create_ref(p.type_name));
-    } else if (p.array_size > 0) {
-      auto at = body->add_child(dcl, Lnast_ntype::create_comp_type_array());
-      auto pt = body->add_child(at, Lnast_ntype::create_prim_type_int());
-      body->add_child(pt, Lnast_node::create_const(p.max ? std::string(p.max->to_pyrope()) : std::string("nil")));
-      body->add_child(pt, Lnast_node::create_const(p.min ? std::string(p.min->to_pyrope()) : std::string("nil")));
-      body->add_child(at, Lnast_node::create_const("[" + std::to_string(p.array_size) + "]"));
-    } else {
-      auto pt = body->add_child(dcl, Lnast_ntype::create_prim_type_int());
-      body->add_child(pt, Lnast_node::create_const(p.max ? std::string(p.max->to_pyrope()) : std::string("nil")));
-      body->add_child(pt, Lnast_node::create_const(p.min ? std::string(p.min->to_pyrope()) : std::string("nil")));
-    }
+    add_value_type(dcl, p);
     body->add_child(dcl, Lnast_node::create_const("mut"));
 
     auto seed = body->add_child(stmts, Lnast_ntype::create_store());
@@ -20106,6 +20113,16 @@ bool uPass_runner::try_detuple_store() {
                   "call it (`x = T(...)`) or give the type an `init` method; a bare function reference may only bind to an "
                   "untyped variable");
     return true;
+  }
+  // A call inside an unspecialized template or a pending import has no
+  // output layout yet. The concrete walk checks the original assignment.
+  if (rest.size() == 1 && rest[0].is_ref()
+      && ((ln->is_template() && !lm->in_inline_frame()) || symbol_table_.import_pending)) {
+    const auto unit = lm->unit_lnast()->get_top_module_name();
+    for (const auto& field : split.fields) {
+      symbol_table_.field_touched.insert(Symbol_table::field_touch_key(unit, var + "." + field.name));
+    }
+    return false;
   }
   detuple_error("unsupported-whole-tuple",
                 std::format("whole-tuple operation on `{}` cannot be scalarized", var),
