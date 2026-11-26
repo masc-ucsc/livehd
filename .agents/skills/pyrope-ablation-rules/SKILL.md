@@ -12,8 +12,9 @@ Use this skill when a caller wants to measure one named change. For a translatio
 1. Take the rule name and target file from the caller. If the rule is missing, ask which of the seven rules to apply. Record whether the input is the original or a previously accepted revision.
 2. Identify candidates, their declarations and all reads and writes. Use identifier boundaries and scope. For nested branches, match complete syntax blocks. A line-prefix match can capture the closing branch of a different write.
 3. Show the plan and unified diff to the experiment driver. Include the old-to-new mapping, the reason for each skipped candidate, and any exceptional lane. The driver accepts the patch before applying it. Keep the module signature, public fields, unrelated statements and other rules out of the diff.
-4. Compile both snapshots with the same top, parameters and settings. Run LEC on the common observable interface. Record the verdict and any proof bound. A counterexample needs investigation. An inconclusive result leaves equivalence open. Preserve all assertions and compare reset, hold and active cycles in simulation.
-5. Report the source-line delta and measure the outcome under study. For compile time, distinguish cold and warm runs. For simulation, report cycles per second on the same stimulus after setup. For mapped area or delay, use identical libraries and options. A proof of equal behavior establishes neither equal mapped structure nor equal speed.
+4. Run `lhd pyrope fmt --verify` on scratch copies of both snapshots with the same formatter version and mode. Use the formatted pair for the line-count comparison.
+5. Compile both snapshots with the same top, parameters and settings. Run LEC on the common observable interface. Record the verdict and any proof bound. A counterexample needs investigation. An inconclusive result leaves equivalence open. Preserve all assertions and compare reset, hold and active cycles in simulation.
+6. Report the source-line delta and measure the outcome under study. For compile time, distinguish cold and warm runs. For simulation, report cycles per second on the same stimulus after setup. For mapped area or delay, use identical libraries and options. A proof of equal behavior establishes neither equal mapped structure nor equal speed.
 
 ## rename
 

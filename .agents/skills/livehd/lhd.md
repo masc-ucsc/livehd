@@ -50,7 +50,8 @@ lhd lec --ref gold.v --impl foo.prp --top foo
 lhd synth foo.prp --top foo --workdir W --stats
 lhd pass opentimer lg:net cells.lib design.sdc --top foo.foo --set pass.opentimer.critical=true
 lhd tool sta paths=5 'slack<0' lg:net --top foo.foo
-lhd pyrope fmt -i foo.prp ; lhd pyrope style foo.prp --diag-fmt pretty
+lhd pyrope fmt --verify -i foo.prp
+lhd pyrope style foo.prp --diag-fmt pretty
 ```
 
 A comptime-only file (no hardware entity) needs
@@ -178,8 +179,9 @@ directory: re-run the pass after any netlist change.
 
 ## pyrope fmt / style
 
-`fmt -i` formats in place; prove the result against its pre-format snapshot
-rather than assuming it is semantics-free. `style` reports repeated statement
+`fmt --verify -i` formats in place and checks the formatted syntax. Run the
+behavioral checks on that source. For a formatting-only equivalence check,
+use the pre-format snapshot as the reference. `style` reports repeated statement
 blocks and flattened bundle arguments (exit 2 = suggestions, 1 = input
 failure; exit 0 can hide a partial parse, so read the diagnostics).
 

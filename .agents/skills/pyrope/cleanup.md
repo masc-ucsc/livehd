@@ -32,11 +32,13 @@ translation must preserve and which changes the caller requested.
 ## 2. Find the repetition
 
 ```sh
+lhd pyrope fmt --verify -i file.prp
 lhd pyrope style file.prp --diag-fmt pretty
 lhd pyrope style dir/*.prp --emit diagnostics:style.jsonl
 ```
 
-Run style on each changed source and its affected callers after each pass.
+Format changed sources and testbenches after each edit pass. Run style on
+those files and their affected callers.
 For clock and reset findings, trace the port to the state it controls. Use
 `Clock` and `Reset` for timing signals, keep ordinary names such as `clock`
 and `reset` unquoted, and preserve the original edge, reset priority and
@@ -210,8 +212,9 @@ mod wrapper<C=profile>(active:Bool, d:Unsigned(bits=C.width))
   triggers it (for example, an imported config forwarded to a generic child).
   Pin the expected behavior in a regression at that stage. A simulator bug
   needs an observable value or timing check.
-* Format the final sources with `lhd pyrope fmt -i` and repeat the checks for
-  the agreed contract. Compare unchanged behavior at a common boundary. Use
+* Check the final formatting with the same formatter mode. For example, run
+  `lhd pyrope fmt --verify file.prp -o "$tmpdir/check.prp" && cmp file.prp "$tmpdir/check.prp"`
+  using a scratch directory. Repeat the behavioral checks on the formatted sources. Compare unchanged behavior at a common boundary. Use
   the new interface and its expected timing when testing a requested redesign.
 * Never weaken assertions, change the reference, or alter the reference setup to
   get a pass. Translate checks on a changed internal interface to the new
@@ -224,6 +227,7 @@ mod wrapper<C=profile>(active:Bool, d:Unsigned(bits=C.width))
   command, diagnostic, and compiler identity. Separate real defects from source
   mistakes and from untested historical workarounds.
 * For code size, list corresponding source blocks, tops and configurations.
+  Record the formatter mode and measure final formatted sources.
   Use the same line-count convention, count each shared generator definition
   once, and report harnesses and tests separately. Measure build time and
   simulation throughput independently when reporting a performance change.

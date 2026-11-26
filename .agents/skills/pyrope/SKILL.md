@@ -16,6 +16,9 @@ simulation, proof and placement workflows, see the [LiveHD skill](../livehd/SKIL
 
 ## Rules that apply to every task
 
+* Run `lhd pyrope fmt --verify -i` on each edited Pyrope source and testbench.
+  Run `lhd pyrope style` on the formatted files, address its findings, and
+  format again after any further edits.
 * Verify every edit with `lhd`: compile, then the strongest check available
   (LEC against the previous version or a reference, simulation, formal).
   `lhd compile` passing is necessary, not sufficient.
