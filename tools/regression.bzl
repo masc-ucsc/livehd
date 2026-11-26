@@ -5,7 +5,7 @@ load("@rules_python//python:defs.bzl", _py_test = "py_test")
 load("@rules_shell//shell:sh_test.bzl", _sh_test = "sh_test")
 
 _BACKEND = [
-    "inou/lefdef", "pass/place", "pass/domplace", "pass/opentimer",
+    "inou/lefdef", "pass/place", "pass/domplace", "pass/opentimer", "pass/route",
     "pass/liberty", "pass/timing", "tools/routefirst", "tools/routetruth", "tools/spef", "scripts/domplace",
 ]
 _BOTH = ["lhd", "pass/abc", "pass/usyn", "pass/synth", "pass/domino", "tools", "benchmark"]

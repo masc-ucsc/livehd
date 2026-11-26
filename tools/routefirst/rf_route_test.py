@@ -17,12 +17,53 @@ CHUNKS = pathlib.Path(sys.argv.pop(1)).resolve()
 FEEDBACK = pathlib.Path(sys.argv.pop(1)).resolve()
 TECH = 'VERSION 5.8 ;\nBUSBITCHARS "[]" ;\nDIVIDERCHAR "/" ;\n'
 TECH += "UNITS DATABASE MICRONS 1000 ; END UNITS\nSITE core CLASS CORE ; SIZE 0.054 BY 0.270 ; END core\n"
+# The router reads its limits from the technology LEF, so the fixture states them: the rules of ASAP7 M2 to M7 and
+# its default vias, as that technology's LEF gives them.
+RULES = {
+    2: ("0.018", "0.036", " AREA 0.000666 ; MINSIZE 0.037 0.018 ;\n"
+        ' PROPERTY LEF58_SPACING "SPACING 0.018 ENDOFLINE 0.025 WITHIN 0.02 ENDTOEND 0.031 PARALLELEDGE 0.025 WITHIN 0.02 ;" ;\n'
+        ' PROPERTY LEF58_EOLKEEPOUT "EOLKEEPOUT 0.025 EXTENSION 0.0 0.0125 0.031 CORNERONLY ;" ;\n'
+        ' PROPERTY LEF58_CORNERSPACING "CORNERSPACING CONVEXCORNER WIDTH 0.0 SPACING 0.02 ;" ;\n'),
+    4: ("0.024", "0.048", " AREA 0.002 ;\n"
+        ' PROPERTY LEF58_SPACING "SPACING 0.024 ENDOFLINE 0.025 WITHIN 0.04 ENDTOEND 0.04 ;" ;\n'
+        ' PROPERTY LEF58_EOLKEEPOUT "EOLKEEPOUT 0.025 EXTENSION 0.048 0.02425 0.048 CORNERONLY ;" ;\n'
+        ' PROPERTY LEF58_CORNERSPACING "CORNERSPACING CONVEXCORNER CORNERONLY 0.048 WIDTH 0.0 SPACING 0.04 ;" ;\n'
+        " SPACINGTABLE PARALLELRUNLENGTH 0.0 WIDTH 0.0 0.024 WIDTH 0.025 0.072 ;\n"),
+    6: ("0.032", "0.064", " AREA 0.0021875 ;\n"
+        ' PROPERTY LEF58_SPACING "SPACING 0.032 ENDOFLINE 0.0375 WITHIN 0.04 ENDTOEND 0.04 ;" ;\n'
+        ' PROPERTY LEF58_EOLKEEPOUT "EOLKEEPOUT 0.05 EXTENSION 0.048 0.03225 0.048 CORNERONLY ;" ;\n'
+        ' PROPERTY LEF58_CORNERSPACING "CORNERSPACING CONVEXCORNER CORNERONLY 0.048 WIDTH 0.0 SPACING 0.04 ;" ;\n'
+        " SPACINGTABLE PARALLELRUNLENGTH 0.0 WIDTH 0.0 0.032 WIDTH 0.033 0.072 ;\n"),
+}
+# name: half sizes of the lower pad, the cut and the upper pad, and the cut spacing
+VIAS = {
+    "VIA12": ((9, 11), (9, 9), (14, 9), "0.018"),
+    "VIA23": ((14, 9), (9, 9), (9, 14), "0.018"),
+    "VIA34": ((9, 17), (9, 12), (20, 12), "0.034"),
+    "VIA45": ((23, 12), (12, 12), (12, 23), "0.034"),
+    "VIA56": ((12, 27), (12, 16), (23, 16), "0.034"),
+    "VIA67": ((27, 16), (16, 16), (16, 27), "0.034"),
+}
 TRACKS = []
 for number in range(1, 8):
     horizontal = number % 2 == 0
     direction = "HORIZONTAL" if horizontal else "VERTICAL"
-    TECH += f"LAYER M{number}\n TYPE ROUTING ; DIRECTION {direction} ; PITCH 0.036 ; WIDTH 0.018 ;\nEND M{number}\n"
-    TRACKS.append(f"TRACKS {'Y' if horizontal else 'X'} 18 DO 20 STEP 36 LAYER M{number} ;")
+    width, pitch, rules = RULES.get(number - number % 2, ("0.018", "0.036", ""))
+    TECH += (f"LAYER M{number}\n TYPE ROUTING ; DIRECTION {direction} ; PITCH {pitch} ; WIDTH {width} ; SPACING {width} ;\n"
+             f"{rules}END M{number}\n")
+    if number < 7:
+        TECH += f"LAYER V{number}\n TYPE CUT ; SPACING {VIAS[f'VIA{number}{number + 1}'][3]} ;\nEND V{number}\n"
+    step = round(float(pitch) * 1000)
+    TRACKS.append(f"TRACKS {'Y' if horizontal else 'X'} {step // 2 if step == 36 else 6 if step == 48 else 22} "
+                  f"DO {720 // step} STEP {step} LAYER M{number} ;")
+for name, (lower, cut, upper, _) in VIAS.items():
+    k = int(name[3])
+
+    def rect(half):
+        return f"RECT {-half[0] / 1000} {-half[1] / 1000} {half[0] / 1000} {half[1] / 1000} ;"
+
+    TECH += (f"VIA {name} DEFAULT\n LAYER M{k} ; {rect(lower)}\n LAYER V{k} ; {rect(cut)}\n"
+             f" LAYER M{k + 1} ; {rect(upper)}\nEND {name}\n")
 TECH += "END LIBRARY\n"
 CELLS = """VERSION 5.8 ;
 MACRO BUF
@@ -193,8 +234,21 @@ class RouteTest(unittest.TestCase):
         self.assertRegex(out, r"\( PIN p1 \)\s+\+ ROUTED M2")
         self.assertIn("# example: - sig ;", out)
 
+    def test_merged_track_retains_terminal_contact(self):
+        pins = [f"- p{i} + NET sig + DIRECTION INOUT + LAYER M2 ( -20 -9 ) ( 20 9 ) "
+                f"+ FIXED ( {x} 54 ) N ;" for i, x in enumerate((90, 198, 306))]
+        frame = self.frame(nets=["- sig ( PIN p0 ) ( PIN p1 ) ( PIN p2 ) ;"], pins=pins)
+        stats = self.run_router(frame, "--verify")
+        self.assertEqual(stats["nets_routed"], 1)
+        self.assertEqual(stats["verify_open_nets"], 0)
+        self.assertEqual(stats["wl_M2"], 256)
+        out = (self.root / "out.def").read_text()
+        contacts = re.findall(r"\( (\d+) \* 0 \)\n\s+NEW M2 \( \1 54 0 \)", out)
+        self.assertTrue(any(178 <= int(x) <= 218 for x in contacts), out)
+
     def test_dbu_and_output_errors(self):
-        self.assertIn("1000", self.run_router(self.frame().replace("MICRONS 1000", "MICRONS 2000"), success=False))
+        # At 2000 units per micron the frame's tracks are half as far apart as the LEF's wires need.
+        self.assertIn("tracks of M2", self.run_router(self.frame().replace("MICRONS 1000", "MICRONS 2000"), success=False))
         self.assertTrue(self.run_router(self.frame(), output="missing/out.def", success=False))
 
     # ---- verification: every finding carries its net and its geometry ----
@@ -273,19 +327,20 @@ class RouteTest(unittest.TestCase):
                  "RECT 0.100 0.000 0.118 0.054 ; END\n END P\n OBS\n"
                  + "".join(f"  LAYER M{k} ; RECT 0 0 0.216 0.150 ;\n" for k in (1, 2, 3)) + " END\nEND BLK\nEND LIBRARY")
         (self.root / "cells.lef").write_text(CELLS.replace("END LIBRARY", block))
-        frame = self.frame(["- big BLK + FIXED ( 306 560 ) N ;", "- a BUF + FIXED ( 108 270 ) N ;"], ["- n ( a Z ) ( big P ) ;"])
+        frame = self.frame(["- big BLK + FIXED ( 306 536 ) N ;", "- a BUF + FIXED ( 108 270 ) N ;"], ["- n ( a Z ) ( big P ) ;"])
         stats = self.run_router(frame, "--verify-report", "found.tsv")
         self.assertEqual((stats["nets_routed"], stats["edge_pin_stubs"], stats["edge_pin_stub_wires"]), (1, 1, 1))
         self.assertEqual({k: v for k, v in stats.items() if k.startswith("verify_") and v}, {})
-        self.assertRegex((self.root / "out.def").read_text(), r"M3 \( 415 360 0 \) \( \* 614 0 \)")
+        self.assertRegex((self.root / "out.def").read_text(), r"M3 \( 415 336 0 \) \( \* 590 0 \)")
 
         # With the long extension blocked, the first crossing track below the pin is still accessible.
         (self.root / "cells.lef").write_text(CELLS.replace("END LIBRARY", block.replace("0.118 0.054", "0.118 0.018")))
+        frame = frame.replace("( 306 536 )", "( 306 538 )")
         frame = frame.replace("NETS 1", "BLOCKAGES 1 ;\n- LAYER M3 RECT ( 405 395 ) ( 425 425 ) ;\nEND BLOCKAGES\nNETS 1")
         stats = self.run_router(frame, "--verify-report", "found.tsv")
         self.assertEqual((stats["nets_routed"], stats["edge_pin_stub_wires"]), (1, 1))
         self.assertEqual({k: v for k, v in stats.items() if k.startswith("verify_") and v}, {})
-        self.assertRegex((self.root / "out.def").read_text(), r"M3 \( 415 524 0 \) \( \* 578 0 \)")
+        self.assertRegex((self.root / "out.def").read_text(), r"M3 \( 415 502 0 \) \( \* 556 0 \)")
 
     def test_direct_macro_via_keeps_pin_metal_in_the_lef(self):
         self.with_vias()
@@ -300,10 +355,12 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(stats.get("edge_pin_stub_wires", 0), 0)
         self.assertEqual({k: v for k, v in stats.items() if k.startswith("verify_") and v}, {})
 
-        # A direct VIA34 needs 11 DBU of M3 enclosure on each end. Its pad
+        # A direct VIA34 needs 17 DBU of M3 enclosure on each end. Centred on the M4 track at 486, its pad
         # exactly fills this short pin. Shrinking the pin by one DBU disallows it.
-        for bottom, expected in (("0.115", 1), ("0.116", 0)):
-            short = block.replace("0.100 0.040 0.118 0.112", f"0.100 {bottom} 0.118 0.137")
+        # Block the M2 landing so VIA23 cannot reach the pin with its shorter M3 enclosure.
+        frame = frame.replace("NETS 1", "BLOCKAGES 1 ;\n- LAYER M2 RECT ( 380 475 ) ( 450 497 ) ;\nEND BLOCKAGES\nNETS 1")
+        for bottom, expected in (("0.109", 1), ("0.110", 0)):
+            short = block.replace("0.100 0.040 0.118 0.112", f"0.100 {bottom} 0.118 0.143")
             (self.root / "cells.lef").write_text(CELLS.replace("END LIBRARY", short))
             stats = self.run_router(frame, "--verify")
             self.assertEqual(stats["nets_routed"], expected)
@@ -327,14 +384,37 @@ class RouteTest(unittest.TestCase):
             self.run_router(frame, "--verify-report", "found.tsv")
             self.assertEqual(("min-length", "M4", "n") in self.findings(), bool(expected))
 
+    def test_track_wire_clears_off_track_pin_metal(self):
+        tech = self.root / "tech.lef"
+        tech.write_text(tech.read_text().replace(
+            "LAYER M2 ; RECT -0.014 -0.009 0.014 0.009",
+            "LAYER M2 ; RECT -0.014 -0.012 0.014 0.012"))
+        strap = """MACRO STRAP
+ CLASS CORE ; ORIGIN 0 0 ; SIZE 0.108 BY 0.270 ;
+ PIN P
+  DIRECTION INPUT ; PORT LAYER M2 ;
+   RECT 0.010 0.123 0.100 0.141 ;
+   RECT 0.020 0.075 0.038 0.132 ;
+  END
+ END P
+END STRAP
+"""
+        (self.root / "cells.lef").write_text(CELLS.replace("END LIBRARY", strap + "END LIBRARY"))
+        tracks = ["TRACKS Y 18 DO 15 STEP 48 LAYER M2 ;" if " M2 " in line else line for line in TRACKS]
+        pins = [f"- {name} + NET {net} + DIRECTION INOUT + LAYER M2 ( -20 -9 ) ( 20 9 ) + FIXED ( {x} {y} ) N ;"
+                for name, net, x, y in (("left", "cross", 90, 354), ("right", "cross", 450, 354),
+                                        ("pad", "hold", 450, 402))]
+        frame = self.frame(["- strap STRAP + FIXED ( 216 270 ) N ;"],
+                           ["- cross ( PIN left ) ( PIN right ) ;", "- hold ( PIN pad ) ( strap P ) ;"],
+                           pins, tracks)
+        stats = self.run_router(frame, "--verify")
+        self.assertEqual(stats["nets_routed"], 2)
+        out = (self.root / "out.def").read_text().split("- cross ", 1)[1].split(";", 1)[0]
+        pieces = re.findall(r"M2 \( (\d+) 354 0 \) \( (\d+) \* 0 \)", out)
+        self.assertFalse(any(int(lo) < 254 and int(hi) > 236 for lo, hi in pieces), out)
+
     def with_vias(self):
-        cuts = "".join(f"LAYER V{k}\n TYPE CUT ;\nEND V{k}\n" for k in range(1, 7))
-        vias = ""
-        for k in range(1, 7):
-            vias += (f"VIA VIA{k}{k + 1} DEFAULT\n LAYER M{k} ; RECT -0.009 -0.011 0.009 0.011 ;\n"
-                     f" LAYER V{k} ; RECT -0.009 -0.009 0.009 0.009 ;\n"
-                     f" LAYER M{k + 1} ; RECT -0.014 -0.009 0.014 0.009 ;\nEND VIA{k}{k + 1}\n")
-        (self.root / "tech.lef").write_text(TECH.replace("END LIBRARY\n", cuts + vias + "END LIBRARY\n"))
+        pass  # the fixture's technology always has them
 
     def findings(self):
         rows = [line.split("\t") for line in (self.root / "found.tsv").read_text().splitlines()[1:]]
@@ -434,6 +514,9 @@ class RouteTest(unittest.TestCase):
     def test_parallel_chunks_and_feedback(self):
         self.with_vias()
         frame = self.two_cells().replace("( 720 720 )", "( 1440 720 )").replace("( 108 270 )", "( 216 270 )")
+        frame = frame.replace("\n- ", "\n    - ").replace("( a Z ) ( b A )", "( a Z )\n        ( b A )")
+        frame = frame.replace("BUF + FIXED", "BUF\n        + FIXED")
+        frame = frame.replace("\nCOMPONENTS ", "\n  COMPONENTS ").replace("\nDIEAREA ", "\n  DIEAREA ")
         (self.root / "in.def").write_text(frame)
         args = [CHUNKS, "--lhd", ROUTER, "--grid", "2", "1", "--out", "trial",
                 "in.def", "tech.lef", "cells.lef"]
@@ -492,6 +575,18 @@ class RouteTest(unittest.TestCase):
                 self.assertEqual((self.root / folder / "routed.def").read_bytes(),
                                  (self.root / previous / "routed.def").read_bytes())
 
+    def test_repair_accepts_indented_placed_def(self):
+        self.with_vias()
+        frame = self.two_cells().replace("\n- ", "\n    - ").replace("( a Z ) ( b A )", "( a Z )\n        ( b A )")
+        frame = frame.replace("BUF + FIXED", "BUF\n        + FIXED")
+        frame = frame.replace("\nEND NETS", "\n  END NETS")
+        self.run_router(frame, "--limit", "0", "--report", "feedback.tsv", output="routed.def")
+        run = subprocess.run([FEEDBACK, "--lhd", ROUTER, "--all-pins", "--out", "fixed", ".", "tech.lef", "cells.lef"],
+                             cwd=self.root, capture_output=True, text=True, check=True, timeout=10)
+        self.assertEqual(json.loads(run.stdout)["violations"], {})
+        self.assertEqual(json.loads(run.stdout)["previous_unrouted"], 1)
+        self.assertTrue((self.root / "fixed/seed.def").read_text().rstrip().endswith("END DESIGN"))
+
     def test_agent_socket_preserves_existing_file(self):
         (self.root / "in.def").write_text(self.two_cells())
         with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
@@ -509,7 +604,7 @@ class RouteTest(unittest.TestCase):
                 f"+ FIXED ( {x} 54 ) N ;" for i, x in enumerate((90, 306))]
         frame = self.frame(["- a BUF + FIXED ( 108 270 ) N ;", "- b BUF + FIXED ( 324 270 ) N ;"],
                            ["- n ( a Z ) ( b A ) ;", "- high ( PIN p0 ) ( PIN p1 )\n"
-                            "      + ROUTED M4 ( 90 54 0 ) ( 306 * 0 ) ;"], pins)
+                            "      + ROUTED M4 ( 90 54 12 ) ( 306 * 12 ) ;"], pins)
         self.run_router(frame, "--limit", "0", "--report", "feedback.tsv", output="routed.def")
         for folder, extra, expected in (("all", [], ["high"]), ("lower", ["--pin-access-layers"], [])):
             run = subprocess.run([FEEDBACK, "--lhd", ROUTER, "--all-pins", *extra, "--out", folder, ".", "tech.lef", "cells.lef"],

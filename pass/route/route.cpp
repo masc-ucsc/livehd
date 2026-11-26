@@ -42,6 +42,7 @@
 #include "inou/lefdef/routing_connectivity.hpp"
 #include "inou/lefdef/routing_geometry.hpp"
 #include "pass/route/route_identity.hpp"
+#include "pass/route/route_tech.hpp"
 
 namespace ph = livehd::physical;
 
@@ -125,6 +126,9 @@ struct Seg {
 };
 struct Track {
   std::vector<Seg> s;  // sorted by lo, disjoint
+  mutable std::vector<Seg> pin_clearance;  // inclusive forbidden coordinates for wires of other nets
+  mutable bool            pin_clearance_sorted = true;
+  int                     max_pin_span = 0;
 };
 struct Cut {
   int xl, yl, xh, yh, net;
@@ -133,6 +137,15 @@ struct Layer {
   std::string        name;
   bool               horiz = false;
   int                w = 0, e2e = 0, cs = 0, minlen = 0, ext = 0, pitch = 0, wide_clear = 0;
+  int                spacing = 0;  // between default-width wires
+  // The shortest piece that carries a via down, or a via up: the pad of the via counts toward the minimum area, so
+  // such a piece may be shorter than a bare wire (sky130: a stacked pin via pair needs no wire at all).
+  int                minlen_dn = 0, minlen_up = 0;
+  int                die_lo = INT32_MIN / 2, die_hi = INT32_MAX / 2;  // the die along the wires
+  int64_t            min_area  = 0;
+  int                bump    = 0;  // how far the widest via pad sticks out beside a wire of this layer
+  // Spacing kept from metal at least this wide, from the LEF width table; empty when the LEF has none.
+  std::vector<std::pair<int, int>> width_spacing;
   double             cost = 1.0;
   std::vector<int>   tc;       // track coordinate, perpendicular to the wires
   std::vector<int>   stops;    // along coordinates where a via may sit
@@ -146,9 +159,9 @@ struct Layer {
 struct Cut_layer {
   std::string                                    name, via;
   int                                            hx = 0, hy = 0, space = 0;  // half sizes of the default cut
+  ph::Rect                                       lower_pad, upper_pad;       // via metal on the two layers, about the origin
   std::unordered_map<uint64_t, std::vector<Cut>> buckets;
 };
-constexpr int bucket = 256;
 uint64_t      bkey(int bx, int by) { return (uint64_t(uint32_t(bx)) << 32) | uint32_t(by); }
 
 struct Cand {
@@ -157,6 +170,10 @@ struct Cand {
   bool v1   = false;  // needs a V1 from the M1 pin
   int  stub = -1;     // selected macro-pin extension, if this access needs one
   int  cut  = -1;     // cut layer of the via at (x, y) that joins the pin to this state; 0 with v1
+  // A pin with one track to land on, between pins in the same position, cannot always go up from that track. With a
+  // jog the via stays on the pin's track and a short piece of first-layer metal across the tracks takes the net to
+  // the next one, where the state is: track t is the via's track plus `jog` (+1 or -1).
+  int  jog  = 0;
 };
 struct Pin {
   int               comp = -1;  // component index, -1 for a terminal
@@ -180,6 +197,8 @@ struct Net {
   int                  bbox_hp    = 0;
   int                  fail_pin   = -1;
   int                  fail_other = -1;  // the tree-side pin the failed one was aiming at
+  int                  trapped_port = -1;  // a port the last attempt found walled in, if any
+  std::vector<Cut>     bars;               // pin jogs in use: first-layer metal across the tracks
   std::string          fail_why;
   int                  rips  = 0;
   double               slack = 1e30;
@@ -191,8 +210,48 @@ using livehd::routing::Settings;
 struct Router {
   ph::Technology         tech;
   ph::Floorplan          fp;
-  std::vector<Layer>     L;   // M2..M7
-  std::vector<Cut_layer> CL;  // V1..V6 ; CL[k] joins L[k-1] (or M1) and L[k]
+  std::vector<Layer>     L;   // the routed layers, bottom up (M2..M7 on ASAP7, met1..met5 on sky130)
+  std::vector<Cut_layer> CL;  // CL[k] joins L[k-1] (the pin layer for k == 0) and L[k]
+  // Technology, read from the LEF and the frame (route_tech.hpp). Nothing below names a layer, a via or a size.
+  std::string            pin_layer;             // standard-cell pins are on it; it is not routed
+  int                    site = 0, row_h = 0;   // placement site width and row height
+  int                    own_margin = 240;      // how far around a cell its own obstacle pieces can lie
+  int                    pin_step   = 18;       // spacing of the positions a pin via may take along the first layer
+  int                    esc_min0 = 0, esc_min1 = 0;  // shortest reserved piece on the first two layers (it carries a via pad)
+  bool                   any_bump   = false;    // some layer's via pads are wider than its wire
+  bool                   esc_pad_only = false;  // a reserved pin holds its landing pad, not a way up
+  bool                   esc_trace  = false;    // explain why a cell's pins found no joint way up
+  int                    esc_win    = 108;      // reach along the first layer of a pin's reserved way up
+  int                    grid = 1;              // manufacturing grid
+  int                    bucket = 256;          // spatial index bin, scaled with the routing pitch in setup
+  // The tunings given in database units (via cost, window margin, search budgets, escape windows) were set on a
+  // first routing layer with 36 units between tracks. They scale with that pitch.
+  double                 unit = 1.0;
+  bool                   tunings_scaled = false;
+  int                    u(int v) const { return int(std::lround(v * unit)); }
+  int                    on_grid(int v) const { return (v + grid - 1) / grid * grid; }
+  bool tech_metal(const std::string& layer) const {
+    return std::find(tech.routing_layers.begin(), tech.routing_layers.end(), layer) != tech.routing_layers.end();
+  }
+  bool tech_cut(const std::string& layer) const { return tech.cut_layers.contains(layer); }
+  // Metal or cut above the pin layer: what a cell owns there is an obstacle or a strap, never a pin landing.
+  bool above_pins(const std::string& layer) const { return layer != pin_layer && (tech_metal(layer) || tech_cut(layer)); }
+  // Spacing a default wire keeps from metal of this width.
+  int wide_spacing(const Layer& ly, int width) const {
+    if (width <= ly.w) {
+      return ly.spacing;
+    }
+    if (ly.width_spacing.empty()) {
+      return ly.wide_clear;
+    }
+    int s = ly.spacing;
+    for (const auto& [from, spacing] : ly.width_spacing) {
+      if (width >= from) {
+        s = std::max(s, spacing);
+      }
+    }
+    return s;
+  }
   std::vector<Net>       nets;
   Settings               opt;
   int64_t                nstates = 0;
@@ -257,6 +316,19 @@ struct Router {
   static int            owner_net(int owner) {
     return is_pin_keep(owner) ? pin_keep_base - owner : (is_keep(owner) ? keep_base - owner : owner);
   }
+  // Who holds a piece, for the failure explanations: a net, a keep-out of a net, a cell's own metal or fixed metal.
+  std::string owner_label(int owner) const {
+    if (owner >= 0) {
+      return nets[owner].name;
+    }
+    if (is_keep(owner)) {
+      return std::string(is_pin_keep(owner) ? "PINKEEP:" : "KEEP:") + nets[owner_net(owner)].name;
+    }
+    if (owner <= -10 && size_t(-10 - owner) < fp.components.size()) {
+      return "CELL:" + fp.components[-10 - owner].name.str();
+    }
+    return "OBS";
+  }
   bool skipped(int owner) const {
     if (!probing) {
       return false;
@@ -264,8 +336,39 @@ struct Router {
     const int n = owner_net(owner);
     return n >= 0 && size_t(n) < probe_skip.size() && probe_skip[n] == probe_tag;
   }
+  void clip_pin_clearance(const Track& track, int net, int a, int ext, int& fl, int& fh) const {
+    auto& pins = track.pin_clearance;
+    if (pins.empty()) {
+      return;
+    }
+    if (!track.pin_clearance_sorted) {
+      std::sort(pins.begin(), pins.end(), [](const Seg& lhs, const Seg& rhs) { return lhs.lo < rhs.lo; });
+      track.pin_clearance_sorted = true;
+    }
+    auto next = std::upper_bound(pins.begin(), pins.end(), a + ext, [](int v, const Seg& s) { return v < s.lo; });
+    for (auto it = next; it != pins.end() && it->lo - ext <= fh; ++it) {
+      if (it->net != net) {
+        fh = it->lo - ext - 1;
+        break;
+      }
+    }
+    while (next != pins.begin()) {
+      const auto& pin = *--next;
+      if (pin.lo + track.max_pin_span + ext < fl) {
+        break;
+      }
+      if (pin.net == net) {
+        continue;
+      }
+      fl = std::max(fl, pin.hi + ext + 1);
+      if (fl > a) {
+        break;
+      }
+    }
+  }
   bool free_range(int l, int t, int net, int a, int& fl, int& fh) const {
-    const auto& T = L[l].tr[t].s;
+    const auto& track = L[l].tr[t];
+    const auto& T = track.s;
     const int   m = L[l].e2e + L[l].ext;
     fl            = -(1 << 28);
     fh            = 1 << 28;
@@ -283,6 +386,7 @@ struct Router {
         break;
       }
     }
+    clip_pin_clearance(track, net, a, L[l].ext, fl, fh);
     return fl <= a && a <= fh;
   }
   bool own_at(int l, int t, int net, int a) const {
@@ -322,7 +426,156 @@ struct Router {
         }
       }
     }
+    return pads_clear(k, x, y, net);
+  }
+  // R5. A default via pad can be wider than the wire it sits on (sky130: 0.26 um on a 0.14 um wire). Beside a wire
+  // of the next track that is still legal, which setup checks, but two such pads on neighbouring tracks are not.
+  // The pads on a layer where they stick out are kept like the cuts, and pads of different nets keep the spacing.
+  std::vector<std::unordered_map<uint64_t, std::vector<Cut>>> pads;  // per routed layer; unused where bump is 0
+  static constexpr int provisional = -9;  // owner of the vias of a path while it is being committed
+  // The pad of a via of cut layer k at (x, y) on routed layer l, which is k (above the cut) or k - 1 (below it).
+  Cut pad_rect(int k, int l, int x, int y, int net) const {
+    const auto& r = l == k ? CL[k].upper_pad : CL[k].lower_pad;
+    return {x + int(r.xl), y + int(r.yl), x + int(r.xh), y + int(r.yh), net};
+  }
+  // For the failure explanation: what a via of cut layer k at (x, y) is too close to.
+  std::string cut_why(int k, int x, int y, int net) const {
+    const auto& c = CL[k];
+    const auto  near = [&](const Cut& o, const Cut& p, int64_t r, bool same) {
+      const int64_t dx = std::max({0, o.xl - p.xh, p.xl - o.xh}), dy = std::max({0, o.yl - p.yh, p.yl - o.yh});
+      return (!same || dx > 0 || dy > 0) && dx * dx + dy * dy < r * r;
+    };
+    const auto label = [&](const Cut& o) {
+      return (o.net == provisional ? std::string("own path") : owner_label(o.net)) + " " + std::to_string(o.xl) + ","
+             + std::to_string(o.yl) + ".." + std::to_string(o.xh) + "," + std::to_string(o.yh);
+    };
+    const Cut me{x - c.hx, y - c.hy, x + c.hx, y + c.hy, net};
+    for (const auto& [key, v] : c.buckets) {
+      for (const auto& o : v) {
+        if (!(o.net == net && o.xl == me.xl && o.yl == me.yl) && !own_keep(o.net, net) && near(o, me, c.space, false)) {
+          return "cut " + label(o);
+        }
+      }
+    }
+    for (int l : {k, k - 1}) {
+      if (l < 0 || L[l].bump == 0) {
+        continue;
+      }
+      const auto p = pad_rect(k, l, x, y, net);
+      for (const auto& [key, v] : pads[l]) {
+        for (const auto& o : v) {
+          const bool same = o.net == net || o.net == provisional;
+          if (!own_keep(o.net, net)
+              && near(o, p, same ? L[l].spacing : wide_spacing(L[l], std::min(o.xh - o.xl, o.yh - o.yl)), same)) {
+            return L[l].name + " pad " + label(o);
+          }
+        }
+      }
+    }
+    return "nothing";
+  }
+  // Two vias of one net: do their pads on a shared layer face each other across a gap below the spacing?
+  bool pads_notch(int k1, int x1, int y1, int k2, int x2, int y2) const {
+    if (!any_bump || std::abs(k1 - k2) > 1) {
+      return false;
+    }
+    for (int l : {k1, k1 - 1}) {
+      if (l < 0 || L[l].bump == 0 || (l != k2 && l != k2 - 1)) {
+        continue;
+      }
+      const auto    a = pad_rect(k1, l, x1, y1, 0), b = pad_rect(k2, l, x2, y2, 0);
+      const int64_t dx = std::max({0, a.xl - b.xh, b.xl - a.xh}), dy = std::max({0, a.yl - b.yh, b.yl - a.yh});
+      if ((dx > 0 || dy > 0) && dx * dx + dy * dy < int64_t(L[l].spacing) * L[l].spacing) {
+        return true;
+      }
+    }
+    return false;
+  }
+  bool pads_clear(int k, int x, int y, int net) const {
+    for (int l : {k, k - 1}) {
+      if (l >= 0 && L[l].bump > 0 && !rect_clear(l, pad_rect(k, l, x, y, net), net)) {
+        return false;
+      }
+    }
     return true;
+  }
+  // The piece of first-layer metal a jogged pin access adds between the via's track and the state's track.
+  Cut jog_bar(const Cand& c, int net) const {
+    const auto& ly = L[0];
+    const int   to = ly.tc[c.t], from = ly.horiz ? c.y : c.x, at = ly.horiz ? c.x : c.y;
+    const int   lo = std::min(from, to), hi = std::max(from, to);
+    return ly.horiz ? Cut{at - ly.w / 2, lo, at + ly.w / 2, hi, net} : Cut{lo, at - ly.w / 2, hi, at + ly.w / 2, net};
+  }
+  // Half of the via pad along the first layer: the stretch of the via's track a jogged access holds.
+  int jog_pad_half() const {
+    const auto& r = CL[0].upper_pad;
+    return int(L[0].horiz ? std::max(-r.xl, r.xh) : std::max(-r.yl, r.yh));
+  }
+  bool jog_ok(int ni, const Cand& c) const {
+    // The pad is shorter than a wire end past a via: free_range() keeps the latter's distance.
+    int       fl, fh;
+    const int at = L[0].horiz ? c.x : c.y, slack = L[0].ext - jog_pad_half();
+    free_range(0, c.t - c.jog, ni, at, fl, fh);
+    return at >= fl - slack && at <= fh + slack && rect_clear(0, jog_bar(c, ni), ni);
+  }
+  // Metal of `net` on routed layer l that is not a wire on a track (a via pad, a jog): does it keep its distance?
+  bool rect_clear(int l, const Cut& p, int net) const {
+    {
+      const int  reach = std::max(L[l].spacing, L[l].wide_clear);
+      for (int bx = (p.xl - reach) / bucket; bx <= (p.xh + reach) / bucket; ++bx) {
+        for (int by = (p.yl - reach) / bucket; by <= (p.yh + reach) / bucket; ++by) {
+          const auto it = pads[l].find(bkey(bx, by));
+          if (it == pads[l].end()) {
+            continue;
+          }
+          for (const auto& o : it->second) {
+            if (own_keep(o.net, net) || skipped(o.net)) {
+              continue;
+            }
+            const int64_t dx = std::max({0, o.xl - p.xh, p.xl - o.xh});
+            const int64_t dy = std::max({0, o.yl - p.yh, p.yl - o.yh});
+            if (o.net == net || o.net == provisional) {
+              // Pads of one net (a path being committed holds its own vias provisionally) may touch or overlap. Apart
+              // but closer than the spacing, the parts beside the wire face each other across a notch.
+              if ((dx > 0 || dy > 0) && dx * dx + dy * dy < int64_t(L[l].spacing) * L[l].spacing) {
+                return false;
+              }
+              continue;
+            }
+            const int64_t r = wide_spacing(L[l], std::min(o.xh - o.xl, o.yh - o.yl));  // fixed metal can be wide
+            if (dx * dx + dy * dy < r * r) {
+              return false;
+            }
+          }
+        }
+      }
+    }
+    return true;
+  }
+  void pad_metal(int l, const Cut& p, bool add) {
+    for (int bx = p.xl / bucket; bx <= p.xh / bucket; ++bx) {
+      for (int by = p.yl / bucket; by <= p.yh / bucket; ++by) {
+        auto& v = pads[l][bkey(bx, by)];
+        if (add) {
+          v.push_back(p);
+          continue;
+        }
+        for (size_t i = 0; i < v.size(); ++i) {
+          if (v[i].net == p.net && v[i].xl == p.xl && v[i].yl == p.yl && v[i].xh == p.xh && v[i].yh == p.yh) {
+            v[i] = v.back();
+            v.pop_back();
+            break;
+          }
+        }
+      }
+    }
+  }
+  void pads_edit(int k, int x, int y, int net, bool add) {
+    for (int l : {k, k - 1}) {
+      if (l >= 0 && L[l].bump > 0) {
+        pad_metal(l, pad_rect(k, l, x, y, net), add);
+      }
+    }
   }
   void add_cut_rect(int k, int xl, int yl, int xh, int yh, int net) {
     auto& c = CL[k];
@@ -332,8 +585,12 @@ struct Router {
       }
     }
   }
-  void add_cut(int k, int x, int y, int net) { add_cut_rect(k, x - CL[k].hx, y - CL[k].hy, x + CL[k].hx, y + CL[k].hy, net); }
+  void add_cut(int k, int x, int y, int net) {
+    add_cut_rect(k, x - CL[k].hx, y - CL[k].hy, x + CL[k].hx, y + CL[k].hy, net);
+    pads_edit(k, x, y, net, true);
+  }
   void del_cut(int k, int x, int y, int net) {
+    pads_edit(k, x, y, net, false);
     auto&     c  = CL[k];
     const int xl = x - c.hx, xh = x + c.hx, yl = y - c.hy, yh = y + c.hy;
     for (int bx = xl / bucket; bx <= xh / bucket; ++bx) {
@@ -386,14 +643,20 @@ struct Router {
       const int  plo = int(ly.horiz ? r.yl : r.xl), phi = int(ly.horiz ? r.yh : r.xh);
       const int  alo = int(ly.horiz ? r.xl : r.yl), ahi = int(ly.horiz ? r.xh : r.yh);
       const bool wide     = phi - plo > ly.w;
-      const int  clear    = wide ? ly.wide_clear : ly.w;  // minimum spacing equals the width on every routed layer
+      const int  clear    = wide_spacing(ly, phi - plo);
       // A standard wire centred on a track obeys the interval rules, so only that track is touched.
       const int  on_track = phi - plo == ly.w ? find(ly.tc, (plo + phi) / 2) : -1;
       if (on_track >= 0 && plo == ly.tc[on_track] - ly.w / 2) {
         block(int(l), on_track, alo, ahi, net);
         return;
       }
-      const int reach = std::max(clear, ly.cs);  // ends near an off-track corner violate the corner spacing
+      // Ends near an off-track corner violate the corner spacing. Where via pads are wider than the wire, the shape
+      // is also kept with the pads, so that a pad on a nearby track keeps its distance (R5): the track itself stays
+      // open to wires, which is what a pin with one track to land on needs.
+      if (ly.bump > 0) {
+        pad_metal(int(l), {int(r.xl), int(r.yl), int(r.xh), int(r.yh), net <= -10 ? net : -1}, true);
+      }
+      const int reach = std::max(clear, ly.cs);
       auto      b     = std::lower_bound(ly.tc.begin(), ly.tc.end(), plo - reach - ly.w);
       for (; b != ly.tc.end() && *b <= phi + reach + ly.w; ++b) {
         const int c   = *b;
@@ -402,7 +665,7 @@ struct Router {
           continue;
         }
         // Wide metal keeps the wide spacing past its ends as well; R1 adds the end-to-end spacing to this margin.
-        const int m = wide ? std::max(0, ly.wide_clear - ly.e2e) + (gap <= 0 ? 0 : ly.cs) : gap <= 0 ? 0 : ly.cs;
+        const int m = wide ? std::max(0, clear - ly.e2e) + (gap <= 0 ? 0 : ly.cs) : gap <= 0 ? 0 : ly.cs;
         block(int(l), int(b - ly.tc.begin()), alo - m, ahi + m, net <= -10 ? net : -1);
       }
       return;
@@ -417,7 +680,7 @@ struct Router {
     const int   id   = -10 - ci;
     bool        ok   = true;
     const auto  each = [&](const ph::Shape& sh) {
-      if (sh.layer == "M1" || (sh.layer[0] != 'M' && sh.layer[0] != 'V')) {
+      if (!above_pins(sh.layer)) {
         return;
       }
       const auto r = ph::placed_rect(m, c.place, fp.dbu, sh.rect);
@@ -433,7 +696,7 @@ struct Router {
     for (const auto& [pn, p] : m.pins) {
       const bool wired = pin_net.count(c.name.str() + "/" + pn) > 0;
       for (const auto& sh : p.shapes) {
-        if (wired && sh.layer[0] == 'M' && sh.layer != "M1") {
+        if (wired && sh.layer != pin_layer && tech_metal(sh.layer)) {
           if (insert) {
             pinned.insert(ci);  // its pin metal is routed on directly; the cell stays
           } else {              // the strap must clear the wires already there, like any other shape of the cell
@@ -451,8 +714,8 @@ struct Router {
   void remove_owner(int id) {
     const int   c  = -10 - id;
     const auto& pl = fp.components[c].place;
-    const int   m  = 240;
-    const int   xl = int(pl.x) - m, xh = int(pl.x) + cinfo[c].w + m, yl = int(pl.y) - m, yh = int(pl.y) + 270 + m;
+    const int   m  = own_margin;
+    const int   xl = int(pl.x) - m, xh = int(pl.x) + cinfo[c].w + m, yl = int(pl.y) - m, yh = int(pl.y) + row_h + m;
     for (auto& ly : L) {
       auto b = std::lower_bound(ly.tc.begin(), ly.tc.end(), ly.horiz ? yl : xl);
       for (; b != ly.tc.end() && *b <= (ly.horiz ? yh : xh); ++b) {
@@ -467,6 +730,20 @@ struct Router {
         for (int by = yl / bucket - 1; by <= yh / bucket + 1; ++by) {
           const auto it = cl.buckets.find(bkey(bx, by));
           if (it != cl.buckets.end()) {
+            auto& v = it->second;
+            v.erase(std::remove_if(v.begin(), v.end(), [&](const Cut& k) { return k.net == id; }), v.end());
+          }
+        }
+      }
+    }
+    for (size_t l = 0; l < pads.size(); ++l) {
+      if (L[l].bump == 0) {
+        continue;
+      }
+      for (int bx = xl / bucket - 1; bx <= xh / bucket + 1; ++bx) {
+        for (int by = yl / bucket - 1; by <= yh / bucket + 1; ++by) {
+          const auto it = pads[l].find(bkey(bx, by));
+          if (it != pads[l].end()) {
             auto& v = it->second;
             v.erase(std::remove_if(v.begin(), v.end(), [&](const Cut& k) { return k.net == id; }), v.end());
           }
@@ -518,9 +795,30 @@ struct Router {
       const bool wide     = phi - plo > ly.w;
       const int  on_track = phi - plo == ly.w ? find(ly.tc, (plo + phi) / 2) : -1;
       if (on_track >= 0 && plo == ly.tc[on_track] - ly.w / 2) {
-        return !taken(size_t(on_track));
+        if (taken(size_t(on_track))) {
+          return false;
+        }
+        // R2 as place() reads it: an end of the bar may not face a wire end on a neighbouring track within the
+        // corner spacing. A wire entering later is lengthened past the bar's end; the bar cannot be, so it does not
+        // fit there (minimax: a moved flop left its M2 bar 3 nm from the end of a wire routed before the move).
+        const int l = int(&ly - L.data());
+        for (int u : {on_track - 1, on_track + 1}) {
+          if (!adjacent(l, on_track, u)) {
+            continue;
+          }
+          for (const auto& sg : ly.tr[u].s) {
+            if (sg.net < 0 || skipped(sg.net)) {
+              continue;
+            }
+            if ((sg.lo >= ahi && sg.lo - ahi < ly.cs) || (sg.hi <= alo && alo - sg.hi < ly.cs)) {
+              return false;
+            }
+          }
+        }
+        return true;
       }
-      const int reach = std::max(wide ? ly.wide_clear : ly.w, ly.cs);
+      (void)wide;
+      const int reach = std::max(wide_spacing(ly, phi - plo), ly.cs);
       auto      b     = std::lower_bound(ly.tc.begin(), ly.tc.end(), plo - reach - ly.w);
       for (; b != ly.tc.end() && *b <= phi + reach + ly.w; ++b) {
         if (std::max(plo - (*b + ly.w / 2), (*b - ly.w / 2) - phi) >= reach) {
@@ -544,17 +842,28 @@ struct Router {
   bool                                            off_rows(int c) const {
     const auto m = tech.macros.find(fp.components[c].macro.str());
     return m != tech.macros.end() && !gap_width.contains(c)
-           && (m->second.height * fp.dbu > 270 + 1 || m->second.klass.starts_with("BLOCK"));
+           && (m->second.height * fp.dbu > row_h + 1 || m->second.klass.starts_with("BLOCK"));
   }
   static ph::Rect footprint(const ph::Macro& macro, const Ann_place& pose, int64_t dbu) {
     const double w = std::llround(macro.width * dbu), h = std::llround(macro.height * dbu);
     return ph::orient_rect({0, 0, w, h}, w, h, pose.orientation).translated(pose.x, pose.y);
   }
   void site_obstacles() {
-    const int site = 54;
+    // The site and the row height are those of the rows. One site for the whole frame: the row plan, the slides and
+    // the pushes count in sites.
+    if (fp.rows.empty()) {
+      throw std::runtime_error("the frame has no placement rows");
+    }
+    site             = int(fp.rows.front().step);
+    const auto first = tech.sites.find(fp.rows.front().site);
+    if (site <= 0 || first == tech.sites.end()) {
+      throw std::runtime_error("the rows name a site the LEF does not define, or have no site step");
+    }
+    row_h = int(std::llround(first->second.height * fp.dbu));
     for (const auto& r : fp.rows) {
-      if (r.step != site) {
-        throw std::runtime_error("rf_route requires 54-DBU site rows");
+      const auto s = tech.sites.find(r.site);
+      if (r.step != site || s == tech.sites.end() || int(std::llround(s->second.height * fp.dbu)) != row_h) {
+        throw std::runtime_error("the router serves rows of one site width and one height; row " + r.name + " differs");
       }
       row_parts[int(r.y)].emplace_back(int(r.x), int(r.x + r.count * r.step));
     }
@@ -612,7 +921,7 @@ struct Router {
     }
     const auto over_rows = [&](const ph::Rect& r, int skip_y, const char* why) {
       for (const auto& [y, parts] : row_parts) {
-        if (y != skip_y && y < r.yh && y + 270 > r.yl) {
+        if (y != skip_y && y < r.yh && y + row_h > r.yl) {
           close(y, int(r.xl), int(r.xh), why);
         }
       }
@@ -628,7 +937,7 @@ struct Router {
     for (size_t i = 0; i < real; ++i) {  // a cell taller than a row closes the other rows it covers
       const auto& c = fp.components[i];
       const auto  m = tech.macros.find(c.macro.str());
-      if (m != tech.macros.end() && (m->second.height * fp.dbu > 270 + 1 || m->second.klass.starts_with("BLOCK"))) {
+      if (m != tech.macros.end() && (m->second.height * fp.dbu > row_h + 1 || m->second.klass.starts_with("BLOCK"))) {
         // every row it covers, its own included: the macro is then no cell of any row, only closed stretches
         over_rows(footprint(m->second, c.place, fp.dbu), INT32_MIN, "macros");
       }
@@ -639,38 +948,35 @@ struct Router {
   void setup(const std::vector<std::string>& lefs, const std::string& def) {
     tech = ph::read_lef(lefs);
     fp   = ph::read_def_snapshot(def);
-    if (fp.dbu != 1000) {
-      throw std::runtime_error("rf_route requires 1000 DEF units per micron for its ASAP7 rules");
-    }
     for (const auto& b : fp.snapshot_blockages) {
       if (!b.polygons.empty() || b.spacing >= 0 || b.design_rule_width >= 0 || b.partial_density >= 0 || b.mask != 0) {
         throw std::runtime_error("rf_route models rectangular DEF BLOCKAGES without spacing, width, density or mask only");
       }
     }
     site_obstacles();
-    struct Spec {
-      const char* name;
-      int         w, e2e, cs, minlen, ext, wide;
-    };
-    // Calibrated with the rule oracle (drt::check_drc on synthetic two-wire layouts).
-    const Spec specs[] = {
-        {"M2", 18, 31, 20, 37, 19, 36},
-        {"M3", 18, 31, 20, 37, 19, 36},
-        {"M4", 24, 48, 40, 84, 23, 72},
-        {"M5", 24, 48, 40, 84, 27, 72},
-        {"M6", 32, 48, 40, 69, 27, 72},
-        {"M7", 32, 48, 40, 69, 27, 72}
-    };
-    for (const auto& sp : specs) {
+    // The stack and its limits come from the technology LEF (route_tech.hpp); the tracks from the frame.
+    const auto stack = livehd::routing::derive_tech_stack(tech, fp.dbu, [&](const std::string& layer, bool horizontal) {
+      return std::any_of(fp.tracks.begin(), fp.tracks.end(), [&](const auto& t) {
+        return t.layer == layer && t.axis == (horizontal ? "Y" : "X");
+      });
+    });
+    pin_layer = stack.pin_layer;
+    grid      = stack.grid;
+    stat["layers_unused_for_via_pads"] = int64_t(stack.unused.size());
+    for (const auto& sp : stack.layers) {
       Layer ly;
-      ly.name       = sp.name;
-      ly.horiz      = tech.layers.at(sp.name).direction == "HORIZONTAL";
-      ly.w          = sp.w;
-      ly.e2e        = sp.e2e;
-      ly.cs         = sp.cs;
-      ly.minlen     = sp.minlen;
-      ly.ext        = sp.ext;
-      ly.wide_clear = sp.wide;
+      ly.name          = sp.name;
+      ly.horiz         = sp.horiz;
+      ly.w             = sp.w;
+      ly.spacing       = sp.spacing;
+      ly.e2e           = sp.e2e;
+      ly.cs            = sp.cs;
+      ly.minlen        = sp.minlen;
+      ly.min_area      = sp.min_area;
+      ly.ext           = sp.ext;
+      ly.wide_clear    = sp.wide;
+      ly.bump          = sp.bump;
+      ly.width_spacing = sp.width_spacing;
       std::set<int> coords;
       for (const auto& t : fp.tracks) {
         if (t.layer == sp.name && t.axis == (ly.horiz ? "Y" : "X")) {
@@ -688,47 +994,129 @@ struct Router {
         ly.pitch = std::min(ly.pitch, ly.tc[i] - ly.tc[i - 1]);
       }
       if (ly.tc.size() == 1) {
-        const auto& layer = tech.layers.at(sp.name);
-        ly.pitch          = int(std::llround((ly.horiz ? layer.pitch_y : layer.pitch_x) * fp.dbu));
+        ly.pitch = sp.pitch;
+      }
+      if (ly.pitch <= 0) {
+        throw std::runtime_error("missing positive track pitch for " + ly.name);
       }
       ly.tr.resize(ly.tc.size());
       L.push_back(std::move(ly));
     }
-    L[0].cost = opt.m2_cost;
-    L[1].cost = opt.m3_cost;
-    L[4].cost = L[5].cost = opt.hi_cost;
-    opt.hmin              = std::min({1.0, opt.m2_cost, opt.m3_cost, opt.hi_cost});
-    struct Cspec {
-      const char *name, *via;
-      int         hx, hy, space;
-    };
-    const Cspec cs[] = {
-        {"V1", "VIA12",  9,  9, 18},
-        {"V2", "VIA23",  9,  9, 18},
-        {"V3", "VIA34",  9, 12, 34},
-        {"V4", "VIA45", 12, 12, 34},
-        {"V5", "VIA56", 12, 16, 34},
-        {"V6", "VIA67", 16, 16, 34}
-    };
-    for (const auto& c : cs) {
+    if (L.size() < 2) {
+      throw std::runtime_error("the router needs two routed layers above the pin layer");
+    }
+    if (L.size() > 8) {
+      throw std::runtime_error("the router serves at most eight routed layers");
+    }
+    if (!L[0].horiz) {
+      throw std::runtime_error("the router needs the first routed layer (" + L[0].name + ") to run along the rows");
+    }
+    for (size_t l = 0; l < L.size(); ++l) {
+      const auto& ly = L[l];
+      if (l > 0 && ly.horiz == L[l - 1].horiz) {
+        throw std::runtime_error("neighbouring routed layers must cross: " + L[l - 1].name + " and " + ly.name);
+      }
+      // A via pad may be wider than its wire. Beside it, a wire of the next track must still keep the spacing.
+      if (ly.tc.size() > 1 && ly.pitch - ly.w - ly.bump < ly.spacing) {
+        throw std::runtime_error("the tracks of " + ly.name + " are " + std::to_string(ly.pitch) + " database units apart: a "
+                                 + std::to_string(ly.w) + " wide wire, " + std::to_string(ly.bump)
+                                 + " of via pad beside it and the spacing of " + std::to_string(ly.spacing)
+                                 + " do not fit (do the DEF tracks and units match the technology LEF?)");
+      }
+    }
+    unit      = L[0].pitch / 36.0;
+    bucket    = std::max(grid, u(256));
+    if (!tunings_scaled) {  // lengths given as options are in the units of a 36-unit track pitch
+      tunings_scaled     = true;
+      opt.via_cost      *= unit;
+      opt.margin         = u(opt.margin);
+      opt.space_min_len  = u(opt.space_min_len);
+    }
+    L[0].cost = opt.m2_cost;  // the two layers pins escape through carry their own costs
+    if (L.size() > 1) {
+      L[1].cost = opt.m3_cost;
+    }
+    opt.hmin = 1.0;
+    for (size_t l = 0; l < L.size(); ++l) {
+      if (l >= 4) {
+        L[l].cost = opt.hi_cost;  // the thick layers at the top
+      }
+      opt.hmin = std::min(opt.hmin, L[l].cost);
+    }
+    opt.hmin = std::min({opt.hmin, opt.m2_cost, opt.m3_cost, opt.hi_cost});
+    for (const auto& c : stack.cuts) {
       Cut_layer cl;
-      cl.name  = c.name;
-      cl.via   = c.via;
-      cl.hx    = c.hx;
-      cl.hy    = c.hy;
-      cl.space = c.space;
-      far_run  = std::max(far_run, cl.space + 2 * std::max(cl.hx, cl.hy));
-      if (far_run > 127) {
+      cl.name      = c.name;
+      cl.via       = c.via;
+      cl.hx        = c.hx;
+      cl.hy        = c.hy;
+      cl.space     = c.space;
+      cl.lower_pad = c.lower_pad;
+      cl.upper_pad = c.upper_pad;
+      far_run      = std::max(far_run, cl.space + 2 * std::max(cl.hx, cl.hy));
+      if (far_run > 4095) {
         throw std::runtime_error("cut spacing too wide for the search key");
       }
       CL.push_back(std::move(cl));
     }
+    for (size_t l = 0; l < L.size(); ++l) {
+      auto&      ly  = L[l];
+      const auto eff = [&](const ph::Rect& pad) {
+        const int64_t across = int64_t(ly.horiz ? pad.yh - pad.yl : pad.xh - pad.xl);
+        const int64_t along  = int64_t(ly.horiz ? pad.xh - pad.xl : pad.yh - pad.yl);
+        const int64_t beside = std::max<int64_t>(0, across - ly.w) * along;  // pad area outside the wire strip
+        if (ly.min_area <= 0 || beside <= 0) {
+          return ly.minlen;
+        }
+        const int need = on_grid(int((std::max<int64_t>(0, ly.min_area - beside) + ly.w - 1) / ly.w));
+        return std::clamp(need, std::min(ly.minlen, 2 * ly.ext), ly.minlen);
+      };
+      ly.minlen_dn = eff(CL[l].upper_pad);
+      ly.minlen_up = l + 1 < L.size() ? eff(CL[l + 1].lower_pad) : ly.minlen;
+    }
+    // How far along the first layer a pin's way up may be from the pin. Where a via pad is as wide as its wire the pins
+    // share tracks and a jog to a free column three tracks away is normal. Where pads are wider (sky130), a jog holds
+    // the one track the neighbouring pins can land on, so the way up is at the pin or half a pitch from it.
+    esc_win = L[0].bump > 0 ? L[1].pitch / 2 : 3 * L[1].pitch;
+    for (auto& ly : L) {
+      any_bump  = any_bump || ly.bump > 0;
+      ly.die_lo = int(std::lround(ly.horiz ? fp.die.xl : fp.die.yl));
+      ly.die_hi = int(std::lround(ly.horiz ? fp.die.xh : fp.die.yh));
+    }
+    esc_min0 = std::min(L[0].minlen_dn, L[0].minlen_up);
+    // Where via pads are wider than the wire, pins of one cell sit a pad and a spacing apart on one track: what a
+    // pin has to hold there is its landing pad alone. It leaves by that track or by a jog to the next one.
+    esc_pad_only = L[0].bump > 0;
+    if (esc_pad_only) {
+      esc_min0 = std::min(esc_min0, 2 * jog_pad_half());
+    }
+    esc_min1 = L.size() > 1 ? L[1].minlen_dn : 0;
+    pads.assign(L.size(), {});
+    own_margin = u(240);
+    for (const auto& ly : L) {
+      own_margin = std::max(own_margin, ly.wide_clear + ly.bump + ly.w + ly.cs + ly.e2e);
+    }
+    tile   = 32 * L[0].pitch;
+    cbin_w = 4 * site;
+    cbin_h = row_h;
+    if (opt.verbose) {
+      std::cerr << "technology: pins on " << pin_layer << ", site " << site << " by " << row_h << ", grid " << grid << '\n';
+      for (size_t l = 0; l < L.size(); ++l) {
+        const auto& ly = L[l];
+        std::cerr << "  " << ly.name << (ly.horiz ? " H" : " V") << " w " << ly.w << " pitch " << ly.pitch << " e2e " << ly.e2e
+                  << " cs " << ly.cs << " minlen " << ly.minlen << " ext " << ly.ext << " wide " << ly.wide_clear << " bump "
+                  << ly.bump << "; " << CL[l].via << " cut " << 2 * CL[l].hx << 'x' << 2 * CL[l].hy << " space " << CL[l].space
+                  << '\n';
+      }
+    }
     // stops
     for (size_t l = 0; l < L.size(); ++l) {
       std::set<int> st;
-      if (l == 0) {  // V1 sites: the M1 grid and its half positions
-        const auto& m3 = L[1].tc;
-        for (int x = m3.front() - 18; x <= m3.back() + 18; x += 18) {
+      if (l == 0) {  // where a via may land on a pin: the tracks of the layer above and the positions half way
+        const auto& above = L[1].tc;
+        const int   half  = std::max(grid, L[1].pitch / 2 / grid * grid);
+        pin_step          = half;
+        for (int x = above.front() - half; x <= above.back() + half; x += half) {
           st.insert(x);
         }
       } else {
@@ -904,7 +1292,7 @@ struct Router {
           // A row split around a macro closes a stretch that holds the macro: the stretch takes what is still free
           // of it, and a macro under a closed stretch has nothing left to take.
           const auto m = tech.macros.find(fp.components[i].macro.str());
-          if (gap_width.contains(int(i)) || (m != tech.macros.end() && m->second.height * fp.dbu > 270 + 1)) {
+          if (gap_width.contains(int(i)) || (m != tech.macros.end() && m->second.height * fp.dbu > row_h + 1)) {
             auto&     sites = occupied[cinfo[i].gy];
             int       at    = cinfo[i].gx;
             const int end   = cinfo[i].gx + cinfo[i].w;
@@ -936,7 +1324,7 @@ struct Router {
           }
           const int  x = ci.gx, y = ci.gy, end = x + ci.w;
           const auto row = row_span.find(y);
-          if (row == row_span.end() || x < row->second.first || end > row->second.second || (x - row->second.first) % 54) {
+          if (row == row_span.end() || x < row->second.first || end > row->second.second || (x - row->second.first) % site) {
             continue;
           }
           const auto& c = fp.components[i];
@@ -1140,9 +1528,9 @@ struct Router {
         const auto   pins    = std::count_if(m->second.pins.begin(), m->second.pins.end(), [](const auto& pin) {
           return pin.second.use != "POWER" && pin.second.use != "GROUND";
         });
-        const double site_um = 54.0 / fp.dbu, row_um = m->second.height;
-        const double requested = std::ceil(pins / (opt.pin_footprint * site_um * row_um)) * 54;
-        const int    need      = int(std::min(requested, double(cinfo[c].w) + 8 * 54));
+        const double site_um = double(site) / fp.dbu, row_um = m->second.height;
+        const double requested = std::ceil(pins / (opt.pin_footprint * site_um * row_um)) * site;
+        const int    need      = int(std::min(requested, double(cinfo[c].w) + 8 * site));
         if (need > cinfo[c].w) {
           roomy.emplace_back(int(c), cinfo[c].w);
           cinfo[c].w = need;
@@ -1313,7 +1701,7 @@ struct Router {
       // the nearest landing. Every shorter trial must still meet the layer's
       // minimum length together with the LEF pin and pass the same spacing test.
       const int  shortest = std::max(ly.ext, ly.minlen - (ahi - alo));
-      for (int reach : {200, 120, std::max(shortest, ly.pitch), shortest}) {
+      for (int reach : {on_grid(u(200)), on_grid(u(120)), on_grid(std::max(shortest, ly.pitch)), on_grid(shortest)}) {
         if (done) {
           break;
         }
@@ -1397,12 +1785,27 @@ struct Router {
       for (const int u : order) {
         int fl, fh;
         if (free_range(la, u, ni, pc, fl, fh) && cut_ok(std::max(int(l), la), ly.horiz ? a.tc[u] : pc, ly.horiz ? pc : a.tc[u], ni)
-            && keep_piece(la, u, pc - 150, pc + 150, pc, ni)) {
-          pin_keeps[ni].push_back({la, u, pc - 150, pc + 150});
+            && keep_piece(la, u, pc - this->u(150), pc + this->u(150), pc, ni)) {
+          pin_keeps[ni].push_back({la, u, pc - this->u(150), pc + this->u(150)});
           ++stat["edge_pin_landings_kept"];
           break;
         }
       }
+    }
+  }
+  void guard_pin_metal(Layer& ly, int plo, int phi, int alo, int ahi, int net) {
+    const int half = ly.w / 2, spacing = wide_spacing(ly, std::min(phi - plo, ahi - alo));
+    auto track = std::lower_bound(ly.tc.begin(), ly.tc.end(), plo - half - spacing);
+    for (; track != ly.tc.end() && *track <= phi + half + spacing; ++track) {
+      const int gap = std::max({0, plo - (*track + half), *track - half - phi});
+      if (gap >= spacing) {
+        continue;
+      }
+      const int margin = int(std::ceil(std::sqrt(int64_t(spacing) * spacing - int64_t(gap) * gap))) - 1;
+      auto& tr = ly.tr[track - ly.tc.begin()];
+      tr.pin_clearance.push_back({alo - margin, ahi + margin, net});
+      tr.pin_clearance_sorted = false;
+      tr.max_pin_span = std::max(tr.max_pin_span, ahi - alo + 2 * margin);
     }
   }
   void attach_cell(int c) {
@@ -1428,6 +1831,11 @@ struct Router {
           const int alo = int(ly.horiz ? r.xl : r.yl), ahi = int(ly.horiz ? r.xh : r.yh);
           const int t2 = find(ly.tc, (plo + phi) / 2);
           if (t2 < 0 || phi - plo != ly.w) {
+            // Extra pin rectangles are not routed segments. Reserve their clearance for both vias and track wires.
+            if (ly.bump > 0) {
+              pad_metal(int(l), {int(r.xl), int(r.yl), int(r.xh), int(r.yh), ni}, true);
+              guard_pin_metal(ly, plo, phi, alo, ahi, ni);
+            }
             continue;
           }
           if (!direct) {
@@ -1525,7 +1933,7 @@ struct Router {
     tracks                = double(std::lower_bound(m2.tc.begin(), m2.tc.end(), (ty + 1) * tile)
                                    - std::lower_bound(m2.tc.begin(), m2.tc.end(), ty * tile));
     const double free_len = std::max(1.0, (tracks - tile_metal(tx, ty, true, false, 0)) * tile);
-    return tile_pins[size_t(ty) * tnx + tx] / (free_len / 72.0);
+    return tile_pins[size_t(ty) * tnx + tx] / (free_len / (2.0 * L[1].pitch));
   }
   // Cost in nm of putting one more cell at (x, y): crowded tiles push the choice elsewhere.
   double tile_pen(int x, int y) const {
@@ -1608,7 +2016,7 @@ struct Router {
 
   // Fine 4-site by 1-row grid counting unrouted signal pins on shared-track cells, so passing M2/M3 wires can pay extra
   // directly over cells whose shared-track pins are still waiting to escape, and pay nothing once those pins are out.
-  static constexpr int cbin_w = 216, cbin_h = 270;
+  int cbin_w = 0, cbin_h = 0;  // four sites by one row, set with the technology
   int                  cbnx = 1, cbny = 1;
   std::vector<int16_t> cell_unrouted;
   void                 cell_grid_init() {
@@ -1623,7 +2031,7 @@ struct Router {
     if (cell_unrouted.empty() || delta == 0) {
       return;
     }
-    const int by  = std::clamp((y + 135) / cbin_h, 0, cbny - 1);
+    const int by  = std::clamp((y + row_h / 2) / cbin_h, 0, cbny - 1);
     const int bx0 = std::clamp(x / cbin_w, 0, cbnx - 1);
     const int bx1 = std::clamp(std::max(x, x + w - 1) / cbin_w, 0, cbnx - 1);
     for (int bx = bx0; bx <= bx1; ++bx) {
@@ -1691,7 +2099,7 @@ struct Router {
     auto&       comp   = fp.components[c];
     const auto& master = tech.macros.at(comp.macro.str());
     const auto  keep   = comp.place;
-    const int   w = cinfo[c].w, site = 54;
+    const int   w = cinfo[c].w;
     const int   base = int(std::lower_bound(row_ys.begin(), row_ys.end(), ay) - row_ys.begin());
     for (int k = 0; k < int(row_ys.size()); ++k) {
       bool any_row = false;
@@ -1834,11 +2242,11 @@ struct Router {
     std::vector<double> cap(tiles, 0.0);
     for (int y : row_ys) {
       const auto sp       = row_span.at(y);
-      const int  ty       = std::clamp((y + 135) / tile, 0, tny - 1);
+      const int  ty       = std::clamp((y + row_h / 2) / tile, 0, tny - 1);
       int        at       = sp.first;
       const auto free_run = [&](int lo, int hi) {
         for (int tx = std::clamp(lo / tile, 0, tnx - 1); tx <= std::clamp((hi - 1) / tile, 0, tnx - 1) && hi > lo; ++tx) {
-          cap[size_t(ty) * tnx + tx] += 270.0 * std::max(0, std::min(hi, (tx + 1) * tile) - std::max(lo, tx * tile));
+          cap[size_t(ty) * tnx + tx] += double(row_h) * std::max(0, std::min(hi, (tx + 1) * tile) - std::max(lo, tx * tile));
         }
       };
       for (int k : row_cells[y]) {
@@ -1853,8 +2261,8 @@ struct Router {
       if (!cinfo[c].settled) {
         cells.push_back(int(c));
         px.push_back(cinfo[c].gx + cinfo[c].w / 2.0);
-        py.push_back(cinfo[c].gy + 135.0);
-        area.push_back(cinfo[c].w * 270.0);
+        py.push_back(cinfo[c].gy + row_h / 2.0);
+        area.push_back(double(cinfo[c].w) * row_h);
       }
     }
     if (cells.empty()) {
@@ -1908,7 +2316,7 @@ struct Router {
     double moved = 0;
     for (size_t k = 0; k < cells.size(); ++k) {
       const int c  = cells[k];
-      const int gx = int(std::lround(px[k] - cinfo[c].w / 2.0)), gy = int(std::lround(py[k] - 135.0));
+      const int gx = int(std::lround(px[k] - cinfo[c].w / 2.0)), gy = int(std::lround(py[k] - row_h / 2.0));
       moved       += std::abs(gx - cinfo[c].gx) + std::abs(gy - cinfo[c].gy);
       cinfo[c].gx  = gx;
       cinfo[c].gy  = gy;
@@ -1922,13 +2330,13 @@ struct Router {
   bool upper_metal(int c) const {
     const auto& m = tech.macros.at(fp.components[c].macro.str());
     for (const auto& o : m.obstructions) {
-      if (o.layer != "M1" && (o.layer[0] == 'M' || o.layer[0] == 'V')) {
+      if (above_pins(o.layer)) {
         return true;
       }
     }
     for (const auto& [pn, pp] : m.pins) {
       for (const auto& sh : pp.shapes) {
-        if (sh.layer != "M1") {
+        if (above_pins(sh.layer)) {
           return true;
         }
       }
@@ -2076,7 +2484,7 @@ struct Router {
     int lo, hi;
     plan_bounds(c, lo, hi);
     hi          -= cinfo[c].w;
-    const int y = plan_y[c], site = 54, x0 = row_span.at(y).first;
+    const int y = plan_y[c], x0 = row_span.at(y).first;
     if (lo > hi) {
       if (stat["settle_fail_bounds"]++ < 3) {
         std::cerr << "settle bounds " << fp.components[c].name.str() << " row " << y << " lo " << lo << " hi " << hi << " w "
@@ -2150,7 +2558,7 @@ struct Router {
       return false;
     }
     auto&     comp = fp.components[c];
-    const int x = int(comp.place.x), y = int(comp.place.y), site = 54;
+    const int x = int(comp.place.x), y = int(comp.place.y);
     const int reach = cinfo[c].clock_sink ? opt.flop_reach * site : 3 * tile;
     if (reach == 0) {
       return false;
@@ -2205,12 +2613,12 @@ struct Router {
     if (s3 < 0) {
       return false;
     }
-    auto it = std::lower_bound(m2.stops.begin(), m2.stops.end(), std::max(fl, cd.x - 144));
-    for (; it != m2.stops.end() && *it <= std::min(fh, cd.x + 144); ++it) {
+    auto it = std::lower_bound(m2.stops.begin(), m2.stops.end(), std::max(fl, cd.x - esc_win - L[1].pitch));
+    for (; it != m2.stops.end() && *it <= std::min(fh, cd.x + esc_win + L[1].pitch); ++it) {
       const int t3 = m2.stop_up[it - m2.stops.begin()];
       int       gl, gh;
-      if (t3 >= 0 && cut_ok(1, *it, cd.y, ni) && free_range(1, t3, ni, L[1].stops[s3], gl, gh)
-          && gh - gl + 2 * L[1].ext >= L[1].minlen) {
+      if (t3 >= 0 && cut_ok(1, *it, m2.tc[cd.t], ni) && free_range(1, t3, ni, L[1].stops[s3], gl, gh)
+          && gh - gl + 2 * L[1].ext >= L[1].minlen_dn) {
         return true;
       }
     }
@@ -2253,10 +2661,10 @@ struct Router {
       ph::Rect              hull{1e18, 1e18, -1e18, -1e18};
       bool                  upper = false;
       for (const auto& s : pdef.shapes) {
-        if (s.layer == "M1") {
+        if (s.layer == pin_layer) {
           rs.push_back(ph::placed_rect(m, pose, fp.dbu, s.rect));
           hull = hull.hull(rs.back());
-        } else if (s.layer[0] == 'M') {
+        } else if (tech_metal(s.layer)) {
           upper = true;
         }
       }
@@ -2267,7 +2675,8 @@ struct Router {
       auto    t0 = std::lower_bound(m2.tc.begin(), m2.tc.end(), int(hull.yl));
       for (; t0 != m2.tc.end() && *t0 <= hull.yh; ++t0) {
         for (const auto& r : rs) {
-          if (r.yl <= *t0 - 11 && r.yh >= *t0 + 11 && r.xh - r.xl >= 18) {
+          if (r.yl <= *t0 + CL[0].lower_pad.yl && r.yh >= *t0 + CL[0].lower_pad.yh
+              && r.xh - r.xl >= CL[0].lower_pad.xh - CL[0].lower_pad.xl) {
             pc.tracks.push_back(int(t0 - m2.tc.begin()));
             break;
           }
@@ -2342,9 +2751,9 @@ struct Router {
         continue;
       }
       Undo u;
-      bool ok = place(0, e.t2, e.lo2, e.hi2, owner, u);
+      bool ok = place(0, e.t2, e.lo2, e.hi2, owner, u, esc_min0);
       if (ok && e.t3 >= 0) {
-        ok = place(1, e.t3, e.lo3, e.hi3, owner, u);
+        ok = place(1, e.t3, e.lo3, e.hi3, owner, u, esc_min1);
       }
       if (!ok) {
         restore(u);
@@ -2389,10 +2798,31 @@ struct Router {
     const auto& m3  = L[1];
     for (size_t pi = 0; pi < net.pins.size(); ++pi) {
       const auto& p = net.pins[pi];
-      if (p.comp < 0 || !cinfo[p.comp].reserved || p.used < 0 || size_t(p.used) >= p.cands.size() || !p.cands[p.used].v1) {
+      if (p.comp < 0 || !cinfo[p.comp].reserved || p.used < 0 || size_t(p.used) >= p.cands.size() || !p.cands[p.used].v1
+          || (p.cands[p.used].jog != 0 && !esc_pad_only)) {
         continue;
       }
       const Cand& cd  = p.cands[size_t(p.used)];
+      if (esc_pad_only) {
+        const int half = jog_pad_half();
+        auto&     sv   = esc_saved[ni];
+        sv.erase(std::remove_if(sv.begin(), sv.end(), [&](const Esc_item& e) { return e.c == p.comp && e.pin == int(pi); }),
+                 sv.end());
+        sv.push_back({p.comp,
+                      int(pi),
+                      int(fp.components[p.comp].place.x),
+                      int(fp.components[p.comp].place.y),
+                      cd.t - cd.jog,
+                      cd.x - half,
+                      cd.x + half,
+                      cd.x,
+                      cd.y,
+                      -1,
+                      0,
+                      0,
+                      0});
+        continue;
+      }
       const Seg*  sg2 = nullptr;
       for (const auto& sg : m2.tr[cd.t].s) {
         if (sg.net == ni && sg.lo <= cd.x && cd.x <= sg.hi) {
@@ -2403,10 +2833,10 @@ struct Router {
       if (!sg2) {
         continue;
       }
-      int lo2 = std::max(sg2->lo, cd.x - 108 - m2.ext), hi2 = std::min(sg2->hi, cd.x + 108 + m2.ext);
-      if (hi2 - lo2 < m2.minlen) {
-        lo2 = std::max(sg2->lo, std::min(lo2, sg2->hi - m2.minlen));
-        hi2 = std::min(sg2->hi, lo2 + m2.minlen);
+      int lo2 = std::max(sg2->lo, cd.x - esc_win - m2.ext), hi2 = std::min(sg2->hi, cd.x + esc_win + m2.ext);
+      if (hi2 - lo2 < esc_min0) {
+        lo2 = std::max(sg2->lo, std::min(lo2, sg2->hi - esc_min0));
+        hi2 = std::min(sg2->hi, lo2 + esc_min0);
       }
       int t3 = -1, x3 = 0, lo3 = 0, hi3 = 0;
       for (const auto& v : net.vias) {
@@ -2419,11 +2849,11 @@ struct Router {
             if (sg.net == ni && sg.lo <= cd.y && cd.y <= sg.hi) {
               t3  = tk3;
               x3  = v.x;
-              lo3 = std::max(sg.lo, cd.y - 120 - m3.ext);
-              hi3 = std::min(sg.hi, cd.y + 120 + m3.ext);
-              if (hi3 - lo3 < m3.minlen) {
-                lo3 = std::max(sg.lo, std::min(lo3, sg.hi - m3.minlen));
-                hi3 = std::min(sg.hi, lo3 + m3.minlen);
+              lo3 = std::max(sg.lo, cd.y - u(120) - m3.ext);
+              hi3 = std::min(sg.hi, cd.y + u(120) + m3.ext);
+              if (hi3 - lo3 < esc_min1) {
+                lo3 = std::max(sg.lo, std::min(lo3, sg.hi - esc_min1));
+                hi3 = std::min(sg.hi, lo3 + esc_min1);
               }
               break;
             }
@@ -2491,26 +2921,55 @@ struct Router {
       };
       std::vector<Scored> scored;
       for (const auto& cd : cands) {
-        if (cd.L != 0 || !cd.v1) {
+        if (cd.L != 0 || !cd.v1 || cd.jog != 0) {
+          continue;
+        }
+        if (esc_pad_only) {
+          const int half = jog_pad_half();
+          int       fl, fh;
+          free_range(0, cd.t, n2, cd.x, fl, fh);
+          const bool room = cd.x >= fl - m2.ext + half && cd.x <= fh + m2.ext - half;
+          if (!room || !cut_ok(0, cd.x, cd.y, n2)) {
+            if (esc_trace) {
+              std::cerr << "    cand x " << cd.x << " y " << cd.y << (room ? " pad fits" : " no room for the pad") << " cut "
+                        << cut_ok(0, cd.x, cd.y, n2) << '\n';
+            }
+            continue;
+          }
+          if (std::none_of(scored.begin(), scored.end(), [&](const Scored& s) { return s.item.x1 == cd.x && s.item.t2 == cd.t; })) {
+            scored.push_back({
+                std::abs(cd.x - m2.stops[cd.s]),
+                {c, pi, cell_x, cell_y, cd.t, cd.x - half, cd.x + half, cd.x, cd.y, -1, 0, 0, 0}
+            });
+          }
           continue;
         }
         int fl2, fh2;
         if (!free_range(0, cd.t, n2, m2.stops[cd.s], fl2, fh2) || cd.x < fl2 || cd.x > fh2 || !cut_ok(0, cd.x, cd.y, n2)) {
+          if (esc_trace) {
+            const bool fr = free_range(0, cd.t, n2, m2.stops[cd.s], fl2, fh2);
+            std::cerr << "    cand x " << cd.x << " y " << cd.y << " stop " << m2.stops[cd.s] << (fr ? " free " : " track-blocked ")
+                      << (fr ? fl2 : 0) << ".." << (fr ? fh2 : 0) << " cut " << cut_ok(0, cd.x, cd.y, n2) << '\n';
+          }
           continue;
         }
         const int s3 = m2.tk_up[cd.t];
         if (s3 < 0) {
           continue;
         }
-        auto it = std::lower_bound(m2.stops.begin(), m2.stops.end(), std::max(fl2, cd.x - 108));
-        for (; it != m2.stops.end() && *it <= std::min(fh2, cd.x + 108); ++it) {
+        auto it = std::lower_bound(m2.stops.begin(), m2.stops.end(), std::max(fl2, cd.x - esc_win));
+        for (; it != m2.stops.end() && *it <= std::min(fh2, cd.x + esc_win); ++it) {
           const int t3 = m2.stop_up[it - m2.stops.begin()];
           if (t3 < 0) {
             continue;
           }
           const int x3 = *it;
           int       fl3, fh3;
-          if (!cut_ok(1, x3, cd.y, n2) || !free_range(1, t3, n2, m3.stops[s3], fl3, fh3) || fh3 - fl3 + 2 * m3.ext < m3.minlen) {
+          if (!cut_ok(1, x3, cd.y, n2) || !free_range(1, t3, n2, m3.stops[s3], fl3, fh3) || fh3 - fl3 + 2 * m3.ext < esc_min1) {
+            if (esc_trace) {
+              std::cerr << "    cand x " << cd.x << " y " << cd.y << " riser x " << x3 << " cut " << cut_ok(1, x3, cd.y, n2) << " free "
+                        << free_range(1, t3, n2, m3.stops[s3], fl3, fh3) << '\n';
+            }
             continue;
           }
           const int lo2      = std::min({cd.x, x3, m2.stops[cd.s]}) - m2.ext;
@@ -2518,8 +2977,8 @@ struct Router {
           bool      added_m4 = false;
           if (has_m4) {
             const auto& m4 = L[2];
-            auto        t4 = std::lower_bound(m4.tc.begin(), m4.tc.end(), std::max(fl3, cd.y - 120));
-            for (; t4 != m4.tc.end() && *t4 <= std::min(fh3, cd.y + 120); ++t4) {
+            auto        t4 = std::lower_bound(m4.tc.begin(), m4.tc.end(), std::max(fl3, cd.y - u(120)));
+            for (; t4 != m4.tc.end() && *t4 <= std::min(fh3, cd.y + u(120)); ++t4) {
               const int y4 = *t4;
               int       fl4, fh4;
               if (!cut_ok(2, x3, y4, n2) || !free_range(2, int(t4 - m4.tc.begin()), n2, x3, fl4, fh4)
@@ -2527,10 +2986,10 @@ struct Router {
                 continue;
               }
               int lo3 = std::min(cd.y, y4) - m3.ext, hi3 = std::max(cd.y, y4) + m3.ext;
-              if (hi3 - lo3 < m3.minlen) {
-                const int pad = (m3.minlen - (hi3 - lo3) + 1) / 2;
+              if (hi3 - lo3 < esc_min1) {
+                const int pad = (esc_min1 - (hi3 - lo3) + 1) / 2;
                 lo3           = std::max(fl3 - m3.ext, lo3 - pad);
-                hi3           = std::min(fh3 + m3.ext, lo3 + m3.minlen);
+                hi3           = std::min(fh3 + m3.ext, lo3 + esc_min1);
               }
               scored.push_back({
                   2 * std::abs(x3 - cd.x) + std::abs(y4 - cd.y),
@@ -2539,13 +2998,13 @@ struct Router {
               added_m4 = true;
             }
           }
-          if (!added_m4 && fh3 - fl3 >= 96) {
-            const int half = std::max(m3.ext, (m3.minlen + 1) / 2);
+          if (!added_m4 && fh3 - fl3 >= u(96)) {
+            const int half = std::max(m3.ext, (esc_min1 + 1) / 2);
             const int lo3  = std::max(fl3 - m3.ext, cd.y - half);
-            const int hi3  = std::min(fh3 + m3.ext, std::max(cd.y + half, lo3 + m3.minlen));
-            if (hi3 - lo3 >= m3.minlen) {
+            const int hi3  = std::min(fh3 + m3.ext, std::max(cd.y + half, lo3 + esc_min1));
+            if (hi3 - lo3 >= esc_min1) {
               scored.push_back({
-                  2 * std::abs(x3 - cd.x) + 160,
+                  2 * std::abs(x3 - cd.x) + u(160),
                   {c, pi, cell_x, cell_y, cd.t, lo2, hi2, cd.x, cd.y, t3, x3, lo3, hi3}
               });
             }
@@ -2553,6 +3012,9 @@ struct Router {
         }
       }
       if (scored.empty()) {
+        if (esc_trace) {
+          std::cerr << "  no escape for " << nets[n2].pins[pi].name << " of " << nets[n2].name << " from " << cands.size() << " candidates\n";
+        }
         return false;
       }
       std::stable_sort(scored.begin(), scored.end(), [](const Scored& a, const Scored& b) { return a.cost < b.cost; });
@@ -2585,7 +3047,8 @@ struct Router {
         if (e.t3 >= 0) {
           add_cut(1, e.x3, e.y2, owner);
         }
-        if (place(0, e.t2, e.lo2, e.hi2, owner, undo[depth]) && (e.t3 < 0 || place(1, e.t3, e.lo3, e.hi3, owner, undo[depth]))) {
+        if (place(0, e.t2, e.lo2, e.hi2, owner, undo[depth], esc_min0)
+            && (e.t3 < 0 || place(1, e.t3, e.lo3, e.hi3, owner, undo[depth], esc_min1))) {
           pick[depth] = int(k);
           if (dfs(depth + 1)) {
             return true;
@@ -2601,6 +3064,9 @@ struct Router {
     };
 
     const bool ok = dfs(0);
+    if (!ok && esc_trace) {
+      std::cerr << "  no joint assignment for " << idx.size() << " pins after " << nodes << " nodes\n";
+    }
     if (!ok || !commit_keeps) {
       if (ok) {
         for (size_t depth = idx.size(); depth-- > 0;) {
@@ -2677,7 +3143,7 @@ struct Router {
     std::vector<ph::Rect> rs;
     ph::Rect              hull{1e18, 1e18, -1e18, -1e18};
     for (const auto& s : m.pins.at(pin_name).shapes) {
-      if (s.layer == "M1") {
+      if (s.layer == pin_layer) {
         rs.push_back(ph::placed_rect(m, c.place, fp.dbu, s.rect));
         hull = hull.hull(rs.back());
       }
@@ -2695,30 +3161,36 @@ struct Router {
     p.cx           = int((hull.xl + hull.xh) / 2);
     p.cy           = int((hull.yl + hull.yh) / 2);
     const auto& m2 = L[0];
-    auto        t0 = std::lower_bound(m2.tc.begin(), m2.tc.end(), int(hull.yl));
+    // The landing of the pin via on the pin layer, as the LEF draws it: the via may sit wherever the pin metal covers it.
+    const auto& lp  = CL[0].lower_pad;
+    const auto  pad = [&](int x, int y) { return ph::Rect{x + lp.xl, y + lp.yl, x + lp.xh, y + lp.yh}; };
+    const auto  snap = [&](double v, bool up) { return int((up ? std::ceil(v / grid) : std::floor(v / grid))) * grid; };
+    std::vector<Cand> jogged;
+    auto        t0  = std::lower_bound(m2.tc.begin(), m2.tc.end(), int(hull.yl));
     for (; t0 != m2.tc.end() && *t0 <= hull.yh; ++t0) {
       // x positions whose landing pad is covered: grid stops first, else the centre of a covering bar
       std::vector<int> xs;
       auto             s0 = std::lower_bound(m2.stops.begin(), m2.stops.end(), int(hull.xl));
       for (; s0 != m2.stops.end() && *s0 <= hull.xh; ++s0) {
-        const ph::Rect pad{double(*s0 - 9), double(*t0 - 11), double(*s0 + 9), double(*t0 + 11)};
-        if (ph::rect_union_covers(pad, rs)) {
+        if (ph::rect_union_covers(pad(*s0, *t0), rs)) {
           xs.push_back(*s0);
         }
       }
       if (xs.empty()) {
         for (const auto& r : rs) {
-          if (r.yl <= *t0 - 11 && r.yh >= *t0 + 11 && r.xh - r.xl >= 18) {
-            xs.push_back(int(std::floor((r.xl + r.xh) / 2)));
+          if (r.yl <= *t0 + lp.yl && r.yh >= *t0 + lp.yh && r.xh - r.xl >= lp.xh - lp.xl) {
+            const int x = snap((r.xl + r.xh) / 2, false);
+            if (grid == 1 || ph::rect_union_covers(pad(x, *t0), rs)) {
+              xs.push_back(x);
+            }
           }
         }
       }
       if (p.extra_access) {
-        // Try additional covered V1 positions when a pin's usual landing is occupied.
+        // Try additional covered landing positions when a pin's usual landing is occupied.
         for (const auto& r : rs) {
-          for (int x : {int(std::ceil(r.xl)) + 9, int(std::floor((r.xl + r.xh) / 2)), int(std::floor(r.xh)) - 9}) {
-            const ph::Rect pad{double(x - 9), double(*t0 - 11), double(x + 9), double(*t0 + 11)};
-            if (std::find(xs.begin(), xs.end(), x) == xs.end() && ph::rect_union_covers(pad, rs)) {
+          for (int x : {snap(r.xl - lp.xl, true), snap((r.xl + r.xh) / 2, false), snap(r.xh - lp.xh, false)}) {
+            if (std::find(xs.begin(), xs.end(), x) == xs.end() && ph::rect_union_covers(pad(x, *t0), rs)) {
               xs.push_back(x);
             }
           }
@@ -2727,7 +3199,7 @@ struct Router {
       for (const int x : xs) {
         auto hi = std::lower_bound(m2.stops.begin(), m2.stops.end(), x);
         for (auto st : {hi, hi == m2.stops.begin() ? hi : hi - 1}) {
-          if (st == m2.stops.end() || std::abs(*st - x) >= 18) {
+          if (st == m2.stops.end() || std::abs(*st - x) >= pin_step) {
             continue;
           }
           Cand cd;
@@ -2739,12 +3211,24 @@ struct Router {
           cd.v1  = true;
           cd.cut = 0;
           p.cands.push_back(cd);
+          if (m2.bump > 0) {  // the same landing, leaving by the track above or below
+            for (int jog : {1, -1}) {
+              if (adjacent(0, cd.t, cd.t + jog)) {
+                cd.jog = jog;
+                cd.t  += jog;
+                jogged.push_back(cd);
+                cd.t  -= jog;
+                cd.jog = 0;
+              }
+            }
+          }
           if (*st == x) {
             break;
           }
         }
       }
     }
+    p.cands.insert(p.cands.end(), jogged.begin(), jogged.end());  // after the direct ones: those are preferred
   }
 
   // ---------- committing wires ----------
@@ -2764,9 +3248,13 @@ struct Router {
     return u >= 0 && u < int(L[l].tc.size()) && std::abs(L[l].tc[u] - L[l].tc[t]) <= L[l].pitch;
   }
   // Insert [lo, hi] for `net`: merge with its own pieces, keep R1, reach the minimum length and repair R2 by lengthening.
-  bool place(int l, int t, int lo, int hi, int net, Undo& undo) {
+  bool place(int l, int t, int lo, int hi, int net, Undo& undo, int min_len = -1) {
     auto& ly = L[l];
-    auto& T  = ly.tr[t].s;
+    auto& track = ly.tr[t];
+    auto& T = track.s;
+    if (min_len < 0) {
+      min_len = ly.minlen;
+    }
     for (int round = 0; round < 8; ++round) {
       bool changed = false;
       // R1 and merging
@@ -2790,9 +3278,15 @@ struct Router {
           }
         }
       }
-      if (hi - lo < ly.minlen) {  // R3: lengthen toward the side with room
-        int need    = ly.minlen - (hi - lo);
-        int room_hi = INT32_MAX / 2, room_lo = INT32_MAX / 2;
+      int fl = -(1 << 28), fh = 1 << 28;
+      clip_pin_clearance(track, net, lo, 0, fl, fh);
+      if (lo < fl || hi > fh) {
+        ++stat["reject_pin_metal_" + ly.name];
+        return false;
+      }
+      if (hi - lo < min_len) {  // R3: lengthen toward the side with room
+        int need    = min_len - (hi - lo);
+        int room_hi = std::min(fh, ly.die_hi) - hi, room_lo = lo - std::max(fl, ly.die_lo);
         for (const auto& s : T) {
           if (s.net == net || own_keep(s.net, net)) {
             continue;
@@ -2853,7 +3347,7 @@ struct Router {
       t->s = std::move(v);
     }
     for (const auto& c : undo.cuts) {
-      del_cut(c.cl, c.x, c.y, -9);
+      del_cut(c.cl, c.x, c.y, provisional);
     }
   }
 
@@ -2875,11 +3369,16 @@ struct Router {
     return !exact_runs ? id : std::abs(delta) > far_run ? id | far_bit : id | (int64_t(delta + far_run) << 48);
   }
   int                      far_run = 0;  // run length past which no cut of the run's first via can clash
+  // How far back along its own path a via looks for another cut of the same layer.
+  int                      clash_reach() const { return std::max(u(160), 2 * far_run); }
   std::vector<const Cand*> goal_cands;
+  double                   run_began  = -1;       // CPU time the routing loop started at, for the time limit
+  const std::vector<Cand>* search_src = nullptr;  // the candidates the running search started from, and its net
+  int                      search_net = -1;
   bool                     goal_cut_clash(int64_t id) {
     const Cand* c = nullptr;
     for (const auto* g : goal_cands) {
-      if (sid(g->L, g->t, g->s) == (id & id_mask)) {
+      if (sid(g->L, g->t, g->s) == (id & id_mask) && (!c || g->jog == 0 || c->jog != 0)) {
         c = g;
       }
     }
@@ -2890,14 +3389,24 @@ struct Router {
     int64_t     at = id;
     for (int step = 0; step < 16; ++step) {
       const int64_t pa = node.find(at)->parent;
-      if (pa < 0) {
+      if (pa < 0) {  // the source state: its pin's via and the goal's may face each other along one wire
+        if (any_bump && search_src) {
+          for (const auto& sc : *search_src) {
+            if (sid(sc.L, sc.t, sc.s) == (at & id_mask) && cand_ok(search_net, sc)) {
+              if (sc.cut >= 0 && pads_notch(sc.cut, sc.x, sc.y, c->cut, c->x, c->y)) {
+                return true;
+              }
+              break;
+            }
+          }
+        }
         break;
       }
       int la, ta, sa, lb, tb, sb, xa, ya;
       unsid(at & id_mask, la, ta, sa);
       unsid(pa & id_mask, lb, tb, sb);
       xy(la, ta, sa, xa, ya);
-      if (std::abs(xa - c->x) + std::abs(ya - c->y) > 160) {
+      if (std::abs(xa - c->x) + std::abs(ya - c->y) > clash_reach()) {
         break;
       }
       if (la != lb && std::max(la, lb) == c->cut && (xa != c->x || ya != c->y)) {
@@ -2906,12 +3415,17 @@ struct Router {
           return true;
         }
       }
+      if (la != lb && pads_notch(c->cut, c->x, c->y, std::max(la, lb), xa, ya)) {
+        return true;
+      }
       at = pa;
     }
     return false;
   }
   bool search(int ni, const std::vector<Cand>& src, const Window& w, const Window& goal, std::vector<int64_t>& path) {
     node.clear();
+    search_src = &src;
+    search_net = ni;
     using Item = std::pair<float, int64_t>;
     std::priority_queue<Item, std::vector<Item>, std::greater<>> pq;
     int src_xl = INT32_MAX, src_yl = INT32_MAX, src_xh = INT32_MIN, src_yh = INT32_MIN;
@@ -2989,7 +3503,7 @@ struct Router {
       const int a = L[c.L].stops[c.s];
       xy(c.L, c.t, c.s, sx, sy);
       free_range(c.L, c.t, ni, a, fl, fh);
-      push(run_key(sid(c.L, c.t, c.s), 0), c.L, 0, -1, sx, sy, a, fl, fh);
+      push(run_key(sid(c.L, c.t, c.s), 0), c.L, c.jog != 0 ? via_cost : 0.0F, -1, sx, sy, a, fl, fh);
     }
     int64_t budget = search_budget > 0 ? search_budget : opt.max_expand;
     while (!pq.empty()) {
@@ -3050,8 +3564,8 @@ struct Router {
           }
           if (l <= 1 && use_cell_cost) {
             if (const int cu = cell_unrouted[cbin_of(x2, y2)]; cu > 0) {
-              const bool near_src  = x2 >= src_xl - 162 && x2 <= src_xh + 162 && y2 >= src_yl - 135 && y2 <= src_yh + 135;
-              const bool near_goal = x2 >= goal.xl - 162 && x2 <= goal.xh + 162 && y2 >= goal.yl - 135 && y2 <= goal.yh + 135;
+              const bool near_src  = x2 >= src_xl - 3 * site && x2 <= src_xh + 3 * site && y2 >= src_yl - row_h / 2 && y2 <= src_yh + row_h / 2;
+              const bool near_goal = x2 >= goal.xl - 3 * site && x2 <= goal.xh + 3 * site && y2 >= goal.yl - row_h / 2 && y2 <= goal.yh + row_h / 2;
               if (!near_src && !near_goal) {
                 step *= float(1.0 + opt.cell_cost * double(std::min(cu, 4)));
               }
@@ -3078,7 +3592,7 @@ struct Router {
         if (!cut_ok(k, x, y, ni)) {
           continue;
         }
-        if (std::abs(a - n.entry) <= 160) {  // the path's own recent cuts on this cut layer; none this far into a run
+        if (std::abs(a - n.entry) <= clash_reach()) {  // the path's own recent cuts on this cut layer; none this far into a run
           bool    clash = false;
           int64_t at    = id;
           for (int step = 0; step < 16 && !clash; ++step) {
@@ -3091,6 +3605,7 @@ struct Router {
                     const int64_t dx = std::max(0, std::abs(c.x - x) - 2 * cl.hx), dy = std::max(0, std::abs(c.y - y) - 2 * cl.hy);
                     clash = dx * dx + dy * dy < int64_t(cl.space) * cl.space;
                   }
+                  clash = clash || (c.cut >= 0 && pads_notch(c.cut, c.x, c.y, k, x, y));
                   break;
                 }
               }
@@ -3100,7 +3615,7 @@ struct Router {
             unsid(at & id_mask, la, ta, sa);
             unsid(pa & id_mask, lb, tb, sb);
             xy(la, ta, sa, xa, ya);
-            if (std::abs(xa - x) + std::abs(ya - y) > 160) {
+            if (std::abs(xa - x) + std::abs(ya - y) > clash_reach()) {
               break;
             }
             if (la != lb && std::max(la, lb) == k && (xa != x || ya != y)) {
@@ -3108,6 +3623,7 @@ struct Router {
               const int64_t dx = std::max(0, std::abs(xa - x) - 2 * c.hx), dy = std::max(0, std::abs(ya - y) - 2 * c.hy);
               clash = dx * dx + dy * dy < int64_t(c.space) * c.space;
             }
+            clash = clash || (la != lb && pads_notch(std::max(la, lb), xa, ya, k, x, y));
             at = pa;
           }
           if (clash) {
@@ -3116,7 +3632,8 @@ struct Router {
         }
         int       gl, gh;
         const int a2 = L[l2].stops[s2];
-        if (!free_range(l2, t2, ni, a2, gl, gh) || gh - gl + 2 * L[l2].ext < L[l2].minlen) {
+        // The landing on the new layer carries this via: down from it when the path went up, up from it otherwise.
+        if (!free_range(l2, t2, ni, a2, gl, gh) || gh - gl + 2 * L[l2].ext < (d > 0 ? L[l2].minlen_dn : L[l2].minlen_up)) {
           continue;
         }
         push(run_key(sid(l2, t2, s2), 0), l2, g + via_cost, id, x, y, a2, gl, gh);
@@ -3137,7 +3654,7 @@ struct Router {
         return false;
       }
     }
-    return true;
+    return c.jog == 0 || jog_ok(ni, c);
   }
   uint8_t              mark_layers = 0;
   Window               mark_box{INT32_MAX, INT32_MAX, INT32_MIN, INT32_MIN};
@@ -3252,7 +3769,7 @@ struct Router {
         const int s2 = d > 0 ? ly.tk_up[t] : ly.tk_dn[t];
         int       gl, gh;
         if (t2 < 0 || s2 < 0 || !cut_ok(std::max(l, l2), x, y, ni) || !free_range(l2, t2, ni, L[l2].stops[s2], gl, gh)
-            || gh - gl + 2 * L[l2].ext < L[l2].minlen) {
+            || gh - gl + 2 * L[l2].ext < (d > 0 ? L[l2].minlen_dn : L[l2].minlen_up)) {
           continue;
         }
         const int64_t id2 = sid(l2, t2, s2);
@@ -3270,7 +3787,7 @@ struct Router {
     }
     return int(q.size()) < limit;
   }
-  std::vector<std::array<std::set<int>, 6>> touched;
+  std::vector<std::array<std::set<int>, 8>> touched;
   struct Term_seg {
     int net, l, t, lo, hi;
   };
@@ -3344,6 +3861,18 @@ struct Router {
       bool        already_owned = false;
       if (!cut_ok(v.cl, v.x, v.y, ni, &already_owned)) {
         ++stat["reject_cut_" + CL[v.cl].name];
+        if (opt.explain > 0 && stat["reject_cut_explained"]++ < 12) {
+          std::cerr << "commit of " << nets[ni].name << " rejects " << CL[v.cl].name << " at " << v.x << ',' << v.y << ": "
+                    << cut_why(v.cl, v.x, v.y, ni) << "; path vias";
+          for (const auto& pv : vias) {
+            std::cerr << ' ' << CL[pv.cl].name << '@' << pv.x << ',' << pv.y;
+          }
+          std::cerr << " runs";
+          for (const auto& r : runs) {
+            std::cerr << ' ' << L[r.l].name << ':' << L[r.l].tc[r.t] << '[' << r.lo << ',' << r.hi << ']';
+          }
+          std::cerr << '\n';
+        }
         for (const auto& r : runs) {  // forbid the runs that meet at this cut
           const int c = L[r.l].horiz ? v.x : v.y, tcoord = L[r.l].horiz ? v.y : v.x;
           if (L[r.l].tc[r.t] == tcoord && r.lo <= c && c <= r.hi && (r.l == v.cl || r.l + 1 == v.cl)) {
@@ -3355,17 +3884,49 @@ struct Router {
       if (already_owned) {
         continue;  // Two branches can meet at one via. Its original owner handles rip-up.
       }
-      add_cut(v.cl, v.x, v.y, -9);  // provisional owner so the path checks against itself
+      add_cut(v.cl, v.x, v.y, provisional);  // provisional owner so the path checks against itself
       undo.cuts.push_back(v);
     }
     for (const auto& r : runs) {
-      if (!place(r.l, r.t, r.lo - L[r.l].ext, r.hi + L[r.l].ext, ni, undo)) {
+      // The vias of this path on the run: their pads count toward its minimum area.
+      const auto& ly  = L[r.l];
+      int         min = ly.minlen;
+      if (ly.minlen_dn < ly.minlen || ly.minlen_up < ly.minlen) {
+        for (const auto& v : vias) {
+          const int c = ly.horiz ? v.x : v.y, tcoord = ly.horiz ? v.y : v.x;
+          if (ly.tc[r.t] == tcoord && r.lo <= c && c <= r.hi) {
+            min = std::min(min, v.cl == r.l ? ly.minlen_dn : v.cl == r.l + 1 ? ly.minlen_up : ly.minlen);
+          }
+        }
+      }
+      if (!place(r.l, r.t, r.lo - ly.ext, r.hi + ly.ext, ni, undo, min)) {
         ban_run(r.l, r.t, r.lo, r.hi);
         return false;
       }
     }
+    // A jogged access holds its via's track over the pad, and its piece across the tracks has to fit.
+    for (const Cand* c : {first, last}) {
+      if (!c || c->jog == 0) {
+        continue;
+      }
+      const int at = L[0].horiz ? c->x : c->y, half = jog_pad_half();
+      if (!place(0, c->t - c->jog, at - half, at + half, ni, undo, 2 * half) || !rect_clear(0, jog_bar(*c, ni), ni)) {
+        ++stat["reject_jog"];
+        ban_run(0, c->t, at, at);
+        return false;
+      }
+    }
+    for (const Cand* c : {first, last}) {
+      if (c && c->jog != 0) {
+        const auto bar = jog_bar(*c, ni);
+        pad_metal(0, bar, true);
+        net.bars.push_back(bar);
+        touched[ni][0].insert(c->t - c->jog);
+        ++stat["pin_jogs"];
+      }
+    }
     for (const auto& v : undo.cuts) {
-      del_cut(v.cl, v.x, v.y, -9);
+      del_cut(v.cl, v.x, v.y, provisional);
       add_cut(v.cl, v.x, v.y, ni);
       net.vias.push_back(v);
     }
@@ -3454,6 +4015,10 @@ struct Router {
       del_cut(v.cl, v.x, v.y, ni);
     }
     net.vias.clear();
+    for (const auto& bar : net.bars) {
+      pad_metal(0, bar, false);
+    }
+    net.bars.clear();
     for (auto& p : net.pins) {
       p.used = -1;
       p.conn = false;
@@ -3474,11 +4039,75 @@ struct Router {
     restore_esc_keeps(ni);
   }
 
+  // A port walled in on its own track (fixed metal beside the bar leaves no room for a via pad or for the wire to
+  // leave) gets a jog: a piece across the layer's direction from the bar to the next track, with a landing there.
+  // The jog is metal of the port from then on and is written with the net. At most two per port.
+  struct Jog {
+    int net, pin, l, t, ta, at;
+  };
+  std::vector<Jog> jogs;
+  bool             port_jog(int ni, int pi) {
+    const auto made = std::count_if(jogs.begin(), jogs.end(), [&](const Jog& j) { return j.net == ni && j.pin == pi; });
+    if (made >= 2) {
+      return false;
+    }
+    const auto bars = own[ni];  // copy: the jog adds to it
+    for (const auto& o : bars) {
+      if (o.pin != pi) {
+        continue;
+      }
+      auto& ly = L[o.l];
+      for (int ta : {o.t + 1, o.t - 1}) {
+        if (ta < 0 || ta >= int(ly.tc.size()) || std::abs(ly.tc[ta] - ly.tc[o.t]) > ly.pitch) {
+          continue;
+        }
+        auto s = std::lower_bound(ly.stops.begin(), ly.stops.end(), o.lo + ly.w / 2);
+        for (; s != ly.stops.end() && *s <= o.hi - ly.w / 2; ++s) {
+          const int at = *s;
+          if (std::any_of(jogs.begin(), jogs.end(), [&](const Jog& j) { return j.net == ni && j.l == o.l && j.at == at; })) {
+            continue;
+          }
+          Undo u;
+          int  lo = 0, hi = 0;
+          bool ok = place(o.l, ta, at - ly.w / 2, at + ly.w / 2, ni, u);
+          if (ok) {
+            ok = false;
+            for (const auto& sg : ly.tr[ta].s) {
+              if (sg.net == ni && sg.lo <= at && at <= sg.hi) {
+                lo = sg.lo;
+                hi = sg.hi;
+                ok = true;
+              }
+            }
+          }
+          restore(u);
+          if (!ok) {
+            continue;
+          }
+          block(o.l, ta, lo, hi, ni);
+          term_segs.push_back({ni, o.l, ta, lo, hi});
+          own[ni].push_back({ni, o.l, ta, lo, hi, pi});
+          Cand cd;
+          cd.L = o.l;
+          cd.t = ta;
+          cd.s = int(s - ly.stops.begin());
+          xy(cd.L, cd.t, cd.s, cd.x, cd.y);
+          nets[ni].pins[pi].cands.push_back(cd);
+          jogs.push_back({ni, pi, o.l, o.t, ta, at});
+          ++stat["port_jogs"];
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   bool route_net(int ni) {
     auto&        net = nets[ni];
     const size_t n   = net.pins.size();
     net.fail_pin     = -1;
     net.fail_other   = -1;
+    net.trapped_port = -1;
     net.fail_why.clear();
     for (size_t i = 0; i < n; ++i) {  // route-first: a cell takes its site when the first net needs it
       const int c = net.pins[i].comp;
@@ -3540,6 +4169,15 @@ struct Router {
     }
     net.pins[0].conn = true;
     for (size_t k = 1; k < n; ++k) {
+      // One net can hold the whole budget (an unbuffered clock with tens of thousands of sinks): the limit is
+      // checked between its pins as well, and the net then stays unrouted like the ones still in the queue.
+      if (opt.time_limit > 0 && run_began >= 0 && (k & 15) == 0 && cpu_s() - run_began > opt.time_limit) {
+        net.failed   = true;
+        net.fail_pin = -1;
+        net.fail_why = "time";
+        ++stat["nets_cut_short_by_time_limit"];
+        return false;
+      }
       auto&       p            = net.pins[order[k]];
       const auto& other        = net.pins[link[k]];
       bool        ok           = false;
@@ -3554,9 +4192,10 @@ struct Router {
         const int span = std::abs(p.cx - other.cx) + std::abs(p.cy - other.cy);
         const int m0   = std::max(opt.margin, span / 16);
         const int m    = grow == 0 ? m0 : grow == 1 ? m0 * 6 : INT32_MAX / 4;
-        search_budget  = opt.max_expand + int64_t(span) * 3 / 2;
+        const auto span_u = int64_t(span / unit);  // the search counts stops, and a stop is a pitch
+        search_budget     = opt.max_expand + span_u * 3 / 2;
         if (attempt == 0 && hw_steps == 0 && !exact_runs && opt.hweight <= 1.15) {
-          search_budget = std::min<int64_t>(search_budget, 12000 + int64_t(span) / 2);
+          search_budget = std::min<int64_t>(search_budget, 12000 + span_u / 2);
         } else if (exact_runs && grow >= 2) {
           search_budget = std::min<int64_t>(search_budget, 60000);
         }
@@ -3588,7 +4227,7 @@ struct Router {
         const bool   found = search(ni, p.cands, w, aim, path);
         goal_cands.clear();
         if (!found && !opt.trace.empty() && net.name == opt.trace) {  // where a failed search went
-          std::array<int64_t, 6> cnt{};
+          std::array<int64_t, 8> cnt{};
           int                    bx0 = INT32_MAX, bx1 = INT32_MIN, by0 = INT32_MAX, by1 = INT32_MIN;
           for (const auto& entry : node.e) {
             if (entry.gen == node.gen) {
@@ -3659,11 +4298,11 @@ struct Router {
             for (size_t l = 2; l < L.size(); ++l) {
               const auto& ly = L[l];
               const int   pc = ly.horiz ? other.cy : other.cx, ac = ly.horiz ? other.cx : other.cy;
-              auto        b = std::lower_bound(ly.tc.begin(), ly.tc.end(), pc - 220);
-              for (; b != ly.tc.end() && *b <= pc + 220; ++b) {
+              auto        b = std::lower_bound(ly.tc.begin(), ly.tc.end(), pc - u(220));
+              for (; b != ly.tc.end() && *b <= pc + u(220); ++b) {
                 std::cerr << "  " << ly.name << " track " << *b << ':';
                 for (const auto& s : ly.tr[b - ly.tc.begin()].s) {
-                  if (s.hi > ac - 700 && s.lo < ac + 700) {
+                  if (s.hi > ac - u(700) && s.lo < ac + u(700)) {
                     std::cerr << " [" << s.lo - ac << ',' << s.hi - ac << ']' << (s.net == ni ? "own" : s.net >= 0 ? "net" : "OBS");
                   }
                 }
@@ -3725,7 +4364,7 @@ struct Router {
         }
         if (first) {
           for (const auto* c : seeds) {
-            if (sid(c->L, c->t, c->s) == path.front()) {
+            if (sid(c->L, c->t, c->s) == path.front() && (!dst || c->jog == 0 || dst->jog != 0)) {
               dst = c;
             }
           }
@@ -3789,6 +4428,7 @@ struct Router {
         if (tree_trapped) {
           int blamed = k == 1 ? order[0] : link[k];
           if (net.pins[blamed].comp < 0) {
+            net.trapped_port = blamed;
             for (size_t j = 0; j < k; ++j) {
               if (net.pins[order[j]].comp >= 0) {
                 blamed = order[j];
@@ -3824,6 +4464,7 @@ struct Router {
     const auto base_budget = opt.max_expand;
     leftovers              = false;
     const double run_start = cpu_s();
+    run_began              = run_start;
     int64_t      popped    = 0;
     touched.resize(nets.size());
     probe_skip.assign(nets.size(), 0);
@@ -3896,10 +4537,10 @@ struct Router {
         return -int64_t(n.bbox_hp);
       }
       if (opt.order == "pins") {
-        return -int64_t(n.pins.size()) * 1000000 + n.bbox_hp;
+        return -int64_t(n.pins.size()) * 1000000 + int64_t(n.bbox_hp / unit);
       }
       if (opt.order == "fewpins") {
-        return int64_t(n.pins.size()) * 1000000 + n.bbox_hp;
+        return int64_t(n.pins.size()) * 1000000 + int64_t(n.bbox_hp / unit);
       }
       return i;
     };
@@ -4053,6 +4694,10 @@ struct Router {
         const int pin = net.fail_pin;
         rip(ni);
         net.failed = true;
+        if (net.trapped_port >= 0 && port_jog(ni, net.trapped_port)) {
+          queue.push_front(ni);
+          continue;
+        }
         if (pin < 0) {
           continue;
         }
@@ -4063,7 +4708,7 @@ struct Router {
           const auto& m      = tech.macros.at(fp.components[failed_pin.comp].macro.str());
           const auto& shapes = m.pins.at(failed_pin.lef).shapes;
           if (!ph::hard_macro(m) && !shapes.empty()
-              && std::all_of(shapes.begin(), shapes.end(), [](const auto& s) { return s.layer == "M1"; })) {
+              && std::all_of(shapes.begin(), shapes.end(), [&](const auto& s) { return s.layer == pin_layer; })) {
             const auto old          = failed_pin.cands.size();
             failed_pin.extra_access = true;
             pin_access(failed_pin, failed_pin.lef);
@@ -4111,7 +4756,12 @@ struct Router {
             rip(n2);
           }
           stat["reserve_attempts"] += 1;
+          esc_trace                 = opt.explain > 0;
           const bool held           = reserve_cell(c);
+          esc_trace                 = false;
+          if (opt.explain > 0 && !held) {
+            std::cerr << "  (reserve of " << fp.components[c].name.str() << " for " << net.name << " failed)\n";
+          }
           for (size_t k = again.size(); k-- > 0;) {  // without pads only the nets that were routed have to come back
             if (held || was_routed[k]) {
               queue.push_front(again[k]);
@@ -4213,7 +4863,6 @@ struct Router {
     int   lo, hi;  // room among the placed neighbours, less the cells still planned in between
     plan_bounds(c, lo, hi);
     const int  x    = int(comp.place.x);
-    const int  site = 54;
     int        best = 0, best_score = 0;
     // A position is as good as its worst pin: the fewest access points any pin of the cell keeps there.
     const auto score_here = [&] {
@@ -4280,7 +4929,6 @@ struct Router {
   }
   // No free site next to the cell: push the run of cells between it and the nearest gap by one site.
   std::vector<int> chain_push(int ni, int c) {
-    const int   site = 54;
     const auto& row  = row_cells.at(int(fp.components[c].place.y));
     const auto  span = row_span.at(int(fp.components[c].place.y));
     const int   at   = int(std::find(row.begin(), row.end(), c) - row.begin());
@@ -4384,6 +5032,18 @@ struct Router {
   void explain(int ni, const Pin& pin) {
     std::cerr << "FAIL " << nets[ni].name << ' ' << pin.name << ' ' << nets[ni].fail_why << " at " << pin.cx << ',' << pin.cy
               << " cands " << pin.cands.size() << '\n';
+    if (pin.comp >= 0) {
+      const int c = pin.comp;
+      std::cerr << "  cell " << fp.components[c].name.str() << " reserved " << cinfo[c].reserved << " tries " << cinfo[c].reserve_tries
+                << " rips " << nets[ni].rips << " blockers";
+      for (int b : find_blockers(ni, pin, true)) {
+        std::cerr << ' ' << nets[b].name << '(' << nets[b].rips << ')';
+      }
+      esc_trace = true;
+      const bool ok = check_cell_escapes_at_pose(c);
+      esc_trace = false;
+      std::cerr << " joint escapes " << (ok ? "exist" : "none") << '\n';
+    }
     for (const auto& c : pin.cands) {
       std::cerr << "  cand track y " << c.y << " x " << c.x << " stop " << L[c.L].stops[c.s]
                 << (cand_ok(ni, c) ? " ok" : " BLOCKED") << (c.v1 && !cut_ok(0, c.x, c.y, ni) ? " cut" : "") << '\n';
@@ -4397,7 +5057,7 @@ struct Router {
       search(ni, pin.cands, all, here, path);
       std::cerr << "  reach " << expansions - before << " states (" << why << ")";
       if (expansions - before < 5000) {  // stamp marks what the search touched
-        std::array<int, 6> cnt{};
+        std::array<int, 8> cnt{};
         int                bx0 = INT32_MAX, bx1 = INT32_MIN, by0 = INT32_MAX, by1 = INT32_MIN;
         for (const auto& entry : node.e) {
           if (entry.gen == node.gen) {
@@ -4419,14 +5079,14 @@ struct Router {
     for (int l = 0; l < 2; ++l) {
       const auto& ly = L[l];
       const int   pc = ly.horiz ? pin.cy : pin.cx, ac = ly.horiz ? pin.cx : pin.cy;
-      const int   rp = l == 0 ? 200 : 130, ra = l == 0 ? 300 : 400;
+      const int   rp = l == 0 ? u(200) : u(130), ra = l == 0 ? u(300) : u(400);
       auto        b = std::lower_bound(ly.tc.begin(), ly.tc.end(), pc - rp);
       for (; b != ly.tc.end() && *b <= pc + rp; ++b) {
         std::cerr << "  " << ly.name << " track " << *b << ':';
         for (const auto& s : ly.tr[b - ly.tc.begin()].s) {
           if (s.hi > ac - ra && s.lo < ac + ra) {
             std::cerr << " [" << s.lo - ac << ',' << s.hi - ac << ']'
-                      << (s.net < 0 ? std::string("OBS") : nets[s.net].name.substr(std::min<size_t>(4, nets[s.net].name.size())));
+                      << owner_label(s.net);
           }
         }
         std::cerr << '\n';
@@ -4453,15 +5113,41 @@ struct Router {
       }
       if (c.v1) {
         const auto& cl = CL[0];
-        for (int bx = (c.x - 64) / bucket; bx <= (c.x + 64) / bucket; ++bx) {
-          for (int by = (c.y - 64) / bucket; by <= (c.y + 64) / bucket; ++by) {
+        // Cuts close enough to forbid this one: the spacing plus a cut, with a little slack.
+        const int near = cl.space + 2 * std::max(cl.hx, cl.hy) + u(4);
+        for (int bx = (c.x - near - u(24)) / bucket; bx <= (c.x + near + u(24)) / bucket; ++bx) {
+          for (int by = (c.y - near - u(24)) / bucket; by <= (c.y + near + u(24)) / bucket; ++by) {
             auto it = cl.buckets.find(bkey(bx, by));
             if (it == cl.buckets.end()) {
               continue;
             }
             for (const auto& o : it->second) {
-              if (o.net >= 0 && o.net != ni && std::abs((o.xl + o.xh) / 2 - c.x) < 40 && std::abs((o.yl + o.yh) / 2 - c.y) < 40) {
+              if (o.net >= 0 && o.net != ni && std::abs((o.xl + o.xh) / 2 - c.x) < near && std::abs((o.yl + o.yh) / 2 - c.y) < near) {
                 score[o.net] += 4;
+              }
+            }
+          }
+        }
+      }
+      // A via whose pad is wider than the wire can also be stopped by the pad of another net's via beside it.
+      if (c.cut >= 0) {
+        for (int l : {c.cut, c.cut - 1}) {
+          if (l < 0 || L[l].bump == 0) {
+            continue;
+          }
+          const auto p = pad_rect(c.cut, l, c.x, c.y, ni);
+          const int  r = L[l].spacing;
+          for (int bx = (p.xl - r) / bucket; bx <= (p.xh + r) / bucket; ++bx) {
+            for (int by = (p.yl - r) / bucket; by <= (p.yh + r) / bucket; ++by) {
+              const auto it = pads[l].find(bkey(bx, by));
+              if (it == pads[l].end()) {
+                continue;
+              }
+              for (const auto& o : it->second) {
+                const int64_t dx = std::max({0, o.xl - p.xh, p.xl - o.xh}), dy = std::max({0, o.yl - p.yh, p.yl - o.yh});
+                if (o.net >= 0 && o.net != ni && dx * dx + dy * dy < int64_t(r) * r) {
+                  score[o.net] += 4;
+                }
               }
             }
           }
@@ -4592,9 +5278,45 @@ struct Router {
             if (st == stacks.end() || shape.rect.empty()) {
               return false;
             }
+            // A landing may be drawn as several rectangles (a strap with wider ends): the cut has to lie in their union.
+            const auto covered = [&](const std::string& layer) {
+              std::vector<double> ys{shape.rect.yl, shape.rect.yh};
+              for (const auto& rect : original) {
+                if (rect.layer == layer) {
+                  for (double y : {rect.rect.yl, rect.rect.yh}) {
+                    if (y > shape.rect.yl && y < shape.rect.yh) {
+                      ys.push_back(y);
+                    }
+                  }
+                }
+              }
+              std::sort(ys.begin(), ys.end());
+              for (size_t i = 0; i + 1 < ys.size(); ++i) {
+                if (ys[i + 1] - ys[i] < 1e-9) {
+                  continue;
+                }
+                std::vector<std::pair<double, double>> spans;
+                for (const auto& rect : original) {
+                  if (rect.layer == layer && rect.rect.yl <= ys[i] + 1e-9 && rect.rect.yh >= ys[i + 1] - 1e-9) {
+                    spans.emplace_back(rect.rect.xl, rect.rect.xh);
+                  }
+                }
+                std::sort(spans.begin(), spans.end());
+                double at = shape.rect.xl;
+                for (const auto& [lo, hi] : spans) {
+                  if (lo <= at + 1e-9) {
+                    at = std::max(at, hi);
+                  }
+                }
+                if (at < shape.rect.xh - 1e-9) {
+                  return false;
+                }
+              }
+              return true;
+            };
             std::set<std::string> landings;
             for (const auto& rect : original) {
-              if (conn_tech.layers.contains(rect.layer) && rect.rect.contains(shape.rect)) {
+              if (conn_tech.layers.contains(rect.layer) && !landings.contains(rect.layer) && covered(rect.layer)) {
                 landings.insert(rect.layer);
               }
             }
@@ -4627,7 +5349,7 @@ struct Router {
         const auto  pp = mc.pins.find(c.pin.str());
         if (pp != mc.pins.end()) {
           for (const auto& sh : pp->second.shapes) {
-            if (sh.layer == "M1") {
+            if (sh.layer == pin_layer) {
               pin_m1.push_back(ph::placed_rect(mc, it->second->place, out.dbu, sh.rect));
             } else if (mc.klass.starts_with("BLOCK")) {
               for (size_t l = 0; l < L.size(); ++l) {
@@ -4641,9 +5363,9 @@ struct Router {
       }
       ph::visit_route_geometry(tech, out, n, [&](const ph::Shape& sh) {
         add(sh, id);
-        if (sh.layer == "M1" && !ph::rect_union_covers(sh.rect, pin_m1)) {  // a via must land inside the pin it reaches
+        if (sh.layer == pin_layer && !ph::rect_union_covers(sh.rect, pin_m1)) {  // a via must land inside the pin it reaches
           ++off_pin;
-          note("v1-off-pin", "M1", n.name.str(), int(sh.rect.xl), int(sh.rect.yl), int(sh.rect.xh), int(sh.rect.yh));
+          note("v1-off-pin", pin_layer, n.name.str(), int(sh.rect.xl), int(sh.rect.yl), int(sh.rect.xh), int(sh.rect.yh));
         }
       });
       if (n.connections.size() >= 2) {
@@ -4657,12 +5379,20 @@ struct Router {
     for (const auto& c : out.components) {  // cell obstructions above M1 are fixed metal too
       const auto& mc = tech.macros.at(c.macro.str());
       for (const auto& o : mc.obstructions) {
-        if (o.layer != "M1" && (o.layer[0] == 'M' || o.layer[0] == 'V')) {
+        if (above_pins(o.layer)) {
           add({o.layer, ph::placed_rect(mc, c.place, out.dbu, o.rect)}, -1);
         }
       }
     }
     int64_t shorts = 0, end_to_end = 0, facing = 0, min_len = 0, cut_space = 0, cut_dup = 0, wide = 0;
+    // Via pads wider than the wire are loose metal of their net. They count toward the minimum area of the piece
+    // they sit on.
+    std::unordered_map<int64_t, std::vector<size_t>> pads_of;  // layer and net -> loose shapes
+    for (size_t i = 0; i < loose.size(); ++i) {
+      if (loose[i].net > 0 && L[loose[i].l].min_area > 0) {
+        pads_of[int64_t(loose[i].l) << 40 | loose[i].net].push_back(i);
+      }
+    }
     for (size_t l = 0; l < L.size(); ++l) {
       const auto& ly = L[l];
       for (auto& [t, v] : on[l]) {  // merge what touches inside one net
@@ -4678,7 +5408,32 @@ struct Router {
         v = std::move(merged);
         std::sort(v.begin(), v.end(), [](const Piece& a, const Piece& b) { return a.lo < b.lo; });
         for (size_t i = 0; i < v.size(); ++i) {
+          int64_t beside = 0;  // largest pad area outside the strip of this piece
           if (v[i].net > 0 && v[i].hi - v[i].lo < ly.minlen) {
+            if (const auto mine = pads_of.find(int64_t(l) << 40 | v[i].net); mine != pads_of.end()) {
+              const int low = ly.tc[t] - ly.w / 2, high = ly.tc[t] + ly.w / 2;
+              for (size_t k : mine->second) {
+                const auto&   r   = loose[k].r;
+                const int64_t plo = std::lround(ly.horiz ? r.yl : r.xl), phi = std::lround(ly.horiz ? r.yh : r.xh);
+                const int64_t alo = std::lround(ly.horiz ? r.xl : r.yl), ahi = std::lround(ly.horiz ? r.xh : r.yh);
+                if (plo <= low && phi >= high && alo >= v[i].lo && ahi <= v[i].hi) {
+                  beside = std::max(beside, (phi - plo - ly.w) * (ahi - alo));
+                }
+              }
+              // A pin jog leaves the piece across the tracks: its metal outside the strip is area of the same shape.
+              for (size_t k : mine->second) {
+                const auto&   r   = loose[k].r;
+                const int64_t plo = std::lround(ly.horiz ? r.yl : r.xl), phi = std::lround(ly.horiz ? r.yh : r.xh);
+                const int64_t alo = std::lround(ly.horiz ? r.xl : r.yl), ahi = std::lround(ly.horiz ? r.xh : r.yh);
+                const int64_t in  = std::min<int64_t>(phi, high) - std::max<int64_t>(plo, low);
+                if (in > 0 && !(plo <= low && phi >= high) && alo >= v[i].lo && ahi <= v[i].hi) {
+                  beside += (phi - plo - in) * (ahi - alo);
+                }
+              }
+            }
+          }
+          if (v[i].net > 0 && v[i].hi - v[i].lo < ly.minlen
+              && (beside == 0 || int64_t(v[i].hi - v[i].lo) * ly.w + beside < ly.min_area)) {
             // A via landing entirely on an existing macro pin adds no
             // conductor outside the pin. A pad protruding even one DBU is
             // still subject to the routed minimum-length rule.
@@ -4752,6 +5507,14 @@ struct Router {
         for (; p != v.end() && p->lo < ahi + ly.w; ++p) {
           if (p->net != w.net && p->net > 0 && p->hi > alo - ly.w) {
             if (w.net < 0) {
+              // A port's own bar is input metal like the shape beside it: only what the route added is checked.
+              bool given = false;
+              for (const auto& ts : term_segs) {
+                given = given || (ts.net == p->net - 1 && ts.l == int(w.l) && ts.t == t && ts.lo <= p->lo && p->hi <= ts.hi);
+              }
+              if (given) {
+                continue;
+              }
               const auto pins = edge_pins.find(p->net);
               bool       own  = false;
               if (pins != edge_pins.end()) {
@@ -4775,7 +5538,7 @@ struct Router {
       auto& v = cuts[k];
       std::sort(v.begin(), v.end(), [](const Cut& a, const Cut& b) { return std::tie(a.xl, a.yl) < std::tie(b.xl, b.yl); });
       // A power strap stacks thousands of cuts on one x, so neighbours are looked up in a grid keyed by the low corner.
-      const int                                           cell = 512, space = CL[k].space;
+      const int                                           cell = 2 * bucket, space = CL[k].space;
       int                                                 maxw = 0, maxh = 0;
       std::unordered_map<uint64_t, std::vector<uint32_t>> grid;
       for (size_t i = 0; i < v.size(); ++i) {
@@ -4827,7 +5590,7 @@ struct Router {
     std::map<int, std::vector<Used>> rows;
     const auto                       cover = [&](const ph::Rect& r, int skip_y) {
       for (const auto& [y, parts] : row_parts) {
-        if (y != skip_y && y < r.yh && y + 270 > r.yl) {
+        if (y != skip_y && y < r.yh && y + row_h > r.yl) {
           rows[y].push_back({int(r.xl), int(r.xh), false});
         }
       }
@@ -4844,7 +5607,7 @@ struct Router {
       const auto  box = footprint(m, c.place, out.dbu);
       const int   w = int(box.xh - box.xl), h = int(box.yh - box.yl);
       rows[int(c.place.y)].push_back({int(c.place.x), int(c.place.x) + w, true});
-      if (h > 271 || m.klass.starts_with("BLOCK")) {  // a macro is not a row cell, whatever its height
+      if (h > row_h + 1 || m.klass.starts_with("BLOCK")) {  // a macro is not a row cell, whatever its height
         cover(box, int(c.place.y));
         continue;
       }
@@ -4854,7 +5617,7 @@ struct Router {
           && (c.place.orientation == row_orient.at(int(c.place.y))
               || c.place.orientation == mirrored(row_orient.at(int(c.place.y))))) {
         for (const auto& [lo, hi] : parts->second) {
-          legal = legal || (c.place.x >= lo && c.place.x + w <= hi && (int(c.place.x) - parts->second.front().first) % 54 == 0);
+          legal = legal || (c.place.x >= lo && c.place.x + w <= hi && (int(c.place.x) - parts->second.front().first) % site == 0);
         }
       }
       if (!legal) {
@@ -4868,7 +5631,7 @@ struct Router {
         for (size_t j = i + 1; j < v.size() && v[j].lo < v[i].hi; ++j) {
           if (v[i].cell || v[j].cell) {
             ++overlaps;
-            note("cell-overlap", "", "", v[j].lo, y, std::min(v[i].hi, v[j].hi), y + 270);
+            note("cell-overlap", "", "", v[j].lo, y, std::min(v[i].hi, v[j].hi), y + row_h);
           }
         }
       }
@@ -4907,6 +5670,32 @@ struct Router {
     const std::string        src = ss.str();
     // per-net wires from the tracks
     std::vector<std::string> wires(nets.size());
+    // Keep terminal contacts in the DEF topology even when their metal was
+    // merged into a single interval. RC extraction needs distinct wire
+    // points for pins that share a track.
+    using Contact = std::tuple<int, int, int, int>;  // net, layer, track, along
+    std::vector<Contact> contacts;
+    for (size_t i = 0; i < nets.size(); ++i) {
+      if (!nets[i].routed) {
+        continue;
+      }
+      for (const auto& pin : nets[i].pins) {
+        if (pin.used >= 0) {
+          const auto& c = pin.cands[pin.used];
+          contacts.emplace_back(int(i), c.L, c.t, L[c.L].horiz ? c.x : c.y);
+        }
+      }
+    }
+    std::sort(contacts.begin(), contacts.end());
+    contacts.erase(std::unique(contacts.begin(), contacts.end()), contacts.end());
+    const auto emit = [](std::string& out, const Layer& ly, int across, int lo, int hi) {
+      out += out.empty() ? "\n      + ROUTED " : "\n      NEW ";
+      if (ly.horiz) {
+        out += ly.name + " ( " + std::to_string(lo) + " " + std::to_string(across) + " 0 ) ( " + std::to_string(hi) + " * 0 )";
+      } else {
+        out += ly.name + " ( " + std::to_string(across) + " " + std::to_string(lo) + " 0 ) ( * " + std::to_string(hi) + " 0 )";
+      }
+    };
     for (size_t l = 0; l < L.size(); ++l) {
       const auto& ly = L[l];
       for (size_t t = 0; t < ly.tc.size(); ++t) {
@@ -4914,14 +5703,19 @@ struct Router {
           if (s.net < 0 || !nets[s.net].routed) {
             continue;
           }
-          auto& o      = wires[s.net];
-          o           += o.empty() ? "\n      + ROUTED " : "\n      NEW ";
-          const int c  = ly.tc[t];
-          if (ly.horiz) {
-            o += ly.name + " ( " + std::to_string(s.lo) + " " + std::to_string(c) + " 0 ) ( " + std::to_string(s.hi) + " * 0 )";
-          } else {
-            o += ly.name + " ( " + std::to_string(c) + " " + std::to_string(s.lo) + " 0 ) ( * " + std::to_string(s.hi) + " 0 )";
+          auto& out = wires[s.net];
+          int   lo  = s.lo;
+          for (auto it = std::upper_bound(contacts.begin(), contacts.end(), Contact{s.net, int(l), int(t), lo});
+               it != contacts.end();
+               ++it) {
+            const auto [net, layer, track, at] = *it;
+            if (net != s.net || layer != int(l) || track != int(t) || at >= s.hi) {
+              break;
+            }
+            emit(out, ly, ly.tc[t], lo, at);
+            lo = at;
           }
+          emit(out, ly, ly.tc[t], lo, s.hi);
           stat["wl_" + ly.name] += s.hi - s.lo;
         }
       }
@@ -4938,17 +5732,47 @@ struct Router {
       const auto& ly = L[sb.l];
       const int   lo = sb.lo, hi = sb.hi;
       const int   c  = (sb.plo + sb.phi) / 2;
-      auto&       o  = wires[sb.net];
-      o             += o.empty() ? "\n      + ROUTED " : "\n      NEW ";
-      if (ly.horiz) {
-        o += ly.name + " ( " + std::to_string(lo) + " " + std::to_string(c) + " 0 ) ( " + std::to_string(hi) + " * 0 )";
-      } else {
-        o += ly.name + " ( " + std::to_string(c) + " " + std::to_string(lo) + " 0 ) ( * " + std::to_string(hi) + " 0 )";
-      }
+      emit(wires[sb.net], ly, c, lo, hi);
       stat["wl_" + ly.name] += hi - lo;
       ++stat["edge_pin_stub_wires"];
     }
-    const char* lower[] = {"M1", "M2", "M3", "M4", "M5", "M6"};
+    for (size_t i = 0; i < nets.size(); ++i) {  // pin jogs: across the first layer's direction
+      if (!nets[i].routed) {
+        continue;
+      }
+      for (const auto& b : nets[i].bars) {
+        const auto& ly = L[0];
+        auto&       o  = wires[i];
+        o             += o.empty() ? "\n      + ROUTED " : "\n      NEW ";
+        // Half a width past both centre lines: the jog then crosses the full width of the wire it meets (a jog that
+        // stops on the centre line overlaps the wire's two DEF pieces by half a width each, which a checker reads as
+        // too little metal), and at the via it stays inside the pad.
+        const std::string e = " " + std::to_string(ly.w / 2) + " )";
+        if (ly.horiz) {
+          o += ly.name + " ( " + std::to_string((b.xl + b.xh) / 2) + " " + std::to_string(b.yl) + e + " ( * " + std::to_string(b.yh) + e;
+        } else {
+          o += ly.name + " ( " + std::to_string(b.xl) + " " + std::to_string((b.yl + b.yh) / 2) + e + " ( " + std::to_string(b.xh) + " *" + e;
+        }
+        stat["wl_" + ly.name] += ly.horiz ? b.yh - b.yl : b.xh - b.xl;
+      }
+    }
+    for (const auto& j : jogs) {  // across the layer's direction, centre line to centre line
+      if (!nets[j.net].routed) {
+        continue;
+      }
+      const auto& ly = L[j.l];
+      const int   a = std::min(ly.tc[j.t], ly.tc[j.ta]), b = std::max(ly.tc[j.t], ly.tc[j.ta]);
+      auto&       o = wires[j.net];
+      o            += o.empty() ? "\n      + ROUTED " : "\n      NEW ";
+      const std::string e = " " + std::to_string(ly.w / 2) + " )";  // across the full width of the bar and of the landing
+      if (ly.horiz) {
+        o += ly.name + " ( " + std::to_string(j.at) + " " + std::to_string(a) + e + " ( * " + std::to_string(b) + e;
+      } else {
+        o += ly.name + " ( " + std::to_string(a) + " " + std::to_string(j.at) + e + " ( " + std::to_string(b) + " *" + e;
+      }
+      stat["wl_" + ly.name] += b - a;
+    }
+    const auto lower = [&](int cut) -> const std::string& { return cut == 0 ? pin_layer : L[cut - 1].name; };
     for (size_t i = 0; i < nets.size(); ++i) {
       if (!nets[i].routed) {
         continue;
@@ -4958,7 +5782,7 @@ struct Router {
       for (const auto& v : all_vias) {
         auto& o  = wires[i];
         o       += o.empty() ? "\n      + ROUTED " : "\n      NEW ";
-        o       += std::string(lower[v.cl]) + " ( " + std::to_string(v.x) + " " + std::to_string(v.y) + " ) " + CL[v.cl].via;
+        o       += lower(v.cl) + " ( " + std::to_string(v.x) + " " + std::to_string(v.y) + " ) " + CL[v.cl].via;
         ++stat["vias_" + CL[v.cl].name];
       }
     }
@@ -5022,8 +5846,9 @@ struct Router {
             section = token == "NETS" ? Section::nets : Section::components;
             if (grid_needed) {
               replace(token,
-                      "GCELLGRID X 0 DO " + std::to_string(int(fp.die.xh) / 540 + 1) + " STEP 540 ;\nGCELLGRID Y 0 DO "
-                          + std::to_string(int(fp.die.yh) / 540 + 1) + " STEP 540 ;\n" + std::string(token));
+                      "GCELLGRID X 0 DO " + std::to_string(int(fp.die.xh) / (10 * site) + 1) + " STEP " + std::to_string(10 * site)
+                          + " ;\nGCELLGRID Y 0 DO " + std::to_string(int(fp.die.yh) / (10 * site) + 1) + " STEP "
+                          + std::to_string(10 * site) + " ;\n" + std::string(token));
               grid_needed = false;
             }
           } else {

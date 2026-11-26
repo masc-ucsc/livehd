@@ -19,11 +19,27 @@ import sys
 # Import the coordinator beside the invoked script in the runfiles directory.
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 
-from rf_chunks import CONN, POSE, ROUTE, WIRE, die_with_parent, feedback, records, route, section, worker_command, worker_options
+from rf_chunks import (
+    CONN,
+    POSE,
+    ROUTE,
+    WIRE,
+    die_with_parent,
+    feedback,
+    frame_steps,
+    record_lines,
+    records,
+    route,
+    routing_layers,
+    section,
+    wire_bounds,
+    worker_command,
+    worker_options,
+)
 
 
 def localized_seed(
-    frame, failed, radius, output, all_pins=False, findings=(), pin_neighbors=False, pin_access_layers=False
+    frame, failed, radius, output, all_pins=False, findings=(), pin_neighbors=False, pin_access_layers=()
 ):
     owners = {row["fail_pin"].rsplit("/", 1)[0] for row in failed if row["fail_pin"]}
     owners.update(row["fail_pin"] for row in failed if row["fail_pin"])
@@ -57,13 +73,15 @@ def localized_seed(
         for line in src:
             dst.write(line)
             current = section(line, current)
-            if current in ("COMPONENTS", "PINS") and line.startswith("- "):
+            if current in ("COMPONENTS", "PINS") and line.lstrip().startswith("- "):
                 name = line.split(None, 2)[1].replace(r"\/", "/")
                 if name in owners:
                     if current == "COMPONENTS" and name in blocked:
                         blocked_cells.add(name)
-                    m = POSE.search(line)
-                    centers.append((int(m[1]), int(m[2])))
+                    lines = record_lines(src, line)
+                    dst.writelines(lines[1:])
+                    if m := POSE.search(" ".join(part.strip() for part in lines)):
+                        centers.append((int(m[1]), int(m[2])))
             if current == "NETS":
                 break
         ys = {}
@@ -76,21 +94,16 @@ def localized_seed(
         def touches(path):
             if not xs:
                 return False
-            m = WIRE.fullmatch(path)
-            if not m:
-                raise ValueError(f"unknown rf_route geometry: {path}")
-            if pin_access_layers and path.partition(" (")[0].split()[-1] not in ("M1", "M2", "M3"):
+            if pin_access_layers and path.partition(" (")[0].split()[-1] not in pin_access_layers:
                 return False
-            x, y = int(m[1]), int(m[2])
-            x2 = int(m[4]) if m[4] not in (None, "*") else x
-            y2 = int(m[5]) if m[5] not in (None, "*") else y
+            xl, yl, xh, yh = wire_bounds(path)
             for i in range(
-                bisect_left(xs, min(x, x2) - radius),
-                bisect_right(xs, max(x, x2) + radius),
+                bisect_left(xs, xl - radius),
+                bisect_right(xs, xh + radius),
             ):
                 yy = ys[xs[i]]
-                j = bisect_left(yy, min(y, y2) - radius)
-                if j < len(yy) and yy[j] <= max(y, y2) + radius:
+                j = bisect_left(yy, yl - radius)
+                if j < len(yy) and yy[j] <= yh + radius:
                     return True
             return False
 
@@ -111,7 +124,7 @@ def localized_seed(
                 if paths:
                     dst.write("      " + "\n      ".join(paths) + " ;\n")
         for line in src:
-            if line.startswith("END NETS"):
+            if line.split()[:2] == ["END", "NETS"]:
                 dst.write(line)
                 break
         for line in src:
@@ -219,7 +232,7 @@ def main():
     die_with_parent()
     p = argparse.ArgumentParser(description=__doc__)
     worker_options(p)
-    p.add_argument("--radius", type=int, default=540, help="access window radius in DEF units")
+    p.add_argument("--radius", type=int, help="access window radius in DEF units (default: ten sites of the frame)")
     p.add_argument(
         "--all-pins",
         action="store_true",
@@ -263,7 +276,7 @@ def main():
     p.add_argument(
         "--pin-access-layers",
         action="store_true",
-        help="release tracks near failed pins only on M1 through M3, including vias starting on those layers",
+        help="release tracks near failed pins only on the lowest three routing layers, including vias starting there",
     )
     args = p.parse_args()
     args.worker = worker_command(args)
@@ -286,6 +299,8 @@ def main():
         timing_eco(args)
         return
     args.pin_neighbors = args.pin_neighbors or args.reserve_first
+    if args.radius is None:
+        args.radius = 10 * frame_steps(args.previous / "routed.def")[0]
     if args.radius < 1 or not args.seconds > 0:
         p.error("radius and CPU budget must be positive")
     folder = args.out
@@ -347,7 +362,8 @@ def main():
         args.all_pins,
         findings,
         args.pin_neighbors,
-        args.pin_access_layers,
+        # The pin layer and the two routing layers above it (M1 through M3 in ASAP7).
+        tuple(routing_layers(args.lefs)[:3]) if args.pin_access_layers else (),
     )
     (folder / "released.json").write_text(json.dumps(released))
     first = folder / "priority"

@@ -27,7 +27,7 @@ inline constexpr Route_setting route_settings[] = {
     {         "all_pins",                            repair_route,    Route_value::flag,                        "Release nearby wires around all endpoints of failed nets."},
     {    "reserve_first",                            repair_route,    Route_value::flag,                      "Reserve compatible M1 access pads before the repair cohort."},
     {    "pin_neighbors",                            repair_route,    Route_value::flag,                                            "Reopen incident nets at blocked pins."},
-    {"pin_access_layers",                            repair_route,    Route_value::flag,                                    "Limit spatial access repair to M1 through M3."},
+    {"pin_access_layers",                            repair_route,    Route_value::flag,                                    "Limit spatial access repair to the lowest three routing layers."},
     {           "margin",                              flat_route, Route_value::integer,                                       "Minimum search-window margin in DEF units."},
     {            "limit",                              flat_route, Route_value::integer, "Maximum nets to attempt in a flat pass. Zero produces a verification checkpoint."},
     {            "ripup",                              flat_route, Route_value::integer,                                                         "Maximum rip-ups per net."},

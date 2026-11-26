@@ -20,13 +20,14 @@ import tempfile
 import time
 
 
-# LiveHD writes each unrouted net and its connections on one line. rf_route
-# appends one path per line. Refuse other producers rather than guessing.
+# Native wire paths use one line per segment or via. OpenROAD may indent
+# net records and wrap their endpoint lists.
 POINT = r"\(\s*(-?\d+)\s+(-?\d+)\s*\)"
 POSE = re.compile(r"\+ (?:FIXED|PLACED|COVER) " + POINT)
-CONN = re.compile(r"\( (\S+) (\S+) \)")
+CONN = re.compile(r"\(\s*([^\s()]+)\s+([^\s()]+)\s*\)")
+# A path is one default via or a two-point wire with explicit end extensions.
 WIRE = re.compile(
-    r"(?:\+ ROUTED|NEW) M[1-7] \( (-?\d+) (-?\d+)( 0)? \) (?:VIA[1-6][2-7]|\( (\*|-?\d+) (\*|-?\d+) 0 \))"
+    r"(?:\+ ROUTED|NEW) \S+ \( (-?\d+) (-?\d+)( \d+)? \) (?:[^\s()]+|\( (\*|-?\d+) (\*|-?\d+) (\d+) \))"
 )
 ROUTE = [
     "--hweight",
@@ -44,13 +45,68 @@ ROUTE = [
 ]
 
 
+def frame_steps(frame):
+    """The site width and the finest track pitch of a DEF, in its database units.
+
+    Distances the coordinators use (the window around a failed pin, the reserve at a seam) are stated for ASAP7,
+    whose site is 54 units and whose finest pitch is 36. They scale with these two numbers in any other technology.
+    """
+    site = pitch = None
+    with frame.open() as src:
+        for line in src:
+            word = line.split(None, 1)[0] if line.strip() else ""
+            if word == "ROW" and site is None:
+                m = re.search(r" STEP (\d+) ", line)
+                site = int(m[1]) if m and int(m[1]) > 0 else site
+            elif word == "TRACKS":
+                m = re.search(r" STEP (\d+) ", line)
+                if m and int(m[1]) > 0:
+                    pitch = int(m[1]) if pitch is None else min(pitch, int(m[1]))
+            elif word in ("COMPONENTS", "NETS"):
+                break
+    return site or 54, pitch or 36
+
+
+def routing_layers(lefs):
+    """Names of the routing layers in the order the technology LEF lists them, lowest first."""
+    names = []
+    for lef in lefs:
+        layer = None
+        with open(lef) as src:
+            for line in src:
+                words = line.split()
+                if len(words) >= 2 and words[0] == "LAYER" and layer is None and len(words) == 2:
+                    layer = words[1]
+                elif layer and words[:2] == ["TYPE", "ROUTING"] and layer not in names:
+                    names.append(layer)
+                elif layer and words[:2] == ["END", layer]:
+                    layer = None
+                elif words[:1] in (["MACRO"], ["VIA"]):
+                    break
+        if names:
+            break
+    return names
+
+
 def section(line, current):
-    if line.startswith("END "):
+    words = line.split(None, 1)
+    if not words:
+        return current
+    if words[0] == "END":
         return ""
-    for name in ("NETS", "COMPONENTS", "PINS"):
-        if line.startswith(name + " "):
-            return name
+    if words[0] in ("NETS", "COMPONENTS", "PINS"):
+        return words[0]
     return current
+
+
+def record_lines(src, line):
+    lines = [line]
+    while not line.rstrip().endswith(";"):
+        line = next(src, "")
+        if not line or line.lstrip().startswith(("- ", "END ")):
+            raise ValueError(f"unterminated DEF record {lines[0].strip()}")
+        lines.append(line)
+    return lines
 
 
 def intersection_area(a, b):
@@ -67,6 +123,7 @@ def partition(frame, nx, ny, plan_path=None):
     with frame.open() as src:
         for line in src:
             current = section(line, current)
+            line = line.lstrip()
             if line.startswith("DESIGN "):
                 design = line.split()[1]
             if line.startswith("DIEAREA "):
@@ -99,6 +156,7 @@ def partition(frame, nx, ny, plan_path=None):
                 jobs = [[] for _ in boxes]
             if not line.startswith("- ") or not current:
                 continue
+            line = " ".join(part.strip() for part in record_lines(src, line))
             name = line.split(None, 2)[1]
             if current in ("COMPONENTS", "PINS"):
                 pose = POSE.search(line)
@@ -106,8 +164,8 @@ def partition(frame, nx, ny, plan_path=None):
                     raise ValueError(f"{current} record without a pose: {name}")
                 (cells if current == "COMPONENTS" else ports)[name] = tuple(map(int, pose.groups()))
             elif current == "NETS":
-                if not line.rstrip().endswith(";") or re.search(r"\+ (ROUTED|FIXED|COVER|SHIELD) ", line):
-                    raise ValueError(f"expected an unrouted LiveHD signal net: {name}")
+                if re.search(r"\+ (ROUTED|FIXED|COVER|SHIELD) ", line):
+                    raise ValueError(f"expected an unrouted signal net: {name}")
                 owners = set()
                 pins = CONN.findall(line.partition(" + ")[0])
                 if len(pins) < 2:
@@ -144,38 +202,55 @@ def partition(frame, nx, ny, plan_path=None):
 def records(frame):
     with frame.open() as src:
         for line in src:
-            if line.startswith("NETS "):
+            if section(line, "") == "NETS":
                 break
         else:
             raise ValueError("missing NETS")
         for line in src:
-            if line.startswith("END NETS"):
+            if line.lstrip().startswith("END NETS"):
                 return
-            if not line.startswith("- "):
+            if not line.lstrip().startswith("- "):
                 raise ValueError("unsupported signal net record")
-            head = line
+            lines = record_lines(src, line)
+            header = [lines[0]]
             paths = []
-            while not line.rstrip().endswith(";"):
-                line = next(src)
-                paths.append(line.strip().removesuffix(";").strip())
+            for line in lines[1:]:
+                part = line.strip()
+                if paths or part.startswith(("+ ROUTED ", "+ FIXED ", "+ COVER ", "+ SHIELD ")):
+                    paths.append(part.removesuffix(";").strip())
+                else:
+                    header.append(line)
+            head = header[0] if len(header) == 1 else " ".join(part.strip() for part in header) + "\n"
             yield head.split(None, 2)[1], head, paths
         raise ValueError("unterminated NETS")
 
 
-def contained(paths, box):
-    # rf_route emits ASAP7 default-width M2-M7 wires and VIA12..67. A
-    # 128-DBU seam reserve covers their enclosures and the calibrated spacing.
+def contained(paths, box, reserve=128):
+    # rf_route emits default-width wires and default vias. The seam reserve covers their enclosures and the
+    # spacing: 128 units in ASAP7, the same number of finest pitches elsewhere.
     for path in paths:
-        m = WIRE.fullmatch(path)
-        if not m:
-            raise ValueError(f"unknown rf_route geometry: {path}")
-        x, y = int(m[1]), int(m[2])
-        x2 = int(m[4]) if m[4] not in (None, "*") else x
-        y2 = int(m[5]) if m[5] not in (None, "*") else y
-        rect = (min(x, x2) - 128, min(y, y2) - 128, max(x, x2) + 128, max(y, y2) + 128)
+        xl, yl, xh, yh = wire_bounds(path)
+        rect = (xl - reserve, yl - reserve, xh + reserve, yh + reserve)
         if sum(intersection_area(rect, slab) for slab in box) < (rect[2] - rect[0]) * (rect[3] - rect[1]):
             return False
     return bool(paths)
+
+
+def wire_bounds(path):
+    m = WIRE.fullmatch(path)
+    if not m:
+        raise ValueError(f"unknown rf_route geometry: {path}")
+    x, y = int(m[1]), int(m[2])
+    if m[4] is None:
+        return x, y, x, y
+    x2 = x if m[4] == "*" else int(m[4])
+    y2 = y if m[5] == "*" else int(m[5])
+    first, last = int(m[3] or 0), int(m[6])
+    if x == x2:
+        return (x, y - first, x, y2 + last) if y <= y2 else (x, y2 - last, x, y + first)
+    if y == y2:
+        return (x - first, y, x2 + last, y) if x <= x2 else (x2 - last, y, x + first, y)
+    raise ValueError(f"non-Manhattan rf_route geometry: {path}")
 
 
 @contextmanager
@@ -359,8 +434,9 @@ def worker(args, frame, box, names, folder):
                 ],
                 folder,
             )
+            reserve = -(-128 * frame_steps(frame)[1] // 36)
             for name, _, paths in records(out):
-                if name in requested and contained(paths, box):
+                if name in requested and contained(paths, box, reserve):
                     accepted[name] = paths
     (folder / "wires.json").write_text(json.dumps(accepted))
     return accepted
@@ -372,12 +448,10 @@ def assemble(frame, dest, wires):
     with frame.open() as src, dest.open("w") as out:
         for line in src:
             current = section(line, current)
-            if current == "NETS" and line.startswith("- "):
+            if current == "NETS" and line.lstrip().startswith("- "):
                 name = line.split(None, 2)[1]
                 if name in wires:
-                    body = line.rstrip()
-                    if not body.endswith(";"):
-                        raise ValueError(f"cannot insert wires into {name}")
+                    body = "".join(record_lines(src, line)).rstrip()
                     line = body[:-1] + "\n      " + "\n      ".join(wires[name]) + " ;\n"
                     seen += 1
             out.write(line)
@@ -476,7 +550,7 @@ def main():
         if not args.plan:
             with args.frame.open() as frame:
                 for line in frame:
-                    if line.startswith("COMPONENTS "):
+                    if section(line, "") == "COMPONENTS":
                         if int(line.split()[1]) <= 150_000 or args.workers < 4:
                             args.grid = (2, 1)
                         break
