@@ -20,6 +20,7 @@ The definitions of a reachable state and the witness checker.
 Mathlib-free; the axioms are audited in `HDLProof/Check/Audit.lean`'s style at the end.
 -/
 import LeanSemanticPrimitives.Compiler.DirectTrace
+import LeanSemanticPrimitives.Compiler.Engine
 import LeanSemanticPrimitives.Compiler.CkptSound
 import LeanSemanticPrimitives.Projection.AxiomGate
 
@@ -149,6 +150,57 @@ theorem checkReach_reachable {D : DesignCert} {s0 : RuntimeState} {c : Ckpt}
     Reachable D s0 adm (Matches D c) :=
   (checkReach_sound h).reachable
 
+/-! ## The witness checker on an engine
+
+`ckpt_reach` replays the witness once, on an engine (`Compiler/Engine`: any route `EngineSelector`
+builds whose run is `interpretDesign`'s: ir, vc, ref), and decides from the state it ends in.
+`reachVerdict` is the decision on that state; `checkReachOn` is it on the engine's run, and
+`checkReachOn_sound` proves, for every engine sound for `interpretDesign D`, what
+`checkReach_sound` proves. -/
+
+/-- The witness's ticks as an engine steps them. -/
+def tickPairs (ts : List Tick) : List (ClockEdges × RuntimeInput) := ts.map fun t => (t.edges, t.input)
+
+/-- The decision on the state a witness ends in (or the run's refusal): every tick admitted, and
+the state matches `c`. -/
+def reachVerdict (D : DesignCert) (c : Ckpt) (adm : Tick → Bool) (ts : List Tick)
+    (r : Except String RuntimeState) : Bool :=
+  ts.all adm && match r with
+    | .ok s => matchesB D c s
+    | .error _ => false
+
+/-- The witness checker on engine `E`'s run from `s0`. -/
+def checkReachOn {σ : Type} (E : Engine σ) (D : DesignCert) (s0 : RuntimeState) (c : Ckpt)
+    (adm : Tick → Bool) (ts : List Tick) : Bool :=
+  reachVerdict D c adm ts ((E.runFinal (E.load s0) (tickPairs ts)).map E.view)
+
+/-- `interpretDesign`'s run over a witness's ticks ends where `refTrace` does. -/
+theorem refRun_tickPairs (D : DesignCert) :
+    ∀ (ts : List Tick) (s : RuntimeState),
+      (refRun (interpretDesign D) s (tickPairs ts)).2 = (refTrace D s ts).finalState
+  | [], _ => rfl
+  | tk :: ts, s => by
+    simp only [tickPairs, List.map_cons, refRun, refTrace]
+    exact refRun_tickPairs D ts _
+
+/-- **The witness checker on an engine is sound**: for an engine whose run is `interpretDesign`'s,
+a `true` answer proves that `c` is reachable from `s0` in `ts.length` admitted steps. -/
+theorem checkReachOn_sound {σ : Type} {E : Engine σ} {D : DesignCert} {s0 : RuntimeState}
+    {c : Ckpt} {adm : Tick → Bool} {ts : List Tick} (hE : E.Sound (interpretDesign D))
+    (h : checkReachOn E D s0 c adm ts = true) : ReachableIn D s0 adm (Matches D c) ts.length := by
+  unfold checkReachOn reachVerdict at h
+  simp only [Bool.and_eq_true] at h
+  obtain ⟨ha, hr⟩ := h
+  refine ⟨ts, rfl, ha, ?_⟩
+  cases hrun : E.runFinal (E.load s0) (tickPairs ts) with
+  | error e => rw [hrun] at hr; cases hr
+  | ok qf =>
+    rw [hrun] at hr
+    have hv := Engine.runFinal_sound hE s0 (tickPairs ts) qf hrun
+    rw [refRun_tickPairs] at hv
+    rw [← hv]
+    exact hr
+
 /-! ## Unreachability by an inductive invariant -/
 
 /-- The final state of a trace is one more step from the final state of its prefix. -/
@@ -177,6 +229,7 @@ theorem not_reachable_of_inv {D : DesignCert} {s0 : RuntimeState} {adm : Tick �
   exact hT _ (hinv ts s0 h0 ha) hreach
 
 #audit_axioms HDLProof.Reach.checkReach_sound
+#audit_axioms HDLProof.Reach.checkReachOn_sound
 #audit_axioms HDLProof.Reach.not_reachable_of_inv
 #audit_axioms HDLProof.Reach.matches_flop
 #audit_axioms HDLProof.Reach.matches_word

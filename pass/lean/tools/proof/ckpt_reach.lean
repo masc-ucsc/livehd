@@ -4,14 +4,20 @@
 ```
 ckpt_reach check <cert> <ckpt> <stim> [edges:all|edges:third|edges:file:<path>]
                  [init:reset|init:zero|init:ckpt:<file>] [emit:<file.lean>]
+                 [route:ir|vc|ref] [ir:raw] [opt:off] [inc:off|inc:scan] [mem:fun]
 ```
 
 `check` replays a WITNESS: the stimulus (`stim v1`, as `cert_trace` reads it) from the start
-state, cycle by cycle, up to the checkpoint's cycle, on the checked direct simulator
-(`runDirect`), and compares the final state with the checkpoint where a step can see it (every
+state, cycle by cycle, up to the checkpoint's cycle, once, on a route's engine
+(`HDLProof/Run/Engine`'s `EngineSelector`; default `route:ir`, the checked direct simulator,
+staged), and compares the state it ends in with the checkpoint where a step can see it (every
 flop at its width, every memory word below `depth`). `HDLProof/Reach/Defs.lean`'s
-`checkReach_sound` proves, once for every design, that a `REACHABLE` answer means the
+`checkReachOn_sound` proves, once for every design and every engine whose run is
+`interpretDesign`'s (`EngineSelector_ir_sound`, `EngineSelector_ref_sound`, and for vc
+`EngineSelector_vc_sound` with `compileOpt_correct`), that a `REACHABLE` answer means the
 checkpoint is reachable in the reference semantics (`refTrace`, iterated `interpretDesign`).
+`route:fp` is refused: its state agrees with `interpretDesign`'s only below each memory's depth.
+The route knobs are `cert_run`'s (`ir:raw` the unstaged step, `runDirect`'s).
 
 * The start is `init:reset` (default: every flop at its reset value, every memory at its
   power-on image), `init:zero`, or another checkpoint (`init:ckpt:<file>`, its cycle `c0`).
@@ -19,8 +25,9 @@ checkpoint is reachable in the reference semantics (`refTrace`, iterated `interp
   `edges:all` (default) fires every clock on every cycle; `edges:third` and `edges:file:` are
   `cert_trace`'s.
 * `emit:<file.lean>` writes a theorem file: the certificate, both checkpoints and the stimulus
-  as text, `checkReach ... = true` by `native_decide` (one trusted-native axiom), and the
-  `ReachableIn` theorem `checkReach_sound` turns it into.
+  as text, `checkReach ... = true` by `native_decide` (one trusted-native axiom; `checkReach`
+  runs the checked direct simulator, `runDirect`), and the `ReachableIn` theorem
+  `checkReach_sound` turns it into.
 
 Results (the last line, `RESULT: ...`) and exit codes:
 `REACHABLE` 0; `NOT MATCHED` 1 (the first flop or word that differs is named); usage or I/O 2;
@@ -31,6 +38,8 @@ A `NOT MATCHED` says only that this witness ends elsewhere; the checkpoint may s
 reachable another way.
 -/
 import HDLProof.Reach.Defs
+import HDLProof.Run.Engine
+import HDLProof.Run.Kit
 import HDLProof.Run.Stim
 import LeanSemanticPrimitives.Compiler.CertIORoute
 
@@ -52,16 +61,13 @@ def leanEdges : EdgeSpec → String
 
 def usage : String :=
   "usage: ckpt_reach check <cert> <ckpt> <stim> [edges:all|edges:third|edges:file:<path>]\n" ++
-  "                        [init:reset|init:zero|init:ckpt:<file>] [emit:<file.lean>]"
+  "                        [init:reset|init:zero|init:ckpt:<file>] [emit:<file.lean>]\n" ++
+  "                        [route:ir|vc|ref] [ir:raw] [opt:off] [inc:off|inc:scan] [mem:fun]"
 
-/-- Read and validate a checkpoint against `D`. -/
-def loadCkpt (D : DesignCert) (path : String) : IO (Except String Ckpt) := do
-  match parse (← IO.FS.readBinFile path) with
-  | .error e => return .error s!"{path}: {e}"
-  | .ok c =>
-    match validate D (designHash D) c with
-    | some e => return .error s!"{path}: {e}"
-    | none => return .ok c
+/-- Read and validate a checkpoint against `D` (`Run/Kit`; `hash`: the design hash, computed
+once for both checkpoints). -/
+def loadCkpt (D : DesignCert) (hash : Thunk Nat) (path : String) : IO (Except String Ckpt) := do
+  return (← readCkpt D hash path).mapError (·.msg)
 
 inductive Init where
   | reset | zero | ckpt (path : String)
@@ -126,25 +132,35 @@ def check (cert ck stim : String) (opts : List String) : IO UInt32 := do
   let mut edgeOpt := "edges:all"
   let mut init : Init := .reset
   let mut emit : Option String := none
+  let mut knobs : Knobs := { route := .ir }
   for o in opts do
     if o.startsWith "edges:" then edgeOpt := o
     else if o == "init:reset" then init := .reset
     else if o == "init:zero" then init := .zero
     else if o.startsWith "init:ckpt:" then init := .ckpt (o.replace "init:ckpt:" "")
     else if o.startsWith "emit:" then emit := some (o.replace "emit:" "")
-    else do IO.eprintln s!"unknown option {o}\n{usage}"; return 2
+    else if o.startsWith "compact:" then do IO.eprintln s!"unknown option {o}\n{usage}"; return 2
+    else
+      match knobs.apply? o with
+      | some (.ok k) => knobs := k
+      | some (.error e) => do IO.eprintln s!"{e}\n{usage}"; return 2
+      | none => do IO.eprintln s!"unknown option {o}\n{usage}"; return 2
+  if knobs.route == .fp then
+    IO.eprintln "route:fp: ckpt_reach decides on a route whose state is interpretDesign's (ir, vc, ref); fp's agrees only below each memory's depth"
+    return 2
   let certBytes ← IO.FS.readBinFile cert
   let D ← match CertIO.admitAny certBytes with
     | .ok (_, D) => pure D
     | .error e => do IO.eprintln s!"{cert}: {e}"; say "RESULT: REFUSED (certificate)"; return 3
-  let c ← match ← loadCkpt D ck with
+  let hash := designHashLazy D
+  let c ← match ← loadCkpt D hash ck with
     | .ok c => pure c
     | .error e => do IO.eprintln e; say "RESULT: CHECKPOINT REFUSED"; return 4
   let (s0, c0, initText) ← match init with
     | .reset => pure (resetState D, 0, "")
     | .zero => pure (zeroState D, 0, "")
     | .ckpt p => do
-      match ← loadCkpt D p with
+      match ← loadCkpt D hash p with
       | .ok ci => pure (restore ci, ci.cycle, String.fromUTF8! (← IO.FS.readBinFile p))
       | .error e => do IO.eprintln e; say "RESULT: CHECKPOINT REFUSED (start)"; return 4
   unless c0 ≤ c.cycle do
@@ -161,19 +177,22 @@ def check (cert ck stim : String) (opts : List String) : IO UInt32 := do
   let ts := ticks D st e c0 n
   say s!"ckpt_reach check: {D.flops.size} flops, {D.memories.size} memories; target cycle {c.cycle}, \
 start cycle {c0}, witness of {n} ticks"
-  match runDirect D s0 ts with
+  -- the witness, once, on the route's engine; the verdict is `checkReachOn`'s on its last state
+  let sel ← match EngineSelector D knobs with
+    | .error err => do say s!"RESULT: REFUSED ({err.detail})"; return 3
+    | .ok b => pure (b.engine.runFinal (b.engine.load s0) (tickPairs ts) |>.map b.engine.view)
+  match sel with
   | .error err =>
-    say s!"RESULT: REFUSED ({err.render})"
+    say s!"RESULT: REFUSED ({err})"
     return 3
-  | .ok t =>
-    if checkReach D s0 c anyTick ts then
+  | .ok s =>
+    if reachVerdict D c anyTick ts (.ok s) then
       if let some out := emit then
         emitFile out (String.fromUTF8! certBytes) (String.fromUTF8! (← IO.FS.readBinFile ck))
           stimText init initText e c0 n
         say s!"theorem file written: {out}"
-      say s!"RESULT: REACHABLE (cycle {c.cycle}, {n} steps from the start; checkReach_sound)"
+      say s!"RESULT: REACHABLE (cycle {c.cycle}, {n} steps from the start; checkReachOn_sound, route {knobs.route.name})"
       return 0
-    let s := t.finalState
     match flopDiff D c s, wordDiff D c s with
     | some (k, got, want), _ =>
       say s!"RESULT: NOT MATCHED: flop {k} is 0x{hexStr got} after the witness, the checkpoint says 0x{hexStr want}"
