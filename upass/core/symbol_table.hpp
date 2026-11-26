@@ -57,6 +57,8 @@ public:
 
   // Active scope chain: innermost at back(). Pointers refer into scope_storage.
   std::vector<Scope*> stack;
+  // This unit will be retried after an import publishes its values.
+  bool import_pending = false;
 
   void                    function_scope(std::string_view func_id);
   // Push a block scope keyed by `key` (e.g. an LNAST nid hash). Re-entering
