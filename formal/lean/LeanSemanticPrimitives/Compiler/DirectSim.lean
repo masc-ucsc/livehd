@@ -35,6 +35,7 @@ Signal NAMES are metadata the certificate does not carry; they are a usability
 feature, not a prerequisite for the evaluator, and are deliberately absent.
 -/
 import LeanSemanticPrimitives.Compiler.DirectTrace
+import LeanSemanticPrimitives.Compiler.Engine
 
 namespace Compiler
 namespace Direct
@@ -249,6 +250,9 @@ structure SimOptions where
   hex       : Bool                  := false
   list      : Bool                  := false
   zeroInit  : Bool                  := false
+  /-- `--raw`: the unstaged direct step (`irRawEngine`, the step `runDirect` iterates) instead of
+  the staged one (`irEngine`); the same results (`Staged.step_eq`) -/
+  raw       : Bool                  := false
 deriving Inhabited
 
 def usage : String :=
@@ -266,6 +270,8 @@ def usage : String :=
   "  --watch-mem IDX:ADDR   print memory IDX at ADDR each cycle (repeatable)\n" ++
   "  --check-only           run the certificate and runtime checks, then exit\n" ++
   "  --hex                  print values in hexadecimal\n" ++
+  "  --raw                  step with the unstaged direct step (runDirect's); default:\n" ++
+  "                         the staged step, prepared once (the same results)\n" ++
   "exit status: 0 ok, 1 refused certificate or runtime shape, 2 usage, 3 I/O"
 
 def parseArgs : List String → SimOptions → Except String SimOptions
@@ -274,6 +280,7 @@ def parseArgs : List String → SimOptions → Except String SimOptions
   | "--show-state" :: rest, o => parseArgs rest { o with showState := true }
   | "--check-only" :: rest, o => parseArgs rest { o with checkOnly := true }
   | "--hex" :: rest, o => parseArgs rest { o with hex := true }
+  | "--raw" :: rest, o => parseArgs rest { o with raw := true }
   | "--inputs" :: f :: rest, o => parseArgs rest { o with inputs := some f }
   | "--state" :: f :: rest, o => parseArgs rest { o with state := some f }
   | "--init" :: "reset" :: rest, o => parseArgs rest { o with zeroInit := false }
@@ -316,23 +323,29 @@ def renderCycle (o : SimOptions) (t : Nat) (r : RuntimeResult) : List String :=
     | none   => s!"cycle {t} mem {i}[{a}] -"
   outs :: (st ++ mw)
 
-/-- Run a whole trace and render it.  Uses `runDirect`, so a refusal at ANY
-cycle aborts with a diagnostic rather than producing a partial trace that looks
-like a result. -/
+/-- Run a whole trace and render it: one `checkDesign`, then the `ir` engine (`Compiler/Engine`:
+`irEngine`, the staged step, or with `--raw` `irRawEngine`, the step `runDirect` iterates), each
+step after the runtime check, so a refusal at ANY cycle aborts with a diagnostic rather than
+producing a partial trace that looks like a result. The trace is `refTrace`'s
+(`Engine.trace_sound` with `irEngine_sound` or `irRawEngine_sound`). -/
 def runAndRender (o : SimOptions) (name : String) (D : DesignCert)
-    (s0 : RuntimeState) (ticks : List Tick) : Except SimError (List String) :=
-  match runDirect D s0 ticks with
-  | .error e => .error e
-  | .ok t =>
-      let body := (t.steps.zipIdx.map fun (r, k) => renderCycle o k r).flatten
+    (s0 : RuntimeState) (ticks : List Tick) : Except String (List String) :=
+  match checkDesign D with
+  | .error e => .error e.render
+  | .ok _ =>
+    let E := if o.raw then irRawEngine D else irEngine D
+    match E.trace (E.load s0) (ticks.map fun t => (t.edges, t.input)) with
+    | .error e => .error e
+    | .ok (rs, qf) =>
+      let body := (rs.zipIdx.map fun (r, k) => renderCycle o k r).flatten
       let fin := s!"final flop " ++
-        String.intercalate " " (t.finalState.flops.toList.map (fmtBV o.hex))
+        String.intercalate " " ((E.view qf).flops.toList.map (fmtBV o.hex))
       .ok (header name D :: (body ++ [fin]))
 
 /-- What one invocation produced. -/
 inductive SimOutcome where
   | ok      (lines : List String)
-  | refused (e : SimError)
+  | refused (msg : String)
 
 /-- Everything after the files are read is PURE, so the simulator's behaviour is
 a function of the certificate and the trace, not of the process. -/
@@ -345,17 +358,17 @@ def simRun (o : SimOptions) (name : String) (D : DesignCert)
   let ticks := (List.range n).map fun k => buildTick D (rows[k]?.getD {})
   if o.checkOnly then
     match checkDesign D with
-    | .error e => .refused e
+    | .error e => .refused e.render
     | .ok _ =>
       match ticks.head? with
       | none    => .ok [header name D, "ok"]
       | some t0 =>
         match checkRuntime D t0.edges t0.input s0 with
-        | .error e => .refused e
+        | .error e => .refused e.render
         | .ok _    => .ok [header name D, "ok"]
   else
     match runAndRender o name D s0 ticks with
-    | .error e     => .refused e
+    | .error msg   => .refused msg
     | .ok lines    => .ok lines
 
 def loadState : Option String → IO (Except String StateExt)
@@ -411,8 +424,8 @@ def simMain (registry : List (String × DesignCert)) (args : List String) : IO U
             | .error m => do IO.eprintln s!"lgraph-sim: {m}"; return 3
             | .ok rows =>
               match simRun o name D stExt rows with
-              | .refused e => do
-                  IO.eprintln s!"lgraph-sim: refused: {e.render}"
+              | .refused msg => do
+                  IO.eprintln s!"lgraph-sim: refused: {msg}"
                   return 1
               | .ok lines => do
                   for l in lines do IO.println l

@@ -208,7 +208,8 @@ cd formal/lean && lake build LgraphSim
 ./.lake/build/bin/lgraph-sim txfma_adder --cycles 10
 ```
 
-The simulator's options are:
+The simulator's options are (the step is the `ir` engine, `Compiler/Engine`: `irEngine`, the
+staged direct step, or with `--raw` `irRawEngine`, the step `runDirect` iterates):
 
 ```
 usage: lgraph-sim DESIGN [options]
@@ -216,12 +217,17 @@ usage: lgraph-sim DESIGN [options]
   --inputs FILE          input trace, one cycle per line (default: all zeros);
                          a line may start with @<bits>, one 0/1 per declared clock
                          (ordinal 0 first) = which clocks fire that cycle (default: all)
-  --state FILE           initial state (default: all zeros)
+  --state FILE           initial state; a flop it does not name starts at
+                         its reset value (memories at zero)
+  --init reset|zero      the start of every flop the state file does not name:
+                         its reset value (default) or 0
   --cycles N             cycles to run (default: the input trace's length, else 1)
   --show-state           also print the flop state each cycle
   --watch-mem IDX:ADDR   print memory IDX at ADDR each cycle (repeatable)
   --check-only           run the certificate and runtime checks, then exit
   --hex                  print values in hexadecimal
+  --raw                  step with the unstaged direct step (runDirect's); default:
+                         the staged step, prepared once (the same results)
 exit status: 0 ok, 1 refused certificate or runtime shape, 2 usage, 3 I/O
 ```
 
