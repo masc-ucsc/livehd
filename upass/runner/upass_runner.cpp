@@ -18900,6 +18900,8 @@ void uPass_runner::detuple_emit_declare(std::string_view name, const uPass_detup
   }
   auto body = scratch_forest_->create_tree_temp("detuple-decl");
   auto ln   = std::make_shared<Lnast>(body, std::string(root_lnast_->get_top_module_name()));
+  // Unbound template extents must still be deferred in each synthesized leaf.
+  ln->set_template(lm->get_lnast()->is_template() && !lm->in_inline_frame());
   auto root = ln->set_root(Lnast_ntype::create_declare());
   stamp_scratch_srcid(ln, root);
   ln->add_child(root, Lnast_node::create_ref(name));
@@ -19123,14 +19125,14 @@ bool uPass_runner::try_detuple_declare() {
         // A scalar named tuple has no dimension: `memory` must stay false, or
         // try_detuple_tuple_get/try_detuple_store route it through the
         // memory index-alias path.
+        // Keep the aggregate's storage identity alive before publishing dotted
+        // leaves. Otherwise their reg/wire facts have no root to attach to.
+        bake_decl_pre_step(/*is_declare=*/true);
         Lnast_node dim_node;
         if (is_array) {
           dim_node = Lnast_ntype::is_ref(ln->get_type(dim)) ? Lnast_node::create_ref(detuple_text(dim))
                                                             : Lnast_node::create_const(detuple_text(dim));
         }
-        // Keep the aggregate's storage identity alive before publishing dotted
-        // leaves. Otherwise their reg/wire facts have no root to attach to.
-        bake_decl_pre_step(/*is_declare=*/true);
         Detuple_split split{.fields = it->second, .mode = mode_text, .memory = is_array, .dimension = dim_node};
         split.whole_bound = !init.is_invalid();  // the declaration's own initializer is the construction
         detuple_splits_.insert_or_assign(var, split);
@@ -20046,6 +20048,17 @@ bool uPass_runner::try_detuple_store() {
           return true;
         }
         write_leaf(var + "." + field.name, Lnast_node::create_ref(rhs + "." + field.name));
+      }
+      return true;
+    }
+    // A runtime if-expression merges record arms into scalar leaves too.
+    // These leaves belong to the SSA base shared by the conditional writes.
+    const std::string base = rhs.substr(0, rhs.find("___ssa_"));
+    if (const auto merged = split_tuple_leaves_.find(base); merged != split_tuple_leaves_.end()
+        && merged->second.size() == split.fields.size()
+        && std::ranges::all_of(split.fields, [&](const auto& f) { return merged->second.contains(f.name); })) {
+      for (const auto& field : split.fields) {
+        write_leaf(var + "." + field.name, Lnast_node::create_ref(base + "." + field.name));
       }
       return true;
     }

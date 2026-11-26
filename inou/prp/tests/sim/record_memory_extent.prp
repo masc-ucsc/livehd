@@ -1,0 +1,39 @@
+/*
+:name: record_memory_extent
+:type: simulation
+*/
+type Entry = (tag:U2, data:U16)
+
+mod slots<N>(clk:Clock, index:U2, write:Bool, value:U16, bypass:Bool=false) -> (q:U16@[], tag:U2@[]) {
+  comptime const depth = if N > 1 { N } else { 2 }
+  reg entries:[depth]Entry:[ordering="old"] = nil
+  const address = index % depth
+  if write { entries[address] = (tag=index, data=value) }
+  reg fallback:Entry = (tag=0, data=77)
+  wire selected:Entry = nil
+  const row = entries[address]
+  selected = if bypass { fallback } else { row }
+  q = selected.data
+  tag = selected.tag
+}
+
+pub mod record_memory_extent(clk:Clock, index:U2, write:Bool, value:U16) -> (q:U16@[], tag:U2@[], small:U16@[], bypass:U16@[]) {
+  (q, tag) = slots<N=4>(clk=clk,index=index,write=write,value=value)
+  bypass = slots<N=4>(clk=clk,index=index,write=write,value=value,bypass=index == 2).q
+  small = slots<N=1>(clk=clk,index=index,write=write,value=value).q
+}
+
+test record_memory_extent.independent_fields {
+  mut d = record_memory_extent
+  tick 8 {
+    d.index = clock % 4
+    d.write = clock < 4
+    d.value = 1000 + clock
+    step
+    if clock >= 4 {
+      assert(d.q == 1000 + clock % 4 and d.tag == clock % 4)
+      assert(d.bypass == (if clock % 4 == 2 { 77 } else { 1000 + clock % 4 }))
+      assert(d.small == 1002 + clock % 2)
+    }
+  }
+}
