@@ -113,6 +113,8 @@ tool runs plain shortest-first routing with no repair.
 | `--order short\|long\|pins\|fewpins` | net order; clock nets always go first |
 | `--timing F`, `--crit-frac X` | pin slacks from the placer (`"inst:pin" slack_ps`); the worst fraction X of the nets goes first by slack, the rest by `--order` |
 | `--long-frac X` | the longest fraction X of the data nets (by pin box) goes ahead of the rest, longest first |
+| `--spread F`, `--spread-rounds N` | with `--prelegal`: before the row plan, the places the floating cells wish for move out of tiles filled above F of their free row area into less dense neighbours (cell shifting on the 32-track tiles, at most N rounds); the cells are not moved, the row plan and the sites still decide |
+| `--pin-footprint P` | with `--prelegal`: a floating cell asks its row for the room its signal pins need at P pins per um2, on its right; given up for the whole design if the rows cannot hold it |
 | `--pin-cost K`, `--pin-tile N` | M2 and M3 wire costs `1 + K * (pins / N - 1)` times more over a 32-track tile with more than N pins (default 27, 20 pins per um2 on ASAP7), so wires that only pass a pin-dense tile go over it on M4 and above; off at K = 0 |
 | `--prelegal` | movable cells float at their input pose and take the nearest free legal site when a net first needs them; give the pose before legalization |
 | `--clock-nets F` | clock nets, one per line, for a pose written before they were tagged `USE CLOCK`: a net name, or an endpoint `cell/pin` (or a port) that keeps its name when nets are renamed |
@@ -200,7 +202,10 @@ against the source and the run's artifacts). The routing steps are `rf_route`, w
 
 1. Expand virtual buffers (only where a first-order cap or slew estimate fails), then wirelength resynthesis on
    cloned graphs; a batch is kept only if timing does not degrade and wirelength drops (339 s).
-2. First PCRS clock tree, legalized, so timing sees a propagated clock (3 s).
+2. First PCRS clock tree, legalized, so timing sees a propagated clock (3 s). Since 2026-11-25 this step runs only
+   with `synth.place.pcrs.initial=true`; by default steps 3 to 5 time an ideal clock. The times and the refusals
+   below are of the run with the first tree. Without it the buffer sweeps of steps 4 and 5 are accepted (5 of 9) and
+   the routed design times at 378 MHz against 161 MHz.
 3. Timing-driven re-place and region refinement (685 s; the slack-weighted re-placement ran no round here).
 4. Gate sizing and buffer-tree repair (197 s). The buffer sweep was refused by the hold guard.
 5. Repair loop, three iterations of re-place, sizing and buffer repair (1,250 s). All 15 buffer sweeps refused by

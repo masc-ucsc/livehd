@@ -1036,9 +1036,10 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "write the mapped hierarchy clock structure and RTL feedback to pcrs_clock_structure.json before placement"},
     {"place.pcrs.clock", "false", Synth_set_option::Kind::boolean,
      "build the physical PCRS clock for timing and repair, then rebuild it before final legalization"},
-    {"place.pcrs.initial", "true", Synth_set_option::Kind::boolean,
+    {"place.pcrs.initial", "false", Synth_set_option::Kind::boolean,
      "with place.pcrs.clock: build a first clock tree before timing-driven placement and repair, so those steps see a "
-     "propagated clock; false times them with an ideal clock and builds the tree once, before final legalization"},
+     "propagated clock; false (the default) times them with an ideal clock and builds the tree once, before final "
+     "legalization"},
     {"place.pcrs.source_fork", "false", Synth_set_option::Kind::boolean,
      "let a characterized clock source drive several buffer branches directly when it meets limits and saves insertion delay"},
     {"place.pcrs.leaf_pull", "0", Synth_set_option::Kind::file,

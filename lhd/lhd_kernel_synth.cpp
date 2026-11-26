@@ -2753,9 +2753,12 @@ void synth_command_once(Options& opts, Result& res, const std::shared_ptr<livehd
   bool       run_timing_place = !isolated && truthy(synth_set(opts, "place.timing_driven", run_place && place_options.full ? "true" : "false"));
   const bool macro_plan_only  = run_place && place_options.full && !place_options.final_cells;
   const bool build_pcrs_clock = run_place && place_options.full && place_options.clock_tree && !macro_plan_only;
-  // The first tree switches the timers to a propagated clock for the steps before the final rebuild. Without it those
-  // steps time an ideal clock, and the tree is built once, from the optimized positions.
-  const bool initial_pcrs_clock = build_pcrs_clock && truthy(synth_set(opts, "place.pcrs.initial", "true"));
+  // A first tree switches the timers to a propagated clock for the steps before the final rebuild. By default there is
+  // none: those steps time an ideal clock, and the tree is built once, from the optimized positions. On the first,
+  // unbalanced tree the paths from input ports (their delay is set against an ideal clock) showed hold violations
+  // that made the hold guard refuse every buffer sweep (eyeriss: 161 MHz with the first tree, 378 MHz without;
+  // NVDLA O: 490 and 502 MHz).
+  const bool initial_pcrs_clock = build_pcrs_clock && truthy(synth_set(opts, "place.pcrs.initial", "false"));
   // The provisional domino profile (pass.usyn.physical=domino_provisional,
   // pass/domplace) is opt-in, and every consumer it does not support is an
   // explicit usage error here: no default moves for it.
