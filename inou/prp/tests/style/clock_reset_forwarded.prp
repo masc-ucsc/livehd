@@ -1,0 +1,12 @@
+/*
+:name: style_clock_reset_forwarded
+:type: style
+:style: clock-port-type reset-port-type
+:message: only forwarded to calls|only drives clock pins or calls
+:help: Clock|Reset
+*/
+// Translated RTL: `clock`/`reset` are plain 1-bit inputs only forwarded to a
+// child. Both should carry their types.
+pub mod m(clock:U1, reset:U1, din:U8) -> (dout:U8@[]) {
+  dout = child(clock=clock, reset=reset, din=din)
+}

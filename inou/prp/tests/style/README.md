@@ -21,8 +21,9 @@ source-only style hints: every `*.prp` here auto-generates a `prp-style-<name>`
 
 - `lhd pyrope style FILE --diag-fmt json` must report **exactly** the listed rule
   codes (no more, no fewer) and exit 2 (0 for `none`). A partial parse, an
-  error, or a warning fails the test: a fixture only has to *parse*, nothing is
-  compiled.
+  error, or any other warning fails the test: a fixture only has to *parse*,
+  nothing is compiled. The port-type rules (`clock-port-type`, `reset-port-type`)
+  and `unneeded-backtick` are warning-severity findings and count as rule codes.
 - Every hint must name its silencing tag, `// prp-style-allow <code>`.
 - `locate_style_<code>` in a comment pins the line where that rule's finding
   starts (same idea as `locate_error_here` / `locate_warning_here`).
@@ -31,7 +32,9 @@ source-only style hints: every `*.prp` here auto-generates a `prp-style-<name>`
 
 One fixture per rule (`repeated-code`, `likely-unrolled-loop`, `whole-tuple-copy`,
 `flattened-bundle-arguments`, `single-destination-conditional`, `hardcoded-reset`,
-`reset-port-type`, `narrow-scoped-mut`, `compact-bit-packing`), the `match` form of `single-destination-conditional`
+`reset-port-type`, `clock-port-type`, `unneeded-backtick`, `narrow-scoped-mut`, `compact-bit-packing`), the
+forwarded clock/reset shape (`clock_reset_forwarded`) and its near-misses
+(`clock_reset_clean`), the `match` form of `single-destination-conditional`
 (`single_destination_match`), plus the reset near-miss (`reset_clean`), the active-low hint, the "all three hints" shape
 (`reset_hand_written_u1`, the twin of `tests/equiv/struct_top_port.prp`), and the
 `prp-style-allow` scoping rules (`allow_scope`, `allow_file_scope`).

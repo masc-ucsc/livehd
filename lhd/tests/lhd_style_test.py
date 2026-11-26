@@ -28,7 +28,7 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
                               text=True, capture_output=True, timeout=30)
         assert proc.returncode in (0, 2), proc.stderr
         codes_all = {"likely-unrolled-loop", "repeated-code", "whole-tuple-copy", "flattened-bundle-arguments",
-                     "single-destination-conditional", "hardcoded-reset", "reset-port-type",
+                     "single-destination-conditional", "hardcoded-reset", "reset-port-type", "clock-port-type", "unneeded-backtick",
                      "narrow-scoped-mut", "compact-bit-packing"}
         codes = {"likely-unrolled-loop", "repeated-code"}
         if rule == "all":
@@ -390,6 +390,71 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
     # Both rules honor prp-style-allow (the port's rule from before the module).
     allowed = "// prp-style-allow hardcoded-reset, reset-port-type\n" + mod("  if rst { q = 0 } else { q = din }\n")
     assert run(allowed, rule=hard)[0] == [] and run(allowed, rule=rtype)[0] == []
+
+    # clock-port-type / reset-port-type are warnings (an untyped clock/reset is
+    # likely wrong hardware); every other rule is an info suggestion.
+    ctype = "clock-port-type"
+    def ports(sig, body="  dout = din\n", kind="mod"):
+        return f"pub {kind} m({sig}, din:U7) -> (dout:U7) {{\n{body}}}\n"
+    findings, _, _ = run(ports("clock:U1, reset:Reset"), rule=ctype)
+    assert len(findings) == 1 and findings[0]["severity"] == "warning" and findings[0]["attrs"]["port"] == "clock", findings
+    findings, _, _ = run(ports("clk:Clock, reset:u1"), rule=rtype)  # legacy lower-case spelling
+    assert len(findings) == 1 and findings[0]["severity"] == "warning" and findings[0]["attrs"]["declared_type"] == "u1", findings
+    assert run(mod("  if rst { q = 0 } else { q = din }\n"), rule=hard)[0][0]["severity"] == "info"
+    # A hand-cleared control NOT named like a reset: still reset-port-type, but info.
+    clr = mod("  if clear { q = 0 } else { q = din }\n", "clear:U1")
+    assert [f["severity"] for f in run(clr, rule=rtype)[0]] == ["info"], run(clr, rule=rtype)[0]
+    for sig in ["clk_i:U1", "core_clock:U1", "gclk:Bool", "io_clock:bool"]:
+        assert len(run(ports(sig + ", rst:Reset"), rule=ctype)[0]) == 1, sig
+    for sig in ["rst_ni:U1", "reset:Bool", "io_reset:U1", "arst:U1"]:
+        assert len(run(ports("clk:Clock, " + sig), rule=rtype)[0]) == 1, sig
+    # Forwarded unchanged to a call (named or positional); the argument NAME is not a use.
+    fwd = "  dout = child(clock=clock, reset=reset, din)\n"
+    findings, _, _ = run(ports("clock:U1, reset:U1", fwd), rule=ctype)
+    assert len(findings) == 1 and findings[0]["attrs"]["forwarded"] == "1", findings
+    assert len(run(ports("clock:U1, reset:U1", fwd), rule=rtype)[0]) == 1
+    assert len(run(ports("clock:U1, reset:U1", "  dout = child(clock, reset)\n"), rule=ctype)[0]) == 1
+    # Functional: any 1-bit port used only as clock_pin=, whatever its name.
+    pin = "pub mod m(strobe:U1, din:U7) -> (dout:U7@[]) {\n  reg q:U7:[clock_pin=strobe] = 0\n  dout = q\n  q = din\n}\n"
+    findings, _, _ = run(pin, rule=ctype)
+    assert len(findings) == 1 and findings[0]["attrs"]["clock_pins"] == "1", findings
+    clock_negatives = [
+        ports("clock:Clock, reset:Reset", fwd),
+        ports("clock:U1, rst:Reset", "  dout = din + clock\n"),         # used as data
+        ports("clock:U8, rst:Reset"),                                   # not 1 bit
+        ports("clk_en:U1, rst:Reset"),                                  # clock word not last
+        ports("tl_clock_xing_out_ready:U1, rst:Reset"),                 # a bundle name containing "clock"
+        ports("clock:U1", kind="comb"),                                 # a comb has no registers
+        ports("strobe:U1, rst:Reset"),                                  # unused, not named like a clock
+    ]
+    for case_source, (findings, _, _) in zip(clock_negatives, run_many(clock_negatives, rule=ctype)):
+        assert findings == [], (case_source, findings)
+    reset_negatives = [
+        ports("clk:Clock, reset:Reset", fwd),
+        ports("clk:Clock, reset:U1", "  dout = din + reset\n"),          # used as data
+        ports("clk:Clock, reset_vector:U1"),                            # a data word in the name
+        ports("clk:Clock, preset:U1"),                                  # not a reset word
+        ports("reset:U1", kind="comb"),
+    ]
+    for case_source, (findings, _, _) in zip(reset_negatives, run_many(reset_negatives, rule=rtype)):
+        assert findings == [], (case_source, findings)
+    allowed = "// prp-style-allow clock-port-type\n" + ports("clock:U1, rst:Reset")
+    assert run(allowed, rule=ctype)[0] == []
+    # A backticked `reset` is still named reset (old style; see unneeded-backtick).
+    assert len(run(ports("clk:Clock, `reset`:U1"), rule=rtype)[0]) == 1
+
+    # unneeded-backtick: `clock`/`reset` are ordinary names since the upper-case
+    # type rule (types Clock/Reset); one warning per word, at its first use.
+    tick = "unneeded-backtick"
+    findings, _, _ = run(ports("`clock`:Clock, `reset`:Reset", "  dout = child(`clock`=`clock`, din)\n"), rule=tick)
+    assert sorted((f["attrs"]["name"], f["attrs"]["uses"], f["severity"]) for f in findings) == \
+        [("clock", "3", "warning"), ("reset", "1", "warning")], findings
+    assert run(ports("clock:Clock, reset:Reset", "  dout = child(`io.a`=din, `clocks`=din)\n"), rule=tick)[0] == []
+    assert run("// prp-style-allow unneeded-backtick\n" + ports("`clock`:Clock"), rule=tick)[0] == []
+    # Warnings rank ahead of suggestions, so --max-findings 1 still shows one.
+    many = "\n".join(f"const lane{i} = data[{i}]" for i in range(8)) + "\nconst `reset` = 1\n"
+    findings, records, _ = run(many, "--max-findings", "1", min_repeats=None, rule=tick)
+    assert len(findings) == 1, records
 
     # `// prp-style-allow CODE[, CODE]` silences those codes for the rest of the
     # enclosing scope only; leaving the scope (tree pop) ends the allow.
