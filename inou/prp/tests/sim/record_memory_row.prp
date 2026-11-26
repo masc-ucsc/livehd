@@ -1,0 +1,52 @@
+/*
+:name: record_memory_row
+:type: simulation
+*/
+// Store and select entire rows of a record memory through a type parameter.
+
+mod bank<T>(clk:Clock, write:U1, addr:U1, read:U1, value:T) -> (row:T@[]) {
+  reg mem:[2]T:[ordering="old"] = nil
+  if write != 0 { mem[addr] = value }
+  row = if write != 0 { value } else { mem[read] }
+}
+
+mod relay<R>(clk:Clock, write:U1, addr:U1, read:U1, value:R) -> (row:R@[]) {
+  const b = bank<T=R>(clk=clk, write=write, addr=addr, read=read, value=value)
+  row = b.row
+}
+
+mod rowBank<WIDTH>(clk:Clock, write:U1, addr:U1, read:U1, tag:U3, data:U17)
+    -> (tagOut:U3@[], dataOut:U17@[]) {
+  type Packet = (tag:U3, data:Unsigned(bits=WIDTH))
+  const b = relay<Packet>(clk=clk, write=write, addr=addr, read=read, value=(tag=tag, data=data))
+  tagOut = b.row.tag
+  dataOut = b.row.data
+}
+
+pub mod record_memory_row(clk:Clock, write:U1, addr:U1, read:U1, tag:U3, data:U17)
+    -> (tagOut:U3@[], dataOut:U17@[]) {
+  const b = rowBank<17>(clk=clk, write=write, addr=addr, read=read, tag=tag, data=data)
+  tagOut = b.tagOut
+  dataOut = b.dataOut
+}
+
+test record_memory_row.rows {
+  mut d = record_memory_row
+  d.write = 1
+  d.addr = 0
+  d.tag = 5
+  d.data = 0x12345
+  step
+  d.addr = 1
+  d.tag = 2
+  d.data = 0xfedc
+  step
+  assert(d.tagOut == 2 and d.dataOut == 0xfedc)
+  d.write = 0
+  d.read = 0
+  step
+  assert(d.tagOut == 5 and d.dataOut == 0x12345)
+  d.read = 1
+  step
+  assert(d.tagOut == 2 and d.dataOut == 0xfedc)
+}

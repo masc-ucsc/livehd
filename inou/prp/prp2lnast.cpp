@@ -8173,11 +8173,8 @@ void Prp2lnast::process_type_statement(TSNode n) {
     named_alias = std::string_view(ts_node_type(ts_node_named_child(alias, i))) == "identifier";
   }
 
-  if (scalar_prim_alias) {
-    // `type Row = Unsigned(bits=N)` in a generic body: the bound only folds
-    // once N is bound, so it defers like a variable declaration's.
-    prelower_int_type_bounds(alias);
-  }
+  // Alias bounds, including each leaf of a record, fold at specialization.
+  prelower_int_type_bounds(alias);
   capture_frames_.back().types.insert(std::string(canonical_escaped_ident(trim(get_text(name)))));
   auto idx = builder.add_child(Lnast_ntype::create_declare());
   lnast->add_child(idx, Lnast_node::create_ref(get_text(name)));

@@ -89,6 +89,10 @@
 
 namespace {
 
+// An imported unit may start with "../". Only a dot after the last path
+// separator separates the file namespace from its module name.
+std::string_view detuple_file_name(std::string_view unit) { return unit.substr(0, unit.find('.', unit.find_last_of('/') + 1)); }
+
 // Emit a function-call argument diagnostic (06-functions.md §"Argument naming")
 // and abort the walk. The record is flushed to the JSONL sink crash-safe before
 // the throw unwinds up to main's top-level catch, so the error-test harness sees
@@ -10097,7 +10101,10 @@ void uPass_runner::copy_subtree_into(const std::shared_ptr<Lnast>& src, const Ln
             }
           }
         }
-        if (!gb.tuple_fields.empty() && Lnast_ntype::is_store(dst->get_type(dst_parent))) {
+        // Expand record types in a port declaration. A nested call's named
+        // generic argument is also a store, but needs the type reference.
+        if (!gb.tuple_fields.empty() && Lnast_ntype::is_store(dst->get_type(dst_parent))
+            && src->get_name(src->get_first_child(src->get_parent(src_nid))) != call_generic_arg_marker) {
           auto tuple = dst->add_child(dst_parent, Lnast_ntype::create_tuple_add());
           for (const auto& field : gb.tuple_fields) {
             auto entry = dst->add_child(tuple, Lnast_ntype::create_store());
@@ -10831,7 +10838,7 @@ std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::share
   for (const auto& [generic, binding] : type_subst) {
     (void)generic;
     if (!binding.tuple_fields.empty()) {
-      detuple_registry_->named_types.insert_or_assign(mangled.substr(0, mangled.find('.')) + "\n" + binding.type_name,
+      detuple_registry_->named_types.insert_or_assign(std::string(detuple_file_name(mangled)) + "\n" + binding.type_name,
                                                       binding.tuple_fields);
     }
   }
@@ -16343,6 +16350,8 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
         actuals.emplace_back(io.inputs[i].name + "." + field.name, value->second);
       } else if (auto ref = try_tuple_slot_ref(source, field.name)) {
         actuals.emplace_back(io.inputs[i].name + "." + field.name, Lnast_node::create_ref(*ref));
+      } else if (stream_port_in_leaf_.contains(source + "." + field.name)) {
+        actuals.emplace_back(io.inputs[i].name + "." + field.name, Lnast_node::create_ref(source + "." + field.name));
       } else if (auto constant = try_fold_ref(source + "." + field.name); constant && !constant->is_invalid()) {
         actuals.emplace_back(io.inputs[i].name + "." + field.name, Lnast_node::create_const(constant->to_pyrope()));
       } else if (const auto split = detuple_splits_.find(source);
@@ -19673,11 +19682,7 @@ std::string uPass_runner::detuple_registry_key(std::string_view type_name) const
   // it (reproduced: an 8-bit field truncated to another file's 2-bit layout).
   // Types are file-scoped, so qualify by the owning source unit: a function
   // body "file.entity[...]" shares its file wrapper's prefix.
-  const auto  unit      = lm->get_lnast()->get_top_module_name();
-  // Parent-relative import paths contain dots before their final slash.
-  const auto  separator = unit.find_last_of('/');
-  const auto  dot       = unit.find('.', separator == std::string_view::npos ? 0 : separator + 1);
-  std::string key(unit.substr(0, dot));
+  std::string key(detuple_file_name(lm->get_lnast()->get_top_module_name()));
   if (const auto member = type_name.rfind('.'); registry_ && member != std::string_view::npos) {
     const auto ns     = type_name.substr(0, member);
     auto       target = ns;
@@ -19803,12 +19808,26 @@ bool uPass_runner::try_detuple_store() {
     // store so branch merging, type checks and SSA see the same tuple as
     // they would for an explicit named tuple literal.
     if (rest.size() == 1 && rest.front().is_ref()) {
-      const auto rhs = detuple_split_name(rest.front().get_name());
+      const auto                                      rhs = detuple_split_name(rest.front().get_name());
+      std::vector<std::pair<std::string, Lnast_node>> fields;
       if (const auto source = detuple_splits_.find(rhs); source != detuple_splits_.end() && !source->second.memory) {
-        std::vector<std::pair<std::string, Lnast_node>> fields;
         for (const auto& field : source->second.fields) {
           fields.emplace_back(field.name, Lnast_node::create_ref(rhs + "." + field.name));
         }
+      } else if (symbol_table_.in_uncertain_scope()) {
+        // A record port is already split into ABI leaves. Either arm of a
+        // whole-record mux needs those leaves, including the first arm.
+        if (const auto port = resolve_stream_port_path(rhs); port && stream_port_prefix_.contains(*port)) {
+          const auto prefix = *port + ".";
+          for (const auto& leaf : stream_port_in_leaf_) {
+            if (leaf.starts_with(prefix)) {
+              fields.emplace_back(leaf.substr(prefix.size()), Lnast_node::create_ref(leaf));
+            }
+          }
+          std::ranges::sort(fields, {}, &decltype(fields)::value_type::first);
+        }
+      }
+      if (!fields.empty()) {
         const auto tmp = std::format("%tuplecopy{}", ++inline_seq_);
         emit_inline_tuple(tmp, fields);
         detuple_emit_store(var, {Lnast_node::create_ref(tmp)});
@@ -19898,6 +19917,21 @@ bool uPass_runner::try_detuple_store() {
     return true;
   }
 
+  // A whole row of a record memory uses the same shape checks as a scalar
+  // record. Carry its address into each per-field memory write.
+  std::optional<Lnast_node> row;
+  if (split.memory && rest.size() == 2) {
+    row = rest.front();
+    rest.erase(rest.begin());
+  }
+  const auto write_leaf = [&](std::string_view leaf, const Lnast_node& value) {
+    if (row) {
+      detuple_emit_store(leaf, {*row, value});
+    } else {
+      detuple_emit_store(leaf, {value});
+    }
+  };
+
   if (rest.size() == 1 && rest[0].is_ref()) {
     const std::string rhs = detuple_split_name(rest[0].get_name());
     if (const auto values = detuple_tuple_values_.find(rhs); values != detuple_tuple_values_.end()) {
@@ -19968,7 +20002,7 @@ bool uPass_runner::try_detuple_store() {
           }
           const auto leaf_name = var + "." + split.fields[i].name;
           (void)detuple_validate_scalar_store(leaf_name, split.fields[i].type, *bound[i]);
-          detuple_emit_store(leaf_name, {*bound[i]});
+          write_leaf(leaf_name, *bound[i]);
         }
         return true;
       }
@@ -19992,7 +20026,7 @@ bool uPass_runner::try_detuple_store() {
         }
         const auto leaf_name = var + "." + field.name;
         (void)detuple_validate_scalar_store(leaf_name, field.type, *value);
-        detuple_emit_store(leaf_name, {*value});
+        write_leaf(leaf_name, *value);
       }
       return true;
     }
@@ -20011,7 +20045,7 @@ bool uPass_runner::try_detuple_store() {
                         std::format("tuple `{}` has no field `{}` required by `{}`", rhs, field.name, var));
           return true;
         }
-        detuple_emit_store(var + "." + field.name, {Lnast_node::create_ref(rhs + "." + field.name)});
+        write_leaf(var + "." + field.name, Lnast_node::create_ref(rhs + "." + field.name));
       }
       return true;
     }
@@ -20021,7 +20055,7 @@ bool uPass_runner::try_detuple_store() {
           return stream_port_in_leaf_.contains(rhs + "." + field.name);
         })) {
       for (const auto& field : split.fields) {
-        detuple_emit_store(var + "." + field.name, {Lnast_node::create_ref(rhs + "." + field.name)});
+        write_leaf(var + "." + field.name, Lnast_node::create_ref(rhs + "." + field.name));
       }
       return true;
     }
@@ -20036,7 +20070,7 @@ bool uPass_runner::try_detuple_store() {
     const auto& only      = split.fields.front();
     const auto  leaf_name = var + "." + only.name;
     (void)detuple_validate_scalar_store(leaf_name, only.type, rest[0]);
-    detuple_emit_store(leaf_name, {rest[0]});
+    write_leaf(leaf_name, rest[0]);
     return true;
   }
 
@@ -20134,7 +20168,18 @@ bool uPass_runner::try_detuple_tuple_get() {
     }
     if (split.memory) {
       detuple_index_aliases_.insert_or_assign(dst_name, Detuple_index_alias{src_name, key_node});
-      return true;  // virtual mem[index] aggregate; the field pick consumes it
+      // Materialize the value as well as recording the address for a direct
+      // field pick. An assignment or a mux can consume the entire row.
+      std::vector<std::pair<std::string, Lnast_node>> fields;
+      for (const auto& field : split.fields) {
+        const auto leaf    = std::format("%row{}", ++inline_seq_);
+        detuple_synthetic_ = true;
+        emit_inline_op(Lnast_ntype::create_tuple_get(), leaf, {Lnast_node::create_ref(src_name + "." + field.name), key_node});
+        detuple_synthetic_ = false;
+        fields.emplace_back(field.name, Lnast_node::create_ref(leaf));
+      }
+      emit_inline_tuple(dst_name, fields);
+      return true;
     }
     detuple_error("tuple-field", std::format("`{}` has no tuple field `{}`", src_name, key_node.get_name()));
     return true;
