@@ -1,0 +1,41 @@
+/*
+:name: conditional_reset_mux
+:type: simulation
+*/
+// A conditionally called mod whose synchronous reset is a 1-bit mux of two
+// reset inputs: the activation gate reopens the clock on (pick and rst_a) or
+// (!pick and rst_b), never on the unselected reset.
+mod inner(clk:Clock, rst_a:Reset, rst_b:Reset, pick:Bool) -> (q:U8@[0]) {
+  const r = if pick { rst_a } else { rst_b }
+  reg c:U8:[clock_pin=clk, reset_pin=r] = 5
+  wrap c += 1
+  q = c
+}
+
+pub mod conditional_reset_mux(clk:Clock, rst_a:Reset, rst_b:Reset, pick:Bool, en:Bool) -> (q:U8@[0]) {
+  q = 0
+  if en {
+    q = inner(clk=clk, rst_a=rst_a, rst_b=rst_b, pick=pick)
+  }
+}
+
+test conditional_reset_mux.selected_reset {
+  mut d = conditional_reset_mux
+  mut want:U8 = 5
+  tick 12 {
+    const active = clock == 1 or clock == 2 or clock == 6 or clock >= 9
+    const ra     = clock == 0 or clock == 3 or clock == 8
+    const rb     = clock == 4 or clock == 7 or clock == 2
+    const pk     = clock < 5
+    d.rst_a = ra
+    d.rst_b = rb
+    d.pick  = pk
+    d.en    = active
+    const rr = if pk { ra } else { rb }
+    if rr { want = 5 } elif active { wrap want += 1 }
+    step
+    if active {
+      assert(d.q == want, "only the selected reset clears the gated lane")
+    }
+  }
+}

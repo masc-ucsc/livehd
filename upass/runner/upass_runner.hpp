@@ -69,10 +69,12 @@ struct uPass_function_registry {
 // without rescanning or copying any tree.
 struct uPass_detuple_registry {
   struct Scalar_type {
-    upass::Kind kind{upass::Kind::unknown};
-    Dlop        max;
-    Dlop        min;
+    upass::Kind              kind{upass::Kind::unknown};
+    Dlop                     max;
+    Dlop                     min;
+    std::vector<std::string> dimensions{};
 
+    void emit(Lnast& ln, Lnast_nid parent) const;
     [[nodiscard]] bool valid() const { return kind == upass::Kind::integer || kind == upass::Kind::boolean; }
   };
   struct Field {
@@ -81,7 +83,8 @@ struct uPass_detuple_registry {
   };
   using Layout = std::vector<Field>;
 
-  absl::flat_hash_map<std::string, Layout> named_types;
+  absl::flat_hash_map<std::string, Layout>                                        named_types;
+  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, std::string>> file_imports;
 };
 
 // Preorder facts of one LNAST for the loop roll planner's "is it written
@@ -358,6 +361,8 @@ protected:
   // declared max/min + comptime on the "0" Entry; mode/type_name on the
   // Bundle). End state: no pass walks a type subtree; until then the
   // passes' own walks coexist.
+  void bake_integer_bound(std::string_view var, Dlop& out);
+  void borrow_scalar_alias(const std::string& alias, Dlop& max, Dlop& min, upass::Kind& kind);
   void bake_decl_pre_step(bool is_declare);
 
   // Drain the dotted-bake stash (Symbol_table::pending_decl_facts):
@@ -387,7 +392,7 @@ protected:
   void emit_rolled_for_verbatim(bool parent_is_stmts = false);
 
   // Returns the first non-nullopt result from any pass's fold_ref(name).
-  std::optional<Dlop> try_fold_ref(std::string_view name);
+  std::optional<Dlop> try_fold_ref(std::string_view name) const;
 
   // A comptime name's value, also through the active inline frame's binding
   // of it (an array dimension's `N` / `LO` inside an inlined body).
@@ -743,6 +748,7 @@ protected:
   };
   absl::flat_hash_map<std::string, Body_value> unit_body_values_;
   void                                         snapshot_unit_body();
+  bool                                         quiet_{false};
 
   struct Stream_ssa_def {
     std::string source;
@@ -771,6 +777,7 @@ protected:
   };
   struct Detuple_pending_decl {
     Lnast_nid                      nid;
+    std::vector<Lnast_nid>         field_attributes;
     std::string                    name;
     std::string                    mode;
     std::optional<std::string>     init_ref;
@@ -834,6 +841,7 @@ protected:
   std::string detuple_text(const Lnast_nid& nid) const;
   std::string detuple_split_name(std::string_view var) const;
   std::string detuple_registry_key(std::string_view type_name) const;
+  void        detuple_emit_field_attributes(const Detuple_pending_decl& pending);
   void        detuple_commit_pending_split(const Detuple_pending_decl& pending);
   bool        detuple_finalize_pending_decl();
   void        detuple_flush_pending_decl();
@@ -968,6 +976,9 @@ protected:
   // than an inline splice (see the definition). `out_inject` (indexed like the
   // callee's outputs) carries a specialized template's generic-width outputs
   // folded under this call's binds; the template's own io_meta has no bound.
+  // Array-valued fields keep their declared port shape when passed to another instance.
+  absl::flat_hash_map<std::string, std::shared_ptr<Lnast>> array_result_types_;
+  const Lnast_io_entry* array_actual_port(std::string_view name) const;
   void stash_sub_instance_port_facts(std::string_view handle, const std::shared_ptr<Lnast>& callee,
                                      const std::vector<Spec_port>* out_inject = nullptr);
 
@@ -1043,9 +1054,9 @@ protected:
   // An omitted `mod`/`pipe` input's declared default drives the port from the
   // call site, so it must fit the input like an actual would. Fatal
   // `fcall-arg-overflow` (or `fcall-arg-kind` for an integer into a `bool`).
-  static void check_omitted_default_fit(const std::shared_ptr<Lnast>& callee, const Lnast_io_entry& e,
-                                        const absl::flat_hash_map<std::string, Generic_bind>& gbinds, std::string_view bare,
-                                        const livehd::diag::Span& call_span);
+  void check_omitted_default_fit(const std::shared_ptr<Lnast>& callee, const Lnast_io_entry& e,
+                                 const absl::flat_hash_map<std::string, Generic_bind>& gbinds, std::string_view bare,
+                                 const livehd::diag::Span& call_span) const;
   // An omitted child `Clock`/`Reset` input auto-wires to the caller's single
   // Clock/Reset -- MINTED when the caller declares none. Warn
   // (`clock-auto-wire-minted` / `reset-auto-wire-minted`) when the caller
@@ -1059,8 +1070,9 @@ protected:
   // integer range, a folded generic-width bound, a `:T` bound to an integer
   // type, or [0, 1] for a bool. nullopt = untyped (it takes the actual's type)
   // or a bound that does not fold here.
-  [[nodiscard]] static std::optional<std::pair<Dlop, Dlop>> declared_param_range(
-      const std::shared_ptr<Lnast>& callee, const Lnast_io_entry& e, const absl::flat_hash_map<std::string, Generic_bind>& gbinds);
+  [[nodiscard]] std::optional<std::pair<Dlop, Dlop>> declared_param_range(
+      const std::shared_ptr<Lnast>& callee, const Lnast_io_entry& e,
+      const absl::flat_hash_map<std::string, Generic_bind>& gbinds) const;
   // The declared shape of a one-dimensional ARRAY port once `gbinds` are
   // bound: its lane count and element envelope, from a `[4]u8` io entry or
   // from the template's declared `[N]unsigned(bits=N)` type folded under the
@@ -1255,16 +1267,26 @@ protected:
   // defined by its straight-line body prologue, a generic name, or a literal)
   // under `binds`. nullopt = not a compile-time integer; `unbound` (when set)
   // receives the first generic of `tmpl` the bound needs but `binds` lacks.
-  [[nodiscard]] static std::optional<Dlop> fold_template_bound(const std::shared_ptr<Lnast>& tmpl, std::string_view text,
-                                                               const absl::flat_hash_map<std::string, Generic_bind>& binds,
-                                                               int depth = 0, std::string* unbound = nullptr);
+  [[nodiscard]] std::optional<Dlop> fold_template_bound(const std::shared_ptr<Lnast>& tmpl, std::string_view text,
+                                                        const absl::flat_hash_map<std::string, Generic_bind>& binds, int depth = 0,
+                                                        std::string* unbound = nullptr) const;
+  // The fold_template_bound fallback (depth 0, nothing unbound yet): slice the
+  // statements of the template's first body block that `text` depends on into
+  // a scratch `comb` and run it through a nested constprop runner with the
+  // binds substituted. Integers only (snapshot_unit_body); the trial's
+  // diagnostics are muted and retracted. Sets `unbound` when the slice reads a
+  // generic `binds` lacks. Costs a full nested run per call: not cached.
+  [[nodiscard]] std::optional<Dlop> eval_template_bound_comptime(const std::shared_ptr<Lnast>& tmpl, std::string_view text,
+                                                                 const absl::flat_hash_map<std::string, Generic_bind>& binds,
+                                                                 std::string* unbound) const;
   // Concrete port type of an io entry with has_deferred_bound(); a side that
   // does not fold is a fatal `type-bound-not-comptime`.
   [[nodiscard]] Spec_port                  deferred_port_type(const std::shared_ptr<Lnast>& tmpl, const Lnast_io_entry& e,
                                                               const absl::flat_hash_map<std::string, Generic_bind>& binds,
                                                               const std::string& callee_name, const livehd::diag::Span& span);
   void copy_subtree_into(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
-                         const Lnast_nid& dst_parent, const absl::flat_hash_map<std::string, Generic_bind>* type_subst = nullptr);
+                         const Lnast_nid&                                      dst_parent,
+                         const absl::flat_hash_map<std::string, Generic_bind>* type_subst = nullptr) const;
   // Emit a `func_call(dst, callee, [name=], port=val…)` with NAMED actuals into a
   // scratch tree and re-walk it, so tolg wires the Sub instance by port name.
   // Used by template specialization and by the concrete pipe/mod decline to
@@ -1481,7 +1503,7 @@ protected:
   // records the inlined param/output's declared width — that's what lets
   // `<tag>param.[bits]` fold during the body walk (the callee's io widths
   // are otherwise lost once the signature is gone). No-op when bits<=0.
-  void emit_inline_typespec(const std::string& name, int bits, bool is_signed);
+  void emit_inline_typespec(const std::string& name, int bits, bool is_signed, bool declared = false);
 
   // Emits `attr_set(target, key, value)` straight into staging (literal names,
   // no frame rename). Used by the inliner to stamp a `__hier` instance-path

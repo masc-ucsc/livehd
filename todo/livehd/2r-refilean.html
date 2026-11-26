@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2r-refilean — Prove refinement across Pyrope rewrites</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2r-refilean</strong> Prove refinement across Pyrope rewrites</h1>
+<p>Let a designer change the latency or internal schedule of a Pyrope design while preserving its observable behavior. Check the original and rewritten Pyrope against the same event specification in simulation and with LiveHD’s Lean refinement checker.</p>
+
+<h2>Depends on</h2>
+<p>None. Build on the existing <a href="../../pass/lean/tools/README.md">Lean proof tools</a> and <a href="../../pass/lean/tools/formats/refmap.md">refinement-map format</a>.</p>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+  <li id="observations"><strong>A — Define what a caller can observe.</strong>
+    <ul>
+      <li>Describe when a transfer fires, which payload fields are meaningful, and which order the interface promises. Define reset, simultaneous events, and environment obligations. For a ready/valid output, record a word when both signals are asserted. Preserve any cycle deadline that is part of the interface.</li>
+      <li>Use one event description for the simulation scoreboard and Lean channel/slot definitions. Each version binds its own signal names to that description. Keep internal state maps and progress measures specific to each implementation.</li>
+    </ul></li>
+  <li id="simulation"><strong>B — Exercise a latency-changing rewrite.</strong>
+    <ul>
+      <li>Use a one-entry elastic queue as the first pair. Delay output availability by one cycle while preserving capacity, ordering and backpressure. Drive each version with the same transaction sequence, holding each input until its own handshake. Include reset, consecutive transfers, a stalled sink and a subsequent drain.</li>
+      <li>Compare accepted and delivered words in order. Record the first divergent transaction with its cycle on each side, payload and replayable stimulus. Keep cycle-exact LEC against the previous Pyrope for earlier cleanup steps that preserve timing.</li>
+    </ul></li>
+  <li id="proof"><strong>C — Prove that the two Pyrope versions realize the same event streams.</strong>
+    <ul>
+      <li>Export both versions as LiveHD certificates. Start with a common finite specification expressed in registers, which fits the checker’s memory-free specification restriction. Check its channel facts with <code>sym_refmap specfacts</code>. For each version provide the state map, reset base and any needed invariants, prove its obligations with <code>sym_refmap refmap</code>, and compose the checked results. A cycle with no transfer may leave the abstract state unchanged.</li>
+      <li>Check progress separately. For the queue, state the sink fairness assumption explicitly and require an accepted word to be delivered when the sink continues to offer service. Record assumptions, reset scope, progress obligations and the emitted Lean theorem with the result.</li>
+    </ul></li>
+  <li id="controls"><strong>D — Test the checker with broken rewrites.</strong>
+    <ul>
+      <li>The latency-only rewrite should pass. A duplicate or corrupted output must fail the event check. A variant that accepts a word and then withholds it forever must fail the progress obligation under the same fairness assumption. Treat a simulation match, an inconclusive proof and a checked theorem as distinct outcomes.</li>
+      <li>After the queue, try a retimed pipeline with backpressure, then an accelerator command/completion interface. For CPUs, define retirement and architectural memory effects explicitly, including the order of multiple retires from one hart. State the allowed cross-hart ordering before comparing runs.</li>
+    </ul></li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<p>None yet.</p>
+</main>
+<footer>LiveHD TODO</footer>
+</body>
+</html>

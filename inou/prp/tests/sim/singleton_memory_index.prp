@@ -1,0 +1,29 @@
+/*
+:name: singleton_memory_index
+:type: simulation
+*/
+
+pub mod singleton_memory_index(clk:Clock, wr:Bool, value:U8, addr:U8) -> (q:U8@[], matches:U2@[]) {
+  reg index:Unsigned(max=0) = nil
+  reg single:[1]U8:[ordering="old"] = nil
+  if wr { index = 0; single[index] = value }
+  q = single[index]
+
+  reg tags:[2]U8:[ordering="old"] = (21, 39)
+  const set = addr % 1
+  for way in 0..<2 { matches#[way] = U1(tags[set*2+way] == addr) }
+}
+
+test singleton_memory_index.last_way {
+  mut c = singleton_memory_index
+  c.wr = true
+  c.value = 57
+  c.addr = 21
+  step
+  assert(c.q == 57 and c.matches == 1)
+  c.wr = false
+  c.value = 23
+  c.addr = 39
+  step
+  assert(c.q == 57 and c.matches == 2)
+}

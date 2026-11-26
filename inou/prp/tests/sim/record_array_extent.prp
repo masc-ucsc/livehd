@@ -1,0 +1,33 @@
+/*
+:name: record_array_extent
+:type: simulation
+*/
+type Table = (data:[16]U8, mask:[16]U8)
+
+comb sum<N>(t:Table) -> (v:U8) {
+  v = 0
+  for i in 0..<N {
+    wrap v += t.data[i] & t.mask[i]
+  }
+}
+
+pub mod record_array_extent(x:U8) -> (v:U8@[]) {
+  mut t:Table
+  t.data = 0
+  t.mask = 0
+  t.data[0] = x
+  t.mask[0] = 15
+  t.data[15] = x
+  t.mask[15] = 240
+  v = sum<16>(t=t)
+}
+
+test record_array_extent.sparse {
+  mut d = record_array_extent
+  d.x = 0xab
+  step
+  assert(d.v == 0xab)
+  d.x = 0x39
+  step
+  assert(d.v == 0x39)
+}

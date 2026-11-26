@@ -1,0 +1,9 @@
+/*
+:name: wide_shift_narrow_result
+:type: error
+:error: may not fit
+:help: widen
+*/
+pub comb wide_shift_narrow_result(a:U64) -> (y:U51) {
+  y = a >> 12
+}

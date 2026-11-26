@@ -1,0 +1,22 @@
+// Each arm supplies a whole typed record, including the previous cycle's copy.
+type Request = (addr:U8, size:U2)
+pub mod record_replay(clk:Clock, replay:Bool, save:Bool, a:U8, n:U2) -> (address:U8@[], count:U2@[]) {
+  reg saved:Request = nil
+  const incoming:Request = (addr=a, size=n)
+  if save { saved = incoming }
+  const req = if replay { saved } else { incoming }
+  address = req.addr
+  count = req.size
+}
+test record_replay.select_fields {
+  mut d = record_replay
+  tick 6 {
+    d.a = 0x34+clock
+    d.n = clock%4
+    d.save = clock == 0 or clock == 3
+    d.replay = clock == 2 or clock == 5
+    step
+    const sample = if clock == 2 { 0 } elif clock == 5 { 3 } else { clock }
+    assert(d.address == 0x34+sample and d.count == sample%4)
+  }
+}

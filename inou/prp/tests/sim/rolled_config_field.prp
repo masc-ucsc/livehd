@@ -1,0 +1,32 @@
+/*
+:name: rolled_config_field
+:type: simulation
+*/
+// The retained loop and its lifted implementation capture the same record
+// field. Each specialization has a different byte bank and output width.
+comptime const small = (const xLen=32,)
+comptime const wide = (const xLen=64,)
+
+mod bank<C>(sel:U3, value:U8) -> (word:Unsigned(bits=C.xLen)@[]) {
+  const bytes = C.xLen / 8
+  mut data:Unsigned(bits=C.xLen) = 0
+  for i in 0..<8 {
+    const addr = (i / bytes) * (C.xLen / 32)
+    if addr == sel { data#[(8*(i%bytes))..+8] = value ^ U8(i) }
+  }
+  word = data
+}
+pub mod rolled_config_field(sel:U3, value:U8) -> (n:U32@[], w:U64@[]) {
+  n = bank<small>(sel=sel, value=value)
+  w = bank<wide>(sel=sel, value=value)
+}
+test rolled_config_field.banks {
+  mut d = rolled_config_field
+  d.sel = 0
+  d.value = 0x10
+  step
+  assert(d.n == 0x13121110 and d.w == 0x1716151413121110, "select the first bank")
+  d.sel = 1
+  step
+  assert(d.n == 0x17161514 and d.w == 0, "only the narrow bank has a second address")
+}

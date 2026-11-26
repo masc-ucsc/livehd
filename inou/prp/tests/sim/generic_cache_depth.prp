@@ -1,0 +1,27 @@
+/*
+:name: generic_cache_depth
+:type: simulation
+*/
+
+// A default or explicit generic depth can be serialized in hexadecimal
+// before upass specializes the storage declaration.
+pub mod generic_cache_depth<N=0x40>(clk:Clock, wr:Bool, a:U6, d:U8) -> (q:U8@[]) {
+  reg words:[N]U8:[ordering="old"] = nil
+  if wr { words[a] = d }
+  q = words[a]
+}
+
+test generic_cache_depth.last_row {
+  mut m = generic_cache_depth
+  m.wr = true
+  m.a = 63
+  m.d = 93
+  step
+  m.a = 0
+  m.d = 31
+  step
+  m.wr = false
+  m.a = 63
+  step
+  assert(m.q == 93)
+}

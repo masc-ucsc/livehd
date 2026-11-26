@@ -636,7 +636,8 @@ protected:
 
   // Source selections lower to elementary half-open ranges. A stepped range
   // contributes one range per selected position, in increasing packed order.
-  std::vector<std::pair<Lnast_node, Lnast_node>> bit_selection_ranges(TSNode sel_node, int* const_width = nullptr);
+  std::vector<std::pair<Lnast_node, Lnast_node>> bit_selection_ranges(TSNode sel_node, int* const_width = nullptr,
+                                                                      std::optional<Lnast_node>* sign_position = nullptr);
   Lnast_node                                     emit_range_node(const Lnast_node& start, const Lnast_node& end);
 
   // The number of bits a `#[...]` select covers when bit_selection_ranges could

@@ -2422,7 +2422,8 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
         V    v  = operand(c[j], env);
         auto wl = parse_literal(nm(c[j + 1]));
         if (!wl || wl->negative || wl->mag.size() != 1 || wl->mag[0] == 0) {
-          bail("concat lane width");
+          bail(std::format("invalid concat lane width '{}' for lane {} of '{}' in '{}'", nm(c[j + 1]), j / 2, dst,
+                           ln_->get_top_module_name()));
         }
         const auto w = static_cast<uint32_t>(wl->mag[0]);
         // the lane is the low `w` bits of the value, as an unsigned window

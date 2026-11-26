@@ -655,6 +655,7 @@ void sim_command(Options& opts, Result& res) {
   if (!run_only) {
     ensure_dir(simdir);
     setup_outcome.emplace(setup_failed, res);
+    opts.sim_testbench_file = file;
     opts.language = "pyrope";
     opts.files    = sources;  // compile ALL positional sources (imports resolve across them)
     // `sim` is DYNAMIC verification: each `test` block's asserts are checked by running it, not formally. Skip
@@ -664,6 +665,9 @@ void sim_command(Options& opts, Result& res) {
     opts.sets.emplace_back("compile.formal.mode", "none");
     opts.emit_dirs.push_back(Typed_path{"sim", simdir});
     try {
+      if (const auto loop = prp_sim::unsupported_test_loop(file, test_sel); !loop.empty()) {
+        throw Lhd_error{"unsupported", loop, ""};
+      }
       auto ir = gather_ir_inputs(opts, "sim");
       compile_sources(opts, res, ir);
     } catch (const Lhd_error& e) {

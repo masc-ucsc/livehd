@@ -1,0 +1,19 @@
+/*
+:name: default_record_layout
+:type: simulation
+*/
+type Rows = (value:[2]U8, tag:U8)
+comb readRow(rows:Rows) -> (r:U8) { r = rows.value[1] ^ rows.tag }
+pub mod default_record_layout<MASK=5>(x:U8) -> (q:U8@[0]) {
+  mut rows:Rows = nil
+  rows.value = 0
+  rows.value[1] = x
+  rows.tag = MASK
+  q = readRow(rows=rows)
+}
+test default_record_layout.use_default {
+  mut d = default_record_layout
+  d.x = 0xa0
+  step
+  assert(d.q == 0xa5)
+}

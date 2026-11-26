@@ -1,0 +1,15 @@
+/*
+:name: generic_local_width_overflow
+:type: error
+:tolg: 1
+:error: may not fit its declared range \[0, 15\]
+*/
+mod select_word<W>(low:U2, high:U5) -> (word:Unsigned(bits=W)@[0]) {
+  mut beat:Unsigned(bits=W) = low
+  if W == 4 { beat = high } // locate_error_here
+  word = beat
+}
+
+pub mod generic_local_width_overflow(low:U2, high:U5) -> (out:U4@[0]) {
+  out = select_word<4>(low=low, high=high)
+}

@@ -1,0 +1,29 @@
+/*
+:name: sized_alias_cast_signed
+:type: simulation
+*/
+// A signed sized alias folds and lowers as S<W>, and an alias declared in an
+// inlined generic comb resolves through the inline frame.
+comb low_ones<W>(v:U4) -> (r:Unsigned(bits=W)) {
+  type Mask = Unsigned(bits=W)
+  r = ~Mask(v)
+}
+
+pub mod sized_alias_cast_signed<W=8>(a:S4, b:U4) -> (neg:Signed(bits=W)@[0], ones:Signed(bits=W)@[0], inl:U8@[0]) {
+  type SW = Signed(bits=W)
+  neg  = SW(a)
+  ones = ~SW(0)
+  inl  = low_ones<8>(v=b)
+}
+
+test sized_alias_cast_signed.values {
+  mut d = sized_alias_cast_signed
+  d.a = -3
+  d.b = 5
+  step
+  assert(d.neg == -3 and d.ones == -1 and d.inl == 250)
+  d.a = 7
+  d.b = 0
+  step
+  assert(d.neg == 7 and d.inl == 255)
+}

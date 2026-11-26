@@ -1,0 +1,23 @@
+/*
+:name: record_port_input_defaults
+:type: simulation
+*/
+type Request = (data:U4, select:Bool)
+
+mod read<N>(req:Request, enable:Bool=true, mask:U4=N+1) -> (value:U4@[]) {
+  value = if enable and req.select { req.data ^ mask } else { 0 }
+}
+
+pub mod record_port_input_defaults(i:U4) -> (a:U4@[], b:U4@[], c:U4@[]) {
+  const req = (const data=i, const select=true)
+  a = read<2>(req=req)
+  b = read<5>(req=req, mask=8)
+  c = read<5>(req=req, enable=false)
+}
+
+test record_port_input_defaults.defaults {
+  mut d = record_port_input_defaults
+  d.i = 4
+  step
+  assert(d.a == 7 and d.b == 12 and d.c == 0)
+}

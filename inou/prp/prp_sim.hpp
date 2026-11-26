@@ -31,6 +31,9 @@ struct Test_info {
 // The caller renders the result (e.g. JSON via tests_to_json, or a human list).
 int list_tests(const std::string& file, const std::string& test_sel, std::vector<Test_info>& tests, std::string& err);
 
+// Diagnose unsupported testbench loops before design elaboration tries to expand them.
+std::string unsupported_test_loop(const std::string& file, const std::string& test_sel);
+
 // Render `tests` as the canonical single-line `--list-tests` JSON — the SAME
 // shape the generated binary's `--list-tests` prints (so `lhd sim --list-tests`
 // in JSON mode and the built binary agree byte-for-byte):

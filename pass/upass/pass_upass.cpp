@@ -673,7 +673,11 @@ void Pass_upass::work(Eprp_var& var) {
   // Semantic tuple layouts are learned by the file-level runner and reused by
   // the extracted function runners that follow it. This is deliberately a
   // compact symbol-table side registry, never another LNAST/tree pass.
-  uPass_detuple_registry  detuple_registry;
+  // A converged file wrapper will not run again to publish its declarations.
+  if (!var.pyrope_type_layouts || std::ranges::none_of(var.lnasts, [](const auto& ln) { return ln->is_upass_converged(); })) {
+    var.pyrope_type_layouts = std::make_shared<uPass_detuple_registry>();
+  }
+  auto& detuple_registry = *var.pyrope_type_layouts;
 
   // Module names already in the queue, for O(1) dedup of runner-spawned
   // specializations below (was an O(lnasts) linear scan per spawn — O(M^2) on a
@@ -715,6 +719,7 @@ void Pass_upass::work(Eprp_var& var) {
       auto         manager = std::make_shared<upass::Lnast_manager>(ln);
       uPass_runner specializer(manager, {}, up.pass_options);
       specializer.set_function_registry(function_registry);
+      specializer.set_detuple_registry(detuple_registry);
       ln              = specializer.specialize_top_defaults();
       var.lnasts[idx] = ln;
       // Minted by the design itself (minter ""), not by a call site, and it

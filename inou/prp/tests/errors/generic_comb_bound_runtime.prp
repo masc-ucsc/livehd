@@ -1,0 +1,15 @@
+/*
+:name: generic_comb_bound_runtime
+:type: error
+:tolg: 1
+:error: not a compile-time value
+*/
+comb dbl(v) -> (w) { w = v * 2 }
+
+mod bad<N>(x:U8) -> (y:Unsigned(bits=dbl(x))@[0]) {
+  y = 0
+}
+
+pub mod generic_comb_bound_runtime(x:U8) -> (y:U8@[0]) {
+  y = bad<4>(x=x)
+}

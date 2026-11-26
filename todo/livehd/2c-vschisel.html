@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2c-vschisel — Configurable Pyrope SoCs and the Chisel comparison</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2c-vschisel</strong> Configurable Pyrope SoCs and the Chisel comparison</h1>
+<p>Extend lhdsuite’s <code>mixed_soc</code> so different Rocket and BOOM configurations can coexist with Gemmini and a selectable interconnect. Measure the cost of generating Verilog from Chisel and the downstream effects of preserving loops and conditional module calls in maintained Pyrope.</p>
+
+<h2>Depends on</h2>
+<p>None.</p>
+
+<h2>Subtasks — implemented in the working trees</h2>
+<ul class="subtasks">
+  <li id="config"><strong>A — Pass a configuration through the tile hierarchy.</strong>
+    <p>LiveHD specializes a module on a whole compile-time record, including nested queue settings. A parent can forward the record and use its fields for port widths. Equal bindings reuse a definition and keep independent register state. On the earlier baseline a whole record was rejected as a runtime value. The <a href="../../inou/prp/tests/sim/generic_config_record.prp">record regression</a> now exercises both repeated and unequal configurations.</p>
+    <p>lhdsuite’s <code>mixed_soc/scripts/check_profiles.py</code> runs the uniform and heterogeneous 16-tile presets for 36,000 cycles. Both produce checksum <code>6893873800832869613</code>. The multiplier fixture observes an early result at cycle 3 and the baseline at cycle 5. BOOM’s four-fast-slot memory queue asserts backpressure two cycles during a burst that fits in the eight-fast-slot baseline. Binding dispatch width 2 to the single-lane memory queue fails elaboration with its queue name. Other dispatch widths and other Rocket options remain porting work.</p></li>
+  <li id="imports"><strong>B — Resolve sibling imports in their own package.</strong>
+    <p>Rocket and BOOM now keep the original module filenames, including <code>PTW.prp</code>. Each importer binds its own sibling in compilation, incremental lookup and LEC. The <a href="../../lhd/tests/lhd_sim_import_same_entity_test.sh">two-package regression</a> proves distinct leaf behavior against RTL, edits one leaf, and checks reuse of the other package. The old Rocket renaming script has been removed.</p></li>
+  <li id="activation"><strong>C — Preserve runtime activation for a stateful child.</strong>
+    <p>LiveHD follows the clock and reset of each domain through nested calls, including active-low resets, and diagnoses two independent reset bindings on a shared conditional clock. The <a href="../../inou/prp/tests/sim/conditional_reset_domains.prp">multi-domain regression</a> exercises reset while disabled. Native simulation records per-DUT kernel attempts, executions and skips when built with <code>--set sim.eval_counts=true</code>.</p>
+    <p>lhdsuite’s <code>gemmini/controller/check.py</code> compares the load-controller DMA tracker using Chisel’s explicit gate and Pyrope’s conditional call. With the same command stream and activity scheduling, each skips 34,000 of 64,001 evaluations and maps one gate driving 26 flop bits. Median execution times were 7.74 and 7.94 ns/cycle respectively. The flat LiveHD check reached <code>PROVEN-bounded(6)</code>. An independent two-phase PDR miter proved equivalence under the original DMA return contract and refuted a corrupted completion tag.</p></li>
+</ul>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+  <li id="constellation"><strong>E — Implement NoC composition in the Constellation Pyrope library.</strong>
+    <ul>
+      <li>Use existing attributes such as <code>p.[bits]</code> and <code>p.[max]</code>, configuration fields such as <code>cfg.w</code>, and <code>cassert</code>. A two-bit unsigned ID can encode four endpoints. The width alone says nothing about which IDs belong to a client, where a packet may go, or which virtual channels may block one another. Supply those facts in the library’s configuration.</li>
+      <li>Derive endpoint bundles, ID allocation and router tables from that configuration. Check agent capabilities, disjoint allocated ranges, reachable destinations and escape-channel dependencies during elaboration. Start with two unlike tiles and a Gemmini endpoint under independent backpressure. Include an overlapping allocation and an unreachable destination as negative tests.</li>
+      <li>Keep the existing mesh selectable. Put protocol and routing policy beside the Constellation port. Consider a shared Pyrope library helper when another design needs the same abstraction. A failure of documented introspection deserves a reduced compiler test of its own. The <a href="../../inou/prp/tests/equiv/generic_arg_postfix.prp">existing generic-argument test</a> covers width, maximum and a scalar configuration field. Passing the complete record is task A.</li>
+    </ul></li>
+</ul>
+
+<h3>Later — keep for a future port iteration</h3>
+<ul class="subtasks">
+  <li id="loops"><strong>D — Track loop indices through lowering and state matching.</strong>
+    <ul><li>Gemmini’s cleaned 16×16 mesh still names 2,048 scalar registers to help LEC pair them. Eventually let row and column indices describe that correspondence, prove the reset and next-state relation, and show where each backend retains or expands the loop. Compare a shared indexed source at 4×4, 8×8 and 16×16. The first port can proceed with today’s loop and LEC support.</li></ul></li>
+</ul>
+
+<h2>Port baseline and measurements</h2>
+<p>lhdsuite starts with one TinyConfig RocketTile, one SmallBoomV4 BoomTile, and three sizes of the standalone Gemmini datapath. The default 6×3 mesh repeats the baseline CPU configurations across 12 Rockets and four BOOMs. Preserve that workload as a regression. Finish Gemmini’s RoCC, controller and scratchpad/DMA integration as a separate step from varying its array dimensions.</p>
+<p>For each supported configuration, retain its emitted RTL and initial Verilog-to-Pyrope translation as reference artifacts. Check each cycle-preserving cleanup against the preceding Pyrope at that same configuration and run the matched workload past reset. Report proof scope, including bounded results and trusted memories.</p>
+<p>Time Chisel elaboration and firtool emission separately, then time each frontend through the same LiveHD milestone, cold and after one tile edit. Compare generated and maintained Pyrope at matched settings for simulator build time, execution time, synthesis time, mapped area/timing and LEC time/verdict. Start runtime measurements after simulator construction and keep the workload and observation points identical.</p>
+</main>
+<footer>LiveHD TODO</footer>
+</body>
+</html>

@@ -1,0 +1,25 @@
+/*
+:name: sext_generic_ranges
+:type: simulation
+*/
+// #sext over a counted range with a generic length, an open-start inclusive
+// range, and an exclusive range with a generic end: the sign position comes
+// from the same evaluated bounds as the get_mask.
+pub mod sext_generic_ranges<N=4>(a:U16) -> (c:S16@[0], z:S16@[0], e:S16@[0]) {
+  c = a#sext[3..+N]
+  z = a#sext[..=N]
+  e = a#sext[2..<(2+N)]
+}
+
+test sext_generic_ranges.values {
+  mut d = sext_generic_ranges
+  d.a = 0x00F8
+  step
+  assert(d.c == -1 and d.z == -8 and d.e == -2)
+  d.a = 0x0070
+  step
+  assert(d.c == -2 and d.z == -16 and d.e == -4)
+  d.a = 0x0024
+  step
+  assert(d.c == 4 and d.z == 4 and d.e == -7)
+}

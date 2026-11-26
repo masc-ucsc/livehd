@@ -1,0 +1,36 @@
+// The result can have fewer bits than either operand. A four-bit divisor of
+// eight still divides by eight when the quotient fits in three bits.
+pub comb narrow_division(a:U3, b:U4, n:U8, neg:S4) -> (q:U3, r:U3, low:U3, sq:S4, sr:S4) {
+  q = a / b
+  wrap r = n % b
+  wrap low = n / b
+  wrap sq = b / neg
+  wrap sr = neg % b
+}
+test narrow_division.values {
+  mut d = narrow_division
+  d.a = 7
+  d.b = 8
+  d.n = 143
+  d.neg = -3
+  step
+  assert(d.q == 0 and d.r == 7 and d.low == 1)
+  assert(d.sq == -2 and d.sr == -3)
+  d.b = 15
+  d.neg = -1
+  step
+  assert(d.q == 0 and d.r == 0 and d.low == 1)
+  assert(d.sq == 1 and d.sr == -1)
+}
+
+pub comb wide_remainder(u:U73, s:S73) -> (positive:U2, signedResult:S3) {
+  positive = u % 3
+  signedResult = s % 3
+}
+test wide_remainder.dividend_sign {
+  mut d = wide_remainder
+  d.u = 1 << 72
+  d.s = -(1 << 70)
+  step
+  assert(d.positive == 1 and d.signedResult == -1)
+}

@@ -688,18 +688,16 @@ void uPass_constprop::record_field_write(std::string_view dst_name, upass::Src_s
     path += '.';
     path += sv->to_field();
   }
-  if (path.find('.') == std::string::npos) {
-    // A WHOLE-value store of an aggregate (`o = t` of an array, a rolled
-    // loop's `m__carry_out = m`) sets every field the value carries; a
-    // scalar store is not a field write at all.
-    if (src.size() == 1 && val.bundle && !val.bundle->is_scalar()) {
-      for (const auto& [k, e] : val.bundle->non_attr_entries()) {
-        st().field_touched.insert(Symbol_table::field_touch_key(unit, path + "." + k));
-      }
+  // Writing a whole aggregate sets its lanes even when the destination is
+  // itself a field (e.g. binding an inlined call's array-valued input).
+  if (src.size() == 1 && val.bundle && !val.bundle->is_scalar()) {
+    for (const auto& [k, e] : val.bundle->non_attr_entries()) {
+      st().field_touched.insert(Symbol_table::field_touch_key(unit, path + "." + k));
     }
-    return;
   }
-  st().field_touched.insert(Symbol_table::field_touch_key(unit, path));
+  if (path.find('.') != std::string::npos) {
+    st().field_touched.insert(Symbol_table::field_touch_key(unit, path));
+  }
 }
 
 // HLOP reductions return Boolean values. Pyrope bit operations expose an
@@ -4276,6 +4274,7 @@ void uPass_constprop::process_func_call() {
   // inlined body, and none of the casts/cell-ops below would match — leaving
   // the result tmp unfolded (e.g. an inlined `cputs("…{x}")`'s string() arg).
   std::string fname(lm->current_raw_text());
+  const auto cast_type = upass::decl_facts::resolve_typecast(st(), lm->get_lnast().get(), fname, current_text());
 
   // `wrap`/`sat` narrowing call: copy the `v=` arg value through to
   // the dst tmp. The following `store(lhs, dst)` then carries it to lhs. When
@@ -4470,7 +4469,7 @@ void uPass_constprop::process_func_call() {
   Cast kind       = Cast::none;
   bool sized_sig  = false;  // true for sN, false for uN
   int  sized_bits = 0;
-  if (auto tc = upass::classify_typecast(fname)) {
+  if (const auto& tc = cast_type) {
     switch (tc->kind) {
       case upass::Typecast_kind::to_signed: kind = Cast::to_signed; break;
       case upass::Typecast_kind::to_uint  : kind = Cast::to_uint; break;

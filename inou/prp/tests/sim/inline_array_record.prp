@@ -1,0 +1,29 @@
+/*
+:name: inline_array_record
+:type: simulation
+*/
+type Rows = (value:[4]U8, tag:[4]U3)
+
+comb selectRow<N>(rows:Rows, index:U2) -> (value:U8, tag:U3) {
+  value = rows.value[index]
+  tag = rows.tag[index] ^ N
+}
+comb pick<N>(table:Rows, index:U2) -> (packed:U11) {
+  const row = selectRow<N>(rows=table, index=index)
+  packed = (row.value << 3) | row.tag
+}
+pub mod inline_array_record(x:U8,index:U2) -> (picked:U11@[0]) {
+  mut table:Rows
+  for i in 0..<4 {
+    table.value[i] = x ^ i
+    table.tag[i] = i
+  }
+  picked = pick<2>(table=table, index=index)
+}
+test inline_array_record.forward {
+  mut d = inline_array_record
+  d.x = 0x80
+  d.index = 3
+  step
+  assert(d.picked == 0x419)
+}

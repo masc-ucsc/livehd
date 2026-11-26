@@ -1,0 +1,26 @@
+pub mod wide_remainder_index(clk:Clock, index:U96, write:Bool, value:U5) -> (element:U5@[], residue:U3@[]) {
+  reg entries:[7]U5:[ordering="old"]
+  const slot = index % 7
+  if write { entries[slot] = value }
+  element = entries[slot]
+  residue = slot
+}
+test wide_remainder_index.non_power_of_two {
+  mut d = wide_remainder_index
+  d.write = true
+  d.index = 0x800000000000000000000013
+  d.value = 17
+  step
+  assert(d.residue == 2)
+  d.index = 0x7ffffffffffffffffffffffd
+  d.value = 21
+  step
+  assert(d.residue == 1)
+  d.write = false
+  d.index = 2
+  step
+  assert(d.element == 17)
+  d.index = 1
+  step
+  assert(d.element == 21)
+}

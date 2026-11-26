@@ -1,0 +1,32 @@
+/*
+:name: nested_array_port_forward
+:type: simulation
+*/
+type Entries = (cfg:[4]U8, addr:[4]U16)
+
+mod supply<N>(x:U5) -> (table:Entries@[]) {
+  for i in 0..<4 {
+    table.addr[i] = if i < N { 0x100 + x + i } else { 0 }
+    table.cfg[i] = if i < N { x } else { 0 }
+  }
+}
+comb read(table:Entries, i:U2) -> (v:U16) {
+  v = table.addr[i] ^ table.cfg[i]
+}
+pub mod nested_array_port_forward(x:U5,i:U2) -> (v:U16@[]) {
+  const s = supply<3>(x=x)
+  v = read(table=s.table, i=i)
+}
+test nested_array_port_forward.lanes {
+  mut d = nested_array_port_forward
+  d.x = 4
+  d.i = 0
+  step
+  assert(d.v == 0x100)
+  d.i = 2
+  step
+  assert(d.v == 0x102)
+  d.i = 3
+  step
+  assert(d.v == 0)
+}

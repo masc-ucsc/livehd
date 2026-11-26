@@ -1,0 +1,33 @@
+/*
+:name: generic_record_stage_width
+:type: simulation
+*/
+mod stagesOf<C>(clk:Clock, x:Unsigned(bits=C.bits)) -> (q:Unsigned(bits=C.bits)@[]) {
+  type Word = Unsigned(bits=C.bits)
+  reg a:(data:Word, valid:Bool):[clock_pin=clk] = nil
+  reg b:(data:Unsigned(bits=C.bits), valid:Bool):[clock_pin=clk] = nil
+  a.data = x
+  a.valid = true
+  b.data = a.data
+  b.valid = a.valid
+  q = b.data
+}
+
+pub mod generic_record_stage_width(clk:Clock, x:U64) -> (low:U32@[], wide:U64@[]) {
+  comptime const narrow = (const bits=32)
+  comptime const full = (const bits=64)
+  low = stagesOf<narrow>(clk=clk, x=x#[0..<32])
+  wide = stagesOf<full>(clk=clk, x=x)
+}
+
+test generic_record_stage_width.transfer {
+  mut d = generic_record_stage_width
+  tick 8 {
+    d.x = 0xcafe012380000010 + clock
+    step
+    if clock >= 2 {
+      assert(d.low == 0x8000000f + clock)
+      assert(d.wide == 0xcafe01238000000f + clock)
+    }
+  }
+}

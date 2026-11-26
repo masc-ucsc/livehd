@@ -69,6 +69,38 @@ TEST(diag, writes_jsonl_to_file_by_default_path) {
   std::remove(path.c_str());
 }
 
+TEST(diag, mute_scope_keeps_trial_off_the_output_channels) {
+  auto path = testing::TempDir() + "/diag_muted.jsonl";
+  std::remove(path.c_str());
+  {
+    Sink s;
+    s.set_jsonl_path(path);
+    s.set_human_stderr(false);
+    const auto mark = s.mark();
+    {
+      livehd::diag::Mute_scope mute(s);
+      s.emit(make_error());
+      EXPECT_EQ(s.records().size(), 1u);  // the caller can still inspect the trial
+      EXPECT_TRUE(s.has_errors());
+    }
+    s.rollback(mark);
+    EXPECT_FALSE(s.has_errors());
+    EXPECT_TRUE(s.records().empty());
+    s.emit(make_error());  // the same record after the trial is genuine, not deduped
+    EXPECT_EQ(s.records().size(), 1u);
+  }
+  std::ifstream f(path);
+  ASSERT_TRUE(f.good());
+  std::string line;
+  int         lines = 0;
+  while (std::getline(f, line)) {
+    ++lines;
+    EXPECT_NE(line.find("\"seq\":0"), std::string::npos);  // the muted trial consumed no seq
+  }
+  EXPECT_EQ(lines, 1);
+  std::remove(path.c_str());
+}
+
 TEST(diag, jsonl_off_suppresses_file) {
   auto path = testing::TempDir() + "/diag_none.jsonl";
   std::remove(path.c_str());

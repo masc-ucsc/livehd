@@ -1,0 +1,11 @@
+/*
+:name: config_profile
+:type: comptime
+:files: inou/prp/tests/imports/config_profile.prp inou/prp/tests/imports/lib_config_profile.prp
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+const configs = import("lib_config_profile")
+comptime const wide = configs.profile(width=64)
+cassert(wide.bytes == 8)
+cassert(configs.small.width == 8)

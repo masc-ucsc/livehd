@@ -1,0 +1,113 @@
+/*
+:name: generic_comptime_bounds
+:type: simulation
+*/
+// Comptime `comb` calls, inline `if` expressions, `for` loops, typed `comb`s
+// (under default compile.upass.inline=false), derived config records, and
+// enum/lambda config fields inside generic port bounds and array dimensions.
+enum Mode = (Add, Xor)
+
+comb fn_add(a:U8, b:U8) -> (r:U8) { wrap r = a + b }
+comb fn_xor(a:U8, b:U8) -> (r:U8) { r = a ^ b }
+
+comptime const small = (
+  const queues=((const depth=2), (const depth=3)),
+  const wide=false,
+  const lanes=2,
+  const mode=Mode.Add,
+  const op=fn_add
+)
+comptime const big = (
+  const queues=((const depth=4), (const depth=5)),
+  const wide=true,
+  const lanes=3,
+  const mode=Mode.Xor,
+  const op=fn_xor
+)
+
+comb sum_depths(qs) -> (s) {
+  mut total = 0
+  for q in qs { total += q.depth }
+  s = total
+}
+
+comb calc_w(c) -> (w) {
+  w = if c.wide { sum_depths(c.queues) } else { c.queues[0].depth + 2 }
+}
+
+comb calc_lanes(c) -> (n) {
+  n = if c.wide { c.lanes + 1 } else { c.lanes }
+}
+
+comb add3(n:U8) -> (w:U8) {
+  wrap w = n + 3
+}
+
+comb derive_cfg(c) -> (r) {
+  r = (const queues=c.queues, const wide=!c.wide, const lanes=c.lanes, const mode=c.mode, const op=c.op)
+}
+
+comb mask<N>(a:Unsigned(bits=add3(N))) -> (y:Unsigned(bits=add3(N))) {
+  y = a
+}
+
+mod leaf<C>(a:[calc_lanes(C)]U8) -> (
+  y:Unsigned(bits=calc_w(C))@[0],
+  z:Unsigned(bits=(if C.wide { 6 } else { 4 }))@[0],
+  op_out:U8@[0]
+) {
+  mut acc:U8 = 0
+  for i in 0..<calc_lanes(C) { wrap acc += a[i] }
+  y = acc#[0..<calc_w(C)]
+  z = acc#[0..<(if C.wide { 6 } else { 4 })]
+  const base = C.op(a=a[0], b=a[1])
+  op_out = if C.mode == Mode.Add { base } else { base >> 1 }
+}
+
+pub mod generic_comptime_bounds(x0:U8, x1:U8, x2:U8, x3:U8) -> (
+  y1:U8@[0], z1:U8@[0], op1:U8@[0],
+  y2:U9@[0], z2:U8@[0], op2:U8@[0],
+  y3:U8@[0], m:U8@[0]
+) {
+  mut a2:[2]U8 = 0
+  a2[0] = x0
+  a2[1] = x1
+  mut a3:[3]U8 = 0
+  a3[0] = x0
+  a3[1] = x1
+  a3[2] = x2
+  mut a4:[4]U8 = 0
+  a4[0] = x0
+  a4[1] = x1
+  a4[2] = x2
+  a4[3] = x3
+
+  const r1 = leaf<small>(a=a2)
+  y1  = r1.y
+  z1  = r1.z
+  op1 = r1.op_out
+
+  const r2 = leaf<big>(a=a4)
+  y2  = r2.y
+  z2  = r2.z
+  op2 = r2.op_out
+
+  const derived = derive_cfg(small)
+  const r3 = leaf<derived>(a=a3)
+  y3 = r3.y
+
+  m = mask<2>(a=x0#[0..<5])
+}
+
+test generic_comptime_bounds.all {
+  mut d = generic_comptime_bounds
+  d.x0 = 10
+  d.x1 = 20
+  d.x2 = 30
+  d.x3 = 40
+  step
+  assert(d.y1 == 14 and d.z1 == 14 and d.op1 == 30, "small: 4-bit sum and Add op")
+  assert(d.y2 == 100 and d.z2 == 36 and d.op2 == 15, "big: 9/6-bit sum and Xor>>1 op")
+  assert(d.y3 == 28, "derived: wide=true, 3 lanes, 5-bit sum (10+20+30)%32=28")
+  assert(d.m == 10, "typed comb in generic comb port width (2+3=5 bits)")
+}

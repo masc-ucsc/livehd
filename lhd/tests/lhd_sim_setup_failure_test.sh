@@ -68,4 +68,39 @@ grep -q "error\[syntax\]: the last --setup-only" "$W/r3.out" || fail "fresh work
 [ -f "$W/reuse/$drv" ] || fail "recovery setup produced no $drv"
 [ ! -f "$W/reuse/$marker" ] || fail "recovery setup left $marker"
 
+# Elaborating this test as hardware used to exhaust memory before tbgen diagnosed the loop.
+cat >> "$W/good.prp" <<'EOF'
+test cnt.many() {
+  mut acc = cnt
+  for i in 0..<18000 {
+    acc.rst = i == 0
+    step
+  }
+}
+EOF
+if "$LHD" sim "$W/good.prp" cnt.many --setup-only --workdir "$W/reuse" > "$W/loop.out" 2>&1; then
+  fail "unsupported testbench for loop passed"
+fi
+grep -q 'unsupported statement in test cnt.many: `for_statement`' "$W/reuse/$marker" || fail "missing loop diagnostic"
+[ ! -f "$W/reuse/$drv" ] || fail "invalid loop left a runnable simulator"
+
+# The pre-check walks every statement container, match arms included.
+cat >> "$W/good.prp" <<'EOF'
+test cnt.many_match() {
+  mut acc = cnt
+  match 1 {
+    == 1 {
+      for i in 0..<18000 {
+        acc.rst = i == 0
+        step
+      }
+    }
+  }
+}
+EOF
+if "$LHD" sim "$W/good.prp" cnt.many_match --setup-only --workdir "$W/reuse" > "$W/loop2.out" 2>&1; then
+  fail "unsupported testbench for loop inside a match arm passed"
+fi
+grep -q 'unsupported statement in test cnt.many_match: `for_statement`' "$W/reuse/$marker" || fail "missing loop-in-match diagnostic"
+
 echo "PASS"

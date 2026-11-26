@@ -1,0 +1,28 @@
+/*
+:name: forward_record_in_branch
+:type: simulation
+*/
+comptime const small = (const low=4, const high=8)
+comptime const wide = (const low=16, const high=32)
+
+comb bound<C>(upper:Bool) -> (n:U6) {
+  n = if upper { C.high } else { C.low }
+}
+comb select<C>(valid:Bool, upper:Bool) -> (n:U6) {
+  n = if valid { bound<C>(upper=upper) } else { 0 }
+}
+pub mod forward_record_in_branch(valid:Bool, upper:Bool) -> (a:U6@[0], b:U6@[0]) {
+  a = select<small>(valid=valid, upper=upper)
+  b = select<wide>(valid=valid, upper=upper)
+}
+test forward_record_in_branch.profiles {
+  mut dut = forward_record_in_branch
+  tick 4 {
+    dut.valid = clock#[0] != 0
+    dut.upper = clock#[1] != 0
+    step
+    if clock#[0] == 0 { assert(dut.a == 0 and dut.b == 0) }
+    elif clock == 1 { assert(dut.a == 4 and dut.b == 16) }
+    else { assert(dut.a == 8 and dut.b == 32) }
+  }
+}

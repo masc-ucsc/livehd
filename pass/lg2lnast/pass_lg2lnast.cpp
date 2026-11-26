@@ -457,13 +457,24 @@ bool Lowering::lower_node(const hhds::Node_class& node) {
       break;
     }
     case Ntype_op::Concat: {
-      // p0 = msb value, p1 = its declared width, ... (MSB first): the same operand
-      // order the LNAST concat node uses.
-      auto v = all_inputs();
-      if (!v) {
+      const auto lanes = livehd::graph_util::concat_lanes(node);
+      if (lanes.empty()) {
+        why = "concat has malformed value/width pairs";
         return false;
       }
-      out = emit(Lnast_ntype::create_concat(), *v, dpin);
+      std::vector<std::string> ops;
+      ops.reserve(2 * lanes.size());
+      for (const auto& lane : lanes) {
+        auto value = operand(lane.value);
+        if (!value) {
+          return false;
+        }
+        ops.push_back(std::move(*value));
+        // Width is integer metadata. The shared one-bit constant can also
+        // drive a Boolean signal and print as "true" when used as a value.
+        ops.push_back(std::to_string(lane.width));
+      }
+      out = emit(Lnast_ntype::create_concat(), ops, dpin);
       break;
     }
     case Ntype_op::SHL:

@@ -68,6 +68,18 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "singleton_range_hdr",
+    hdrs = ["singleton_range.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//lnast",
+        "@abseil-cpp//absl/strings",
+    ],
+)
+
 # Header-only: canonical (max,min)-from-bits reconstruction. Depends only on
 # hlop so lightweight consumers (e.g. the wrap_sat_hdr header) can pull it in
 # without linking the full upass/core plugin.

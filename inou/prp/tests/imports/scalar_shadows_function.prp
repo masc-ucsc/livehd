@@ -1,0 +1,28 @@
+/*
+:name: scalar_shadows_function
+:type: simulation
+:set: compile.upass.inline=true
+*/
+
+const select = import("lib_pick3.pick3")
+
+pub mod scalar_shadows_function(clk:Clock, enable:Bool, pick3:U4) -> (q:U4@[]) {
+  reg saved:U4 = 0
+  if enable {
+    const result = select(a=pick3, b=1)
+    saved = result.o1
+  }
+  q = saved
+}
+
+test scalar_shadows_function.capture_argument {
+  mut d = scalar_shadows_function
+  d.enable = true
+  d.pick3 = 12
+  step
+  assert(d.q == 13)
+  d.enable = false
+  d.pick3 = 4
+  step
+  assert(d.q == 13)
+}

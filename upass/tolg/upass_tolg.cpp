@@ -45,6 +45,7 @@
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
 #include "port_reach.hpp"
 #include "range_bits.hpp"
+#include "singleton_range.hpp"
 #include "split_selfref.hpp"
 #include "synth_policy.hpp"
 
@@ -839,6 +840,11 @@ public:
         // Backends still know the GraphIO declaration is physically W bits.
         set_ubits(raw, mw);
         record(e.name, raw, mw);
+      }
+      // A lifted body can receive an invariant whose only value is known
+      // across every call site. Its physical input width cannot express that.
+      if (const auto bound = upass::singleton_range(*lnast_, e.name); bound && e.array_size == 0 && e.kind == Io_kind::integer) {
+        record(e.name, create_const(*g_, *Dlop::create_integer(*bound)), mw);
       }
       if (e.array_size > 0) {
         // `a:[N]T` port: the packed bus above, plus the lane view that makes
@@ -3064,7 +3070,7 @@ private:
     // Docs (04b "comptime"): a `comptime` variable must be compile-time
     // known or a compile error is generated.
     if (comptime_scalar_names_.contains(lhs_text) && Lnast_ntype::is_ref(lnast_->get_type(rhs))
-        && lnast_->get_sibling_next(rhs).is_invalid()) {
+        && lnast_->get_sibling_next(rhs).is_invalid() && !literal_tuple_temps_.contains(lnast_->get_name(rhs))) {
       error_hint_at(nid,
                     livehd::diag::Id{"comptime-not-constant", "type"},
                     std::format("`{}` is declared comptime but its value is not known at compile time", lhs_text),
@@ -4264,6 +4270,11 @@ private:
         *in_range = and2(*in_range, not1(lt_of(addr, 0)));
       }
     }
+    // For a single entry, both the legal address and the clamped address
+    // are zero. A Verilog write still uses in_range above to suppress OOB.
+    if (size == 1) {
+      return create_const(*g_, *Dlop::create_integer(0));
+    }
     auto out = clamp(addr, size, true);
     if (can_neg) {
       out = clamp(out, 0, false);
@@ -4290,7 +4301,12 @@ private:
     // access, which memories don't have.
     auto const_index_of = [&](const Lnast_nid& nid, std::optional<int64_t>& out) -> bool {
       if (!Lnast_ntype::is_const(lnast_->get_type(nid))) {
-        return true;  // runtime ref — resolved through leaf()
+        // Physical pins have at least one bit, even for Unsigned(max=0).
+        // Preserve a singleton proven for every write of this index.
+        if (Lnast_ntype::is_ref(lnast_->get_type(nid))) {
+          out = upass::singleton_range(*lnast_, logical_key(lnast_->get_name(nid)));
+        }
+        return true;
       }
       auto v = Dlop::from_pyrope(lnast_->get_name(nid));
       if (!v || !v->is_just_i64()) {
@@ -4902,7 +4918,18 @@ private:
                "lowering (tuples must be fully resolved at compile time)",
                lnast_->get_name(dst));
     }
-    tuple_recs_[std::string(lnast_->get_name(dst))] = std::move(rec);
+    // A forwarded record generic may survive in a runtime branch as a store
+    // from a tuple constructor. Prove every leaf constant at construction,
+    // including nested literals. A reference to a runtime slot is insufficient.
+    const auto literal = [&](Lnast_nid v) {
+      return Lnast_ntype::is_const(lnast_->get_type(v)) || literal_tuple_temps_.contains(lnast_->get_name(v));
+    };
+    const auto name = lnast_->get_name(dst);
+    if (Lnast::is_tmp(name) && std::ranges::all_of(rec.elems, literal)
+        && std::ranges::all_of(rec.named, [&](const auto& e) { return literal(e.second); })) {
+      literal_tuple_temps_.emplace(name);
+    }
+    tuple_recs_[std::string(name)] = std::move(rec);
   }
 
   // tuple_concat(ref dst, op…) — the `...` splice / `++` result. 2f-splice: a
@@ -13201,6 +13228,7 @@ private:
   absl::flat_hash_set<std::string>                    mem_node_names_;      // unique_mem_name  // packed array value -> its type=2 memory
   absl::flat_hash_set<std::string>                    call_instance_names_;
   absl::flat_hash_set<std::string>                    comptime_array_names_;
+  absl::flat_hash_set<std::string>                    literal_tuple_temps_;
   absl::flat_hash_set<std::string>                    comptime_scalar_names_;
   absl::flat_hash_map<int32_t, int>                   mem_write_site_counts_;
   absl::flat_hash_map<std::string, int>               mem_write_sites_by_name_;  // same count, by canonical name
@@ -14904,21 +14932,12 @@ void prepare_registry_abi(const uPass_tolg::Registry& registry);
       if (kind != "pipe" && kind != "mod") {
         continue;  // a comb holds no state and auto-wires nothing (ruling 30)
       }
-      // A clocked callee whose public ABI already carries `clk`/`clock` is
-      // wired by the ordinary named actual at the call site.  It does NOT need
-      // the caller's compiler-minted implicit clock forwarded as a second,
-      // hidden input.  Propagating the raw "contains state" fact through such
-      // a boundary gave parents like prim_rf_1r1w_preview an unused `clock`
-      // GraphIO pin in addition to their explicit `rf_clk_i`; hierarchical LEC
-      // then quite correctly reported an implementation-only box input.
-      //
-      // Keep the leaf result true: setup_io_impl still needs it to select the
-      // callee's own declared clk/clock as clock_name.  Suppress only the
-      // TRANSITIVE request seen by its caller.
-      const bool  clock_walk = declares == &tree_declares_reg;
-      const auto  candidate  = clock_walk ? &is_clock_candidate : &is_reset_candidate;
-      const auto& cins       = callee->io_meta().inputs;
-      if (!lnast->is_verilog_origin() && std::any_of(cins.begin(), cins.end(), candidate)) {
+      // An explicitly bound public Clock/Reset satisfies the child's need at
+      // this boundary. Omission auto-wires it from the caller instead.
+      const auto  candidate       = declares == &tree_declares_reg ? &is_clock_candidate : &is_reset_candidate;
+      const auto& cins            = callee->io_meta().inputs;
+      const bool  has_public_port = std::any_of(cins.begin(), cins.end(), candidate);
+      if (!lnast->is_verilog_origin() && has_public_port) {
         if (!shapes) {
           shapes = collect_call_shapes(lnast);
         }
@@ -14927,8 +14946,7 @@ void prepare_registry_abi(const uPass_tolg::Registry& registry);
           break;
         }
       }
-      const bool callee_has_public_clock = clock_walk && std::any_of(cins.begin(), cins.end(), &is_clock_candidate);
-      if (!callee_has_public_clock && needs_transitive(callee, registry, memo, visiting, declares)) {
+      if (!has_public_port && needs_transitive(callee, registry, memo, visiting, declares)) {
         needs = true;
         break;
       }
@@ -15159,18 +15177,18 @@ void prepare_registry_abi(const uPass_tolg::Registry& registry) {
       edges[i].push_back(*child);
       const auto kind = units[*child]->get_lambda_kind();
       if (kind == "pipe" || kind == "mod") {
-        // A child's declared clk/clock is an ordinary actual at this call site;
-        // only a compiler-MINTED clock must be transported through the caller's
-        // hidden ABI. Keep reset's existing propagation independent -- clock
-        // and reset need not share the same public boundary.
-        const auto& cins                   = units[*child]->io_meta().inputs;
+        // Propagate a minted port through callers. A public port needs the
+        // caller's implicit signal only at a call that omits its binding.
+        const auto& cins = units[*child]->io_meta().inputs;
         const bool  child_has_public_clock = std::any_of(cins.begin(), cins.end(), &is_clock_candidate);
+        const bool  child_has_public_reset = std::any_of(cins.begin(), cins.end(), &is_reset_candidate);
         if (!child_has_public_clock) {
           clock_reverse[*child].push_back(i);
         }
-        reset_reverse[*child].push_back(i);
-        if (!units[i]->is_template() && !units[i]->is_verilog_origin()
-            && (child_has_public_clock || std::any_of(cins.begin(), cins.end(), &is_reset_candidate))) {
+        if (!child_has_public_reset) {
+          reset_reverse[*child].push_back(i);
+        }
+        if (!units[i]->is_template() && !units[i]->is_verilog_origin() && (child_has_public_clock || child_has_public_reset)) {
           public_clock_reset_calls.emplace_back(i, name, *child);
         }
       }
@@ -16219,9 +16237,17 @@ void uPass_tolg::gate_activation_clocks(const std::vector<std::shared_ptr<hhds::
 
   livehd::latch_contract::Clock_port_cache cache;
   for (const auto& graph : graphs) {
-    if (graph) {
-      (void)livehd::latch_contract::gate_activation_clocks(graph.get(), "upass.tolg", cache);
+    if (!graph) {
+      continue;
     }
+    // Verilog instances already specify the complete clock connection. Reading
+    // emitted RTL may bring back an ordinary input named __valid alongside
+    // the materialized gate, with the synchronous reset folded into data.
+    const auto unit = lowering_pass().units.find(graph->get_name());
+    if (unit != lowering_pass().units.end() && unit->second && unit->second->is_verilog_origin()) {
+      continue;
+    }
+    (void)livehd::latch_contract::gate_activation_clocks(graph.get(), "upass.tolg", cache);
   }
 }
 
@@ -16326,6 +16352,8 @@ std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast
       }
     }
   }
+  // If duplicate names replaced a body, keep the provenance of the surviving definition.
+  lowering_pass().units.insert_or_assign(std::string(lnast->get_graph_name()), lnast.get());
   lowering_pass().pending.erase(lnast->get_graph_name());  // its body is final now
   // Record the finished body's comb reach for its callers' loop checks.
   livehd::port_reach::stamp(*g_shared, livehd::port_reach::Cache(callee_reach, /*slices=*/false).of(g_shared));

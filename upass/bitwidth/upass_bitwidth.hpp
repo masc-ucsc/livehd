@@ -262,9 +262,9 @@ private:
   // bw_meta), bypassing write_bw's has-trivial guard so the arm-invalidated
   // entry is refreshed, and propagate it into any enclosing uncertain arm.
   // `wide`: some path leaves `name` too wide for a derived range.
-  void commit_merged(std::string_view name, const Lnast_range& r, bool wide);
+  void commit_merged(std::string_view name, const Lnast_range& r, bool wide, bool multiple_defs);
   // The bundle/bw_meta half of commit_merged, with no arm bookkeeping.
-  void set_range(std::string_view name, const Lnast_range& r, bool wide);
+  void set_range(std::string_view name, const Lnast_range& r, bool wide, bool multiple_defs = false);
 
   // ── Lnast_range ↔ bundle-Entry conversion ─────────────────────────────────
   static std::optional<int64_t> const_to_i64(const Dlop& v);

@@ -9026,6 +9026,18 @@ void Prp2lnast::prelower_int_type_bounds(TSNode ty) {
     return;
   }
   const std::string_view t(ts_node_type(ty));
+  if (t == "expression_type") {
+    for (TSNode tuple : ts_node_named_children(ty)) {
+      if (std::string_view(ts_node_type(tuple)) == "tuple") {
+        for (TSNode field : ts_node_named_children(tuple)) {
+          if (std::string_view(ts_node_type(field)) == "typed_field") {
+            prelower_type_bounds(child_by_field(field, "type"));
+          }
+        }
+      }
+    }
+    return;
+  }
   if (t == "array_type") {
     // `[N+1]unsigned(bits=N)`: the element bound defers like a scalar one, and
     // so does a dimension written as an expression over a generic (a bare name
@@ -9341,16 +9353,7 @@ bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::strin
     }
     auto bound_not_comptime
         = [&](std::string_view which) { return std::format("`{}(...)` bound `{}` is not a compile-time value", kw, which); };
-    // A generic parameter only works where prelower_type_bounds runs -- a
-    // VARIABLE DECLARATION inside the body, or a port/return type of the
-    // generic lambda itself (flush_deferred_port_bounds). A tuple field type or
-    // a `f<signed(bits=N)>` generic argument has no statement position to
-    // desugar the bound into, so say so instead of promising a spelling that
-    // will land back here.
-    constexpr std::string_view bound_hint
-        = "use a literal or a `comptime const`; a generic parameter is resolved on a variable declaration inside the body "
-          "and on the ports of the generic lambda itself (`mod m<N=8>(a:Unsigned(bits=N))`), not on a tuple field type or "
-          "a `<…>` argument";
+    constexpr std::string_view bound_hint = "size the type with an integer expression that folds at compile time";
     if (key == "range") {
       // No `range` type argument — it would be pure sugar for max/min, so it
       // is rejected to keep a single way to bound an integer type.
@@ -12093,7 +12096,8 @@ Lnast_node Prp2lnast::emit_range_node(const Lnast_node& start, const Lnast_node&
   return rng_ref;
 }
 
-std::vector<std::pair<Lnast_node, Lnast_node>> Prp2lnast::bit_selection_ranges(TSNode sel_node, int* const_width) {
+std::vector<std::pair<Lnast_node, Lnast_node>> Prp2lnast::bit_selection_ranges(TSNode sel_node, int* const_width,
+                                                                              std::optional<Lnast_node>* sign_position) {
   if (const_width) {
     *const_width = 0;
   }
@@ -12150,9 +12154,15 @@ std::vector<std::pair<Lnast_node, Lnast_node>> Prp2lnast::bit_selection_ranges(T
                      "bit/array/cycle indices are non-negative");
       }
       if (kind == "op_range_inclusive") {
+        if (sign_position && (!lo.is_const() || !hi.is_const())) {
+          *sign_position = emit_bound_binop(Lnast_ntype::create_minus(), hi, lo);
+        }
         hi = add(hi, one);
       }
       if (kind == "op_range_count") {
+        if (sign_position && !hi.is_const()) {
+          *sign_position = emit_bound_binop(Lnast_ntype::create_minus(), hi, one);
+        }
         if (const_width && hi.is_const()) {
           auto width = Dlop::from_pyrope(hi.get_name());
           if (width->is_just_i64() && width->to_just_i64() > 0 && width->to_just_i64() <= std::numeric_limits<int>::max()) {
@@ -12170,7 +12180,11 @@ std::vector<std::pair<Lnast_node, Lnast_node>> Prp2lnast::bit_selection_ranges(T
       lo = bound(from);
     }
     if (!ts_node_is_null(incl)) {
-      hi = add(bound(incl), one);
+      const auto end = bound(incl);
+      if (sign_position) {
+        *sign_position = end;
+      }
+      hi = add(end, one);
     }
     if (!ts_node_is_null(excl)) {
       hi = bound(excl);
@@ -12437,7 +12451,9 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
   TSNode ext_node  = child_by_field(n, "extension");
 
   int        selected_width = 0;
-  const auto ranges         = bit_selection_ranges(sel_node, &selected_width);
+  std::optional<Lnast_node> sign_position;
+  const bool sext = !ts_node_is_null(ext_node) && std::string_view(ts_node_type(ext_node)) == "sign_extend";
+  const auto ranges = bit_selection_ranges(sel_node, &selected_width, sext ? &sign_position : nullptr);
   if (packed_base && ts_node_is_null(type_node) && ts_node_is_null(ext_node) && ranges.size() == 1 && ranges[0].first.is_const()
       && ranges[0].first.get_name() == "0" && ranges[0].second.get_name() == "nil") {
     return *packed_base;
@@ -12508,38 +12524,18 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
         lnast->add_child(sx, ref);
         lnast->add_child(sx, Lnast_node::create_const(selected_width - 1));
         return out;
-      } else {
-        // Non-literal closed range `#sext[lo..=hi]`: the mask is a `range` ref
-        // (non-const), so popcount isn't statically known — but the sign-bit
-        // position equals `hi - lo` (= popcount(mask)-1 for a contiguous mask).
-        // Emit `sext(ref, hi-lo)`; constprop folds the minus + sext once lo/hi
-        // resolve. (Mirror bit_selection_ranges's inclusive-range detection.)
-        TSNode idxn = child_by_field(sel_node, "index");
-        if (!ts_node_is_null(idxn) && std::string_view(ts_node_type(idxn)) == "expression_item"
-            && ts_node_named_child_count(idxn) == 3) {
-          TSNode op_w = ts_node_named_child(idxn, 1);
-          if (std::string_view(ts_node_type(op_w)) == "binary_other_op") {
-            TSNode op_i = ts_node_named_child(op_w, 0);
-            if (!ts_node_is_null(op_i) && std::string_view(ts_node_type(op_i)) == "op_range_inclusive") {
-              Lnast_node lo_n    = expr_to_node(ts_node_named_child(idxn, 0));
-              Lnast_node hi_n    = expr_to_node(ts_node_named_child(idxn, 2));
-              auto       m_idx   = builder.add_child(Lnast_ntype::create_minus());
-              auto       pos_ref = builder.mint_tmp_ref();
-              lnast->add_child(m_idx, pos_ref);
-              lnast->add_child(m_idx, hi_n);
-              lnast->add_child(m_idx, lo_n);  // sign-bit position = hi - lo
-              auto s_idx = builder.add_child(Lnast_ntype::create_sext());
-              auto s_ref = builder.mint_tmp_ref();
-              lnast->add_child(s_idx, s_ref);
-              lnast->add_child(s_idx, ref);
-              lnast->add_child(s_idx, pos_ref);
-              return s_ref;
-            }
-          }
-        }
       }
-    }
-    if (et == "sign_extend") {
+      // get_mask takes half-open bounds. Use the same evaluated endpoints
+      // for a generic or dynamic sign position, including counted selections.
+      if (sign_position) {
+        return emit_bound_binop(Lnast_ntype::create_sext(), ref, *sign_position);
+      }
+      const auto& [lo, end] = ranges.front();
+      if (!end.is_const() || end.get_name() != "nil") {
+        const auto width = emit_bound_binop(Lnast_ntype::create_minus(), end, lo);
+        const auto sign  = emit_bound_binop(Lnast_ntype::create_minus(), width, Lnast_node::create_const("1"));
+        return emit_bound_binop(Lnast_ntype::create_sext(), ref, sign);
+      }
       // Open selections have an infinite mask, but a finite declared source
       // window. The runner records the selected window on the get-mask result
       // after resolving scalar or aggregate layout; never popcount(-1).

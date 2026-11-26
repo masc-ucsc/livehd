@@ -2079,64 +2079,145 @@ namespace {
 
 [[nodiscard]] bool const_true(const hhds::Pin_class& p) { return p.is_known_true(); }
 
-// Constant-evaluate a 1-bit boolean reset cone before pass.aegraph runs (e.g.
-// `rst and false` or `rst_n or true` from a specialized generic config).
-[[nodiscard]] std::optional<bool> const_reset_level(const hhds::Pin_class& p, int depth = 0) {
-  if (p.is_invalid() || depth > 16) {
+[[nodiscard]] Reset_expr make_reset_const(bool level) {
+  Reset_expr e;
+  e.kind  = Reset_expr::Kind::Const;
+  e.value = level;
+  return e;
+}
+
+[[nodiscard]] Reset_expr make_reset_port(uint32_t pid, bool active_low) {
+  Reset_expr e;
+  e.kind    = Reset_expr::Kind::Port;
+  e.value   = active_low;
+  e.port_id = pid;
+  return e;
+}
+
+[[nodiscard]] Reset_expr make_reset_combine(Reset_expr::Kind op, std::vector<Reset_expr> items) {
+  const bool              absorbing = (op == Reset_expr::Kind::Or);
+  std::vector<Reset_expr> flat;
+  for (auto& item : items) {
+    if (item.kind == Reset_expr::Kind::Const) {
+      if (item.value == absorbing) {
+        return make_reset_const(absorbing);
+      }
+      continue;  // identity element (false for Or, true for And)
+    }
+    if (item.kind == op) {
+      for (auto& sub : item.children) {
+        flat.push_back(std::move(sub));
+      }
+    } else {
+      flat.push_back(std::move(item));
+    }
+  }
+  std::sort(flat.begin(), flat.end());
+  flat.erase(std::unique(flat.begin(), flat.end()), flat.end());
+  if (flat.empty()) {
+    return make_reset_const(!absorbing);
+  }
+  if (flat.size() == 1) {
+    return std::move(flat.front());
+  }
+  Reset_expr e;
+  e.kind     = op;
+  e.children = std::move(flat);
+  return e;
+}
+
+// Exact complement (De Morgan): flips constants and port polarity, swaps And/Or.
+[[nodiscard]] Reset_expr negate_reset_expr(const Reset_expr& expr) {
+  if (expr.kind == Reset_expr::Kind::Const) {
+    return make_reset_const(!expr.value);
+  }
+  if (expr.kind == Reset_expr::Kind::Port) {
+    return make_reset_port(expr.port_id, !expr.value);
+  }
+  std::vector<Reset_expr> children;
+  children.reserve(expr.children.size());
+  for (const auto& c : expr.children) {
+    children.push_back(negate_reset_expr(c));
+  }
+  return make_reset_combine(expr.kind == Reset_expr::Kind::Or ? Reset_expr::Kind::And : Reset_expr::Kind::Or, std::move(children));
+}
+
+// Reduce a synchronous reset driver cone to a canonical active-high Reset_expr
+// over the definition's declared input ports (applying De Morgan when
+// active_low). Supports single ports, inversions, constants, And/Or cones
+// (e.g. `rst or flush`, `!rst_n or sw_rst`, `rst and HAS_RST`), and 1-bit Mux
+// specializations.
+[[nodiscard]] std::optional<Reset_expr> reset_expr_of(const hhds::Pin_class& driver, bool active_low, int depth = 0) {
+  if (driver.is_invalid() || depth > 16) {
     return std::nullopt;
   }
-  if (p.is_known_false()) {
-    return false;
+  if (driver.is_known_false()) {
+    return make_reset_const(active_low);
   }
-  if (p.is_known_true()) {
-    return true;
+  if (driver.is_known_true()) {
+    return make_reset_const(!active_low);
   }
-  if (p.is_const() || gu::is_graph_input_pin(p)) {
+  if (driver.is_const()) {
     return std::nullopt;
   }
-  const auto n  = p.get_master_node();
+  if (gu::is_graph_input_pin(driver)) {
+    return make_reset_port(static_cast<uint32_t>(driver.get_port_id()), active_low);
+  }
+
+  const auto n  = driver.get_master_node();
   const auto op = gu::type_op_of(n);
-  if (op == Ntype_op::And) {
-    bool all_true = true;
-    bool any_in   = false;
-    for (auto sink : n.inp_sorted_pins()) {
-      for (auto drv : sink.get_driver_pins()) {
-        any_in = true;
-        const auto v = const_reset_level(drv, depth + 1);
-        if (v && !*v) {
-          return false;
-        }
-        if (!v || !*v) {
-          all_true = false;
-        }
-      }
-    }
-    return (any_in && all_true) ? std::optional<bool>(true) : std::nullopt;
-  }
-  if (op == Ntype_op::Or) {
-    bool all_false = true;
-    bool any_in    = false;
-    for (auto sink : n.inp_sorted_pins()) {
-      for (auto drv : sink.get_driver_pins()) {
-        any_in = true;
-        const auto v = const_reset_level(drv, depth + 1);
-        if (v && *v) {
-          return true;
-        }
-        if (!v || *v) {
-          all_false = false;
-        }
-      }
-    }
-    return (any_in && all_false) ? std::optional<bool>(false) : std::nullopt;
-  }
   if (op == Ntype_op::Ror) {
     for (auto sink : n.inp_sorted_pins()) {
       for (auto drv : sink.get_driver_pins()) {
-        return const_reset_level(drv, depth + 1);
+        return reset_expr_of(drv, active_low, depth + 1);
       }
     }
     return std::nullopt;
+  }
+  if (op == Ntype_op::Get_mask || op == Ntype_op::Sext) {
+    auto a = gu::first_value_driver(n);
+    if (!a.is_invalid() && (gu::bits_of(a) <= 1 || gu::type_op_of(a.get_master_node()) == Ntype_op::Not)) {
+      return reset_expr_of(a, active_low, depth + 1);
+    }
+    return std::nullopt;
+  }
+  if (op == Ntype_op::Not) {
+    for (auto sink : n.inp_sorted_pins()) {
+      for (auto drv : sink.get_driver_pins()) {
+        if (gu::bits_of(drv) <= 1) {
+          return reset_expr_of(drv, !active_low, depth + 1);
+        }
+      }
+    }
+    return std::nullopt;
+  }
+  if (op == Ntype_op::Xor) {
+    hhds::Pin_class val, cst;
+    int             cnt = 0;
+    for (const auto& in : gu::inp_sink_drivers(n)) {
+      ++cnt;
+      if (in.driver.is_const()) {
+        if (!cst.is_invalid()) {
+          cnt = 99;
+          break;
+        }
+        cst = in.driver;
+      } else {
+        if (!val.is_invalid()) {
+          cnt = 99;
+          break;
+        }
+        val = in.driver;
+      }
+    }
+    if (cnt == 2 && !val.is_invalid() && !cst.is_invalid() && gu::bits_of(val) <= 1) {
+      if (const_is(cst, 1)) {
+        return reset_expr_of(val, !active_low, depth + 1);
+      }
+      if (const_is(cst, 0)) {
+        return reset_expr_of(val, active_low, depth + 1);
+      }
+    }
   }
   if (op == Ntype_op::EQ) {
     std::vector<hhds::Pin_class> ins;
@@ -2147,27 +2228,146 @@ namespace {
     }
     if (ins.size() == 2) {
       if (ins[0].is_known_false()) {
-        const auto v = const_reset_level(ins[1], depth + 1);
-        return v ? std::optional<bool>(!*v) : std::nullopt;
+        return reset_expr_of(ins[1], !active_low, depth + 1);
       }
       if (ins[1].is_known_false()) {
-        const auto v = const_reset_level(ins[0], depth + 1);
-        return v ? std::optional<bool>(!*v) : std::nullopt;
+        return reset_expr_of(ins[0], !active_low, depth + 1);
       }
     }
+  }
+  if (op == Ntype_op::And || op == Ntype_op::Or) {
+    if (op == Ntype_op::And) {
+      // Check for 1-bit mask wrapper `And(x, 1)` where `x` is 1-bit or `Not(1-bit)`,
+      // and guard multi-input bitwise `And` to 1-bit operands so multi-bit masking isn't
+      // conflated with logical `&&`.
+      hhds::Pin_class val;
+      bool            masked   = false;
+      int             cnt      = 0;
+      bool            all_1bit = true;
+      for (const auto& in : gu::inp_sink_drivers(n)) {
+        ++cnt;
+        if (const_is(in.driver, 1) || const_is(in.driver, -1)) {
+          masked = true;
+        } else {
+          val = in.driver;
+          if (!in.driver.is_const() && gu::bits_of(in.driver) > 1) {
+            all_1bit = false;
+          }
+        }
+      }
+      if (cnt == 2 && masked && !val.is_invalid()
+          && (gu::bits_of(val) <= 1 || gu::type_op_of(val.get_master_node()) == Ntype_op::Not)) {
+        return reset_expr_of(val, active_low, depth + 1);
+      }
+      if (!all_1bit) {
+        return std::nullopt;
+      }
+    }
+    const Reset_expr::Kind  target_op = ((op == Ntype_op::Or) != active_low) ? Reset_expr::Kind::Or : Reset_expr::Kind::And;
+    const bool              absorbing = (target_op == Reset_expr::Kind::Or);
+    std::vector<Reset_expr> children;
+    bool                    unresolved = false;
+    for (auto sink : n.inp_sorted_pins()) {
+      for (auto drv : sink.get_driver_pins()) {
+        auto sub = reset_expr_of(drv, active_low, depth + 1);
+        if (!sub) {
+          unresolved = true;
+          continue;
+        }
+        if (sub->kind == Reset_expr::Kind::Const && sub->value == absorbing) {
+          return make_reset_const(absorbing);  // short-circuit even with opaque sibling (e.g. `rst and false`)
+        }
+        children.push_back(std::move(*sub));
+      }
+    }
+    if (unresolved || children.empty()) {
+      return std::nullopt;
+    }
+    return make_reset_combine(target_op, std::move(children));
+  }
+  if (op == Ntype_op::Mux) {
+    // Only the 2-way, 1-bit-select form: a wider Mux selects among more than
+    // two arms (pid 3+), which reading pids 1/2 alone would silently drop.
+    hhds::Pin_class sel, f_arm, t_arm;
+    bool            extra = false;
+    for (auto sink : n.inp_sorted_pins()) {
+      const auto pid = sink.get_port_id();
+      if (pid == 0) {
+        sel = sink.get_driver_pin();
+      } else if (pid == 1) {
+        f_arm = sink.get_driver_pin();
+      } else if (pid == 2) {
+        t_arm = sink.get_driver_pin();
+      } else {
+        extra = true;
+      }
+    }
+    if (!extra && !sel.is_invalid() && !f_arm.is_invalid() && !t_arm.is_invalid() && gu::bits_of(sel) <= 1) {
+      // One walk of the select: its negation is exact (De Morgan), and a second
+      // walk would make nested mux selects exponential in the depth bound.
+      auto s_pos = reset_expr_of(sel, false, depth + 1);
+      auto f_e   = s_pos ? reset_expr_of(f_arm, active_low, depth + 1) : std::nullopt;
+      auto t_e   = f_e ? reset_expr_of(t_arm, active_low, depth + 1) : std::nullopt;
+      if (s_pos && f_e && t_e) {
+        auto s_neg = negate_reset_expr(*s_pos);
+        auto lhs   = make_reset_combine(Reset_expr::Kind::And, {std::move(*s_pos), std::move(*t_e)});
+        auto rhs   = make_reset_combine(Reset_expr::Kind::And, {std::move(s_neg), std::move(*f_e)});
+        return make_reset_combine(Reset_expr::Kind::Or, {std::move(lhs), std::move(rhs)});
+      }
+    }
+  }
+  // Fallback for transparent bit-slice / xor-with-1 cones that control_root handles.
+  const auto root = control_root(driver);
+  if (!root.net.is_invalid() && gu::is_graph_input_pin(root.net)) {
+    return make_reset_port(static_cast<uint32_t>(root.net.get_port_id()), active_low != root.inverted);
   }
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<Reset_input_port> reset_root_port(const hhds::Pin_class& driver, bool active_low) {
-  if (driver.is_invalid()) {
+[[nodiscard]] std::optional<Reset_expr> subst_reset_expr(const Reset_expr&                               expr,
+                                                         const std::function<hhds::Pin_class(uint32_t)>& binding, int depth = 0) {
+  if (depth > 16) {
     return std::nullopt;
   }
-  const auto root = control_root(driver);
-  if (root.net.is_invalid() || !gu::is_graph_input_pin(root.net)) {
+  if (expr.kind == Reset_expr::Kind::Const) {
+    return expr;
+  }
+  if (expr.kind == Reset_expr::Kind::Port) {
+    const auto pin = binding(expr.port_id);
+    if (pin.is_invalid()) {
+      return std::nullopt;
+    }
+    return reset_expr_of(pin, expr.value, 0);
+  }
+  const bool              absorbing = (expr.kind == Reset_expr::Kind::Or);
+  std::vector<Reset_expr> children;
+  children.reserve(expr.children.size());
+  bool unresolved = false;
+  for (const auto& c : expr.children) {
+    auto sub = subst_reset_expr(c, binding, depth + 1);
+    if (!sub) {
+      unresolved = true;
+      continue;
+    }
+    if (sub->kind == Reset_expr::Kind::Const && sub->value == absorbing) {
+      return make_reset_const(absorbing);
+    }
+    children.push_back(std::move(*sub));
+  }
+  if (unresolved) {
     return std::nullopt;
   }
-  return Reset_input_port{static_cast<uint32_t>(root.net.get_port_id()), active_low != root.inverted};
+  return make_reset_combine(expr.kind, std::move(children));
+}
+
+void collect_reset_ports(const Reset_expr& expr, std::vector<uint32_t>& out) {
+  if (expr.kind == Reset_expr::Kind::Port) {
+    out.push_back(expr.port_id);
+    return;
+  }
+  for (const auto& c : expr.children) {
+    collect_reset_ports(c, out);
+  }
 }
 
 }  // namespace
@@ -2266,6 +2466,15 @@ const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph
   // unresolved analysis, exactly as on the reset side. A state element with no
   // clock_pin driver at all is not: it commits on the module's implicit clock,
   // so there is no port to name and nothing was lost.
+  const auto add_reset_expr = [&](uint32_t pid, Reset_expr expr) {
+    if (expr.kind == Reset_expr::Kind::Const && !expr.value) {
+      return;  // constant-inactive reset can never assert
+    }
+    auto& resets = result.resets[pid];
+    if (std::find(resets.begin(), resets.end(), expr) == resets.end()) {
+      resets.push_back(std::move(expr));
+    }
+  };
   const auto add_clock = [&](const hhds::Pin_class& driver, const hhds::Pin_class& reset, bool active_low) {
     if (driver.is_invalid()) {
       return;
@@ -2273,19 +2482,10 @@ const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph
     if (auto pid = root_port(driver, 0)) {
       result.ports.insert(*pid);
       if (!reset.is_invalid()) {
-        // A reset pin folded to its inactive constant can never assert, so it
-        // needs no clock-gate bypass and must not fail structural analysis.
-        const auto level          = const_reset_level(reset);
-        const bool const_inactive = level && (*level == active_low);
-        if (!const_inactive) {
-          if (auto rp = reset_root_port(reset, active_low)) {
-            auto& resets = result.resets[*pid];
-            if (std::find(resets.begin(), resets.end(), *rp) == resets.end()) {
-              resets.push_back(*rp);
-            }
-          } else {
-            result.resets_complete = false;
-          }
+        if (auto expr = reset_expr_of(reset, active_low)) {
+          add_reset_expr(*pid, std::move(*expr));
+        } else {
+          result.resets_complete = false;
         }
       }
     } else {
@@ -2308,9 +2508,12 @@ const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph
     // (tests/equiv/conditional_latch_call), and refusing it here would reject
     // it outright. Withholding the activation from a latch needs its ENABLE
     // gated rather than a clock port, which this walk does not model.
+    // An async reset lands regardless of the clock gate (in both RTL and
+    // lnast_llvm), so it must not require reopening the shared clock.
     if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
+      const bool is_async = (op != Ntype_op::Latch) && const_true(gu::get_driver_of_sink_name(n, "async"));
       add_clock(gu::get_driver_of_sink_name(n, "clock_pin"),
-                gu::get_driver_of_sink_name(n, "reset_pin"),
+                is_async ? hhds::Pin_class{} : gu::get_driver_of_sink_name(n, "reset_pin"),
                 const_true(gu::get_driver_of_sink_name(n, "negreset")));
       continue;
     }
@@ -2344,14 +2547,18 @@ const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph
         result.complete = false;
         continue;
       }
-      add_clock(clock, {}, false);
+      const auto pid = root_port(clock, 0);
+      if (!pid) {
+        result.complete = false;
+        continue;
+      }
+      result.ports.insert(*pid);
       if (const auto domain = child.resets.find(cp); domain != child.resets.end()) {
-        for (const auto& rp : domain->second) {
-          const auto reset = binding(rp.port_id);
-          if (reset.is_invalid()) {
-            result.resets_complete = false;
+        for (const auto& rexpr : domain->second) {
+          if (auto mapped = subst_reset_expr(rexpr, binding)) {
+            add_reset_expr(*pid, std::move(*mapped));
           } else {
-            add_clock(clock, reset, rp.active_low);
+            result.resets_complete = false;
           }
         }
       }
@@ -3885,6 +4092,24 @@ namespace {
   return logical_not1(g, logical_not1(g, a));
 }
 
+[[nodiscard]] hhds::Pin_class logical_and1(hhds::Graph* g, const hhds::Pin_class& a, const hhds::Pin_class& b) {
+  if (a.is_invalid()) {
+    return b;
+  }
+  if (b.is_invalid()) {
+    return a;
+  }
+  if (auto found = existing_binop(Ntype_op::And, a, b); !found.is_invalid()) {
+    return found;
+  }
+  auto op = gu::create_typed_node(*g, Ntype_op::And);
+  a.connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
+  b.connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
+  auto out = op.create_driver_pin(0);
+  gu::set_bits(out, 1);
+  return out;
+}
+
 [[nodiscard]] hhds::Pin_class logical_or1(hhds::Graph* g, const hhds::Pin_class& a, const hhds::Pin_class& b) {
   if (a.is_invalid()) {
     return b;
@@ -3903,52 +4128,21 @@ namespace {
   return out;
 }
 
-// Does the cone driving `start` contain `target` (an activation guard's
-// control root)? A bounded reverse walk that -- unlike comb_reach above --
-// CROSSES state and instance boundaries on purpose: the MATERIALIZED form of
-// an activation gate keeps its enable behind a transparent latch
-// (`clk & latch(__valid|reset)` closing at the rise), and an instantiated ICG
-// cell hides the same cone behind a Sub, so stopping at either boundary would
-// un-recognize exactly the already-gated shapes this test exists to skip. The
-// walk answers reachability only -- never phase or polarity -- and a cone
-// larger than the cap answers false, which falls back to gating (the historic
-// behavior) rather than silently withholding a gate the state needs.
-//
-// The seed itself does not count as a hit: a clock port WIRED to the guard
-// net is not evidence of a gate, only a guard folded INSIDE the clock's
-// derivation is.
-[[nodiscard]] bool cone_reaches(const hhds::Pin_class& start, const hhds::Pin_class& target) {
-  if (start.is_invalid() || target.is_invalid()) {
-    return false;
+[[nodiscard]] hhds::Pin_class materialize_reset_expr(hhds::Graph* g, const Reset_expr& expr,
+                                                     const absl::flat_hash_map<uint32_t, hhds::Pin_class>& bound) {
+  if (expr.kind == Reset_expr::Kind::Const) {
+    return gu::create_const(*g, *Dlop::create_integer(expr.value ? 1 : 0));
   }
-  constexpr size_t                       visit_cap = 512;
-  absl::flat_hash_set<hhds::Class_index> seen;
-  std::vector<hhds::Pin_class>           work{start};
-  while (!work.empty()) {
-    auto p = work.back();
-    work.pop_back();
-    if (p.is_invalid()) {
-      continue;
-    }
-    if (!same_pin(p, start) && same_pin(p, target)) {
-      return true;
-    }
-    if (p.is_const() || gu::is_graph_input_pin(p)) {
-      continue;
-    }
-    if (!seen.insert(p.get_class_index()).second) {
-      continue;
-    }
-    if (seen.size() > visit_cap) {
-      return false;
-    }
-    for (auto sink : p.get_master_node().inp_sorted_pins()) {  // read-only walk
-      for (auto driver : sink.get_driver_pins()) {
-        work.push_back(driver);
-      }
-    }
+  if (expr.kind == Reset_expr::Kind::Port) {
+    auto asserted = nonzero1(g, bound.at(expr.port_id));
+    return expr.value ? logical_not1(g, asserted) : asserted;
   }
-  return false;
+  hhds::Pin_class acc;
+  for (const auto& c : expr.children) {
+    auto pin = materialize_reset_expr(g, c, bound);
+    acc      = (expr.kind == Reset_expr::Kind::Or) ? logical_or1(g, acc, pin) : logical_and1(g, acc, pin);
+  }
+  return acc;
 }
 
 }  // namespace
@@ -4009,8 +4203,8 @@ int gate_activation_clocks(hhds::Graph* g, std::string_view from_pass, Clock_por
     // the root clock (and opens it for reset), so wrapping every forwarded
     // occurrence only builds redundant nested Clock_cells. A genuinely local
     // path guard is an And/Mux cone and does not reduce to this input root.
-    const auto guard_root = control_root(guard).net;
-    if (!guard_root.is_invalid() && gu::is_graph_input_pin(guard_root) && gu::pin_name_of(guard_root) == "__valid") {
+    const auto [guard_root, inverted] = control_root(guard);
+    if (!inverted && !guard_root.is_invalid() && gu::is_graph_input_pin(guard_root) && gu::pin_name_of(guard_root) == "__valid") {
       continue;
     }
 
@@ -4041,7 +4235,7 @@ int gate_activation_clocks(hhds::Graph* g, std::string_view from_pass, Clock_por
           .msg("conditional instance `{}` in `{}` has reset state whose reset cone is not reducible to a declared input",
                gu::debug_name(inst),
                g->get_name())
-          .hint("make the callee's synchronous reset derive directly (optionally through inversion) from one input port")
+          .hint("make the callee's synchronous reset derive from input ports via boolean logic (or/and/not)")
           .emit();
       continue;
     }
@@ -4065,15 +4259,22 @@ int gate_activation_clocks(hhds::Graph* g, std::string_view from_pass, Clock_por
         valid = false;
         break;
       }
-      const auto rit = bound.find(resets.front().port_id);
-      if (rit == bound.end() || rit->second.is_invalid()) {
-        livehd::diag::err(from_pass, "activation-reset-unbound", "time")
-            .msg("conditional instance `{}` in `{}` leaves its reset input `{}` unbound",
-                 gu::debug_name(inst),
-                 g->get_name(),
-                 port_name(resets.front().port_id))
-            .emit();
-        valid = false;
+      std::vector<uint32_t> rports;
+      collect_reset_ports(resets.front(), rports);
+      for (const auto rpid : rports) {
+        const auto rit = bound.find(rpid);
+        if (rit == bound.end() || rit->second.is_invalid()) {
+          livehd::diag::err(from_pass, "activation-reset-unbound", "time")
+              .msg("conditional instance `{}` in `{}` leaves its reset input `{}` unbound",
+                   gu::debug_name(inst),
+                   g->get_name(),
+                   port_name(rpid))
+              .emit();
+          valid = false;
+          break;
+        }
+      }
+      if (!valid) {
         break;
       }
     }
@@ -4081,49 +4282,24 @@ int gate_activation_clocks(hhds::Graph* g, std::string_view from_pass, Clock_por
       continue;
     }
 
-    // ROUND-TRIP idempotence (the second decline): a clock driver whose cone
-    // is ALREADY a function of this activation guard IS the activation gate,
-    // materialized as design text -- the emitted `clk & latch(__valid|reset)`
-    // read back through a Verilog front end reaches the clock port through the
-    // gate's own enable latch. Wrapping it again is not redundant but WRONG:
-    // the fresh cell latches the guard ALONE (a re-read callee folds its sync
-    // reset into a data mux, so the structural walk sees no reset port to OR
-    // in), which withholds every reset edge while the call is inactive --
-    // measured as the callee's state never leaving its power-on value
-    // (conditional_state_call: ref=0, impl=255 after reset). The pin-identity
-    // check inside the loop below cannot catch this: the re-read gate is body
-    // logic, not a Clock_cell carrying this exact enable pin. Decided per
-    // port BEFORE the enable cone is minted, so an all-ports-gated instance
-    // leaves no speculative orphan nodes behind.
-    const auto            guard_key = guard_root.is_invalid() ? guard : guard_root;
-    std::vector<uint32_t> ports_to_gate;
+    // A parent clock may run for several clients (e.g. integerBusy or fpBusy).
+    // A dependency on this child's guard cannot establish that its clock stops
+    // when the guard is false. Compare the actual gate enable below.
+    const auto active = nonzero1(g, guard);
     for (const auto pid : clock_ports) {
-      auto it = bound.find(pid);
-      if (it == bound.end() || it->second.is_invalid()) {
+      const auto bit = bound.find(pid);
+      if (bit == bound.end() || bit->second.is_invalid()) {
         continue;
       }
-      if (cone_reaches(it->second, guard_key)) {
-        continue;  // the design text already conditions this clock net on the guard
-      }
-      ports_to_gate.push_back(pid);
-    }
-    // No clock port needs (or has) a gate here, so the loop below would rewire
-    // nothing. Building the enable anyway is the orphan case above.
-    if (ports_to_gate.empty()) {
-      continue;
-    }
-
-    const auto active = nonzero1(g, guard);
-    for (const auto pid : ports_to_gate) {
-      const auto bit    = bound.find(pid);
-      auto       enable = active;
+      auto enable = active;
       if (const auto domain = clocks.resets.find(pid); domain != clocks.resets.end()) {
-        const auto& rp       = domain->second.front();
-        auto        asserted = nonzero1(g, bound.at(rp.port_id));
-        if (rp.active_low) {
-          asserted = logical_not1(g, asserted);
+        const auto& rexpr = domain->second.front();
+        if (rexpr.kind == Reset_expr::Kind::Const && rexpr.value) {
+          enable = gu::create_const(*g, *Dlop::create_integer(1));
+        } else {
+          auto asserted = materialize_reset_expr(g, rexpr, bound);
+          enable        = logical_or1(g, active, asserted);
         }
-        enable = logical_or1(g, active, asserted);
       }
 
       // Idempotence without confusing a design-authored gate for this one:

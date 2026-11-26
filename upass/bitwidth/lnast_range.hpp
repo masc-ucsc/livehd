@@ -335,32 +335,19 @@ struct Lnast_range {
   // follows the dividend (truncated semantics). Falls back to the dividend's
   // magnitude when the divisor is unknown.
   Lnast_range mod(const Lnast_range& b) const noexcept {
-    if (unbounded) {
-      return make_unbounded();
-    }
-    if (!b.unbounded && is_constant() && b.is_constant() && b.min != 0
+    if (!unbounded && !b.unbounded && is_constant() && b.is_constant() && b.min != 0
         && !(min == std::numeric_limits<int64_t>::min() && b.min == -1)) {
-      return constant(min % b.min);  // both endpoints known → exact remainder
+      return constant(min % b.min);
     }
-    int64_t ma;
-    if (!magnitude(ma)) {
+    int64_t bound;
+    const bool bounded_dividend = !unbounded && magnitude(bound);
+    int64_t divisor;
+    if (!b.unbounded && b.magnitude(divisor) && divisor != 0) {
+      bound = bounded_dividend ? std::min(bound, divisor - 1) : divisor - 1;
+    } else if (!bounded_dividend || (b.is_constant() && b.min == 0)) {
       return make_unbounded();
     }
-    int64_t bound = ma;
-    if (!b.unbounded) {
-      int64_t db;
-      if (!b.magnitude(db) || db == 0) {
-        return make_unbounded();
-      }
-      bound = std::min(ma, db - 1);
-    }
-    if (min >= 0) {
-      return bounded(0, bound);
-    }
-    if (max < 0) {
-      return bounded(-bound, 0);
-    }
-    return bounded(-bound, bound);
+    return bounded(!unbounded && min >= 0 ? 0 : -bound, !unbounded && max <= 0 ? 0 : bound);
   }
 
   // Sign-extend to a signed value whose sign bit sits at position `sign_bit`

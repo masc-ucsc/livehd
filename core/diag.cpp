@@ -388,6 +388,10 @@ void Sink::emit(Diagnostic d) {
     case Severity::info   : ++info_count_; break;  // never an error / exit-code change
   }
   init_output();
+  if (muted_ > 0) {
+    records_.push_back(std::move(d));  // a trial: kept for its caller and rollback(), never written
+    return;
+  }
   // Apply the current filter here as well as in the builders: cached diagnostics
   // and direct Sink callers bypass the builders. Keep file records for reports.
   const bool show_stderr = d.severity != Severity::info || enabled(d.pass, d.code);
@@ -411,7 +415,7 @@ void Sink::progress(std::string_view pass, std::string_view message,
                     std::initializer_list<std::pair<std::string_view, std::string>> attrs) {
   const std::lock_guard lock(mutex_);
   init_output();
-  if (!human_stderr_) {
+  if (!human_stderr_ || muted_ > 0) {
     return;
   }
   const uint64_t progress_seq = progress_seq_++;
@@ -503,6 +507,18 @@ void Sink::rollback(const Mark& m) {
     seen_.erase(dedup_key(d));
   }
   records_.erase(records_.begin() + static_cast<std::ptrdiff_t>(m.records), records_.end());
+}
+
+void Sink::push_mute() {
+  const std::lock_guard lock(mutex_);
+  ++muted_;
+}
+
+void Sink::pop_mute() {
+  const std::lock_guard lock(mutex_);
+  if (muted_ > 0) {
+    --muted_;
+  }
 }
 
 void Sink::set_step(std::string_view step) {

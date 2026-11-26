@@ -16,6 +16,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        "//upass/core:singleton_range_hdr",
         "//core",
         "//lnast",
         "//upass/bitwidth:lnast_range_hdr",

@@ -1,0 +1,28 @@
+/*
+:name: conditional_parent_clock
+:type: simulation
+*/
+mod counter(clk:Clock, rst:Reset) -> (q:U8@[0]) {
+  reg edges:U8 = 0
+  wrap edges += 1
+  q = edges
+}
+
+pub mod conditional_parent_clock(clk:Clock, rst:Reset, integerBusy:Bool, fpBusy:Bool) -> (q:U8@[0]) {
+  const pipeline = Clock(clock_pin=clk, enable=rst or integerBusy or fpBusy)
+  q = 0
+  if fpBusy { q = counter(clk=pipeline, rst=rst) }
+}
+
+test conditional_parent_clock.independent_enables {
+  mut d = conditional_parent_clock
+  mut expected:U8 = 0
+  tick 11 {
+    d.rst = clock == 0 or clock == 7
+    d.integerBusy = clock >= 2 and clock <= 5
+    d.fpBusy = clock == 1 or clock == 6 or clock >= 9
+    if d.rst { expected = 0 } elif d.fpBusy { wrap expected += 1 }
+    step
+    if d.fpBusy { assert(d.q == expected, "an integer pipeline edge must not advance the FP counter") }
+  }
+}

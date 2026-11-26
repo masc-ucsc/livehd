@@ -20,7 +20,19 @@ cc_library(
     alwayslink = True,
 )
 
-load("//tools:regression.bzl", "sh_test")
+load("//tools:regression.bzl", "cc_test", "sh_test")
+
+cc_test(
+    name = "pass_lg2lnast_test",
+    srcs = ["tests/pass_lg2lnast_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":pass_lg2lnast",
+        "//graph",
+        "//lnast",
+        "@googletest//:gtest_main",
+    ],
+)
 
 sh_test(
     name = "lg2lnast_roundtrip_test",

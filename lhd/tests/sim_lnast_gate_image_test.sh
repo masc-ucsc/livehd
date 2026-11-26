@@ -66,3 +66,50 @@ echo "ok glitchy clock gate declined"
 "$LHD" sim "$D/memimg.prp" "$D/memimg_tb.prp" --workdir "$W/mem" >"$W/mem.out" 2>&1 || { cat "$W/mem.out"; fail "memory image: sim"; }
 grep -q '"status":"pass"' "$W/mem.out" || { cat "$W/mem.out"; fail "memory image: not a pass"; }
 echo "ok memory image reload"
+
+# Conditional activation under LHD_SIM_LNAST_GATE=1: async+sync flops sharing one
+# gated clock plus a combined `!rst_n or flush` sync reset cone.
+cat >"$W/cond_rst_gate.prp" <<'PRP'
+mod inner(clk:Clock, rst_s:Reset, rst_a:Reset, flush:Bool) -> (s:U8@[0], a:U8@[0]) {
+  const local_rst = rst_s or flush
+  reg rs:U8:[clock_pin=clk, reset_pin=local_rst] = 10
+  reg ra:U8:[clock_pin=clk, reset_pin=rst_a, async=true] = 20
+  wrap rs += 1
+  wrap ra += 1
+  s = rs
+  a = ra
+}
+pub mod cond_rst_gate(clk:Clock, rst_s:Reset, rst_a:Reset, flush:Bool, en:Bool) -> (s:U8@[0], a:U8@[0]) {
+  s = 0
+  a = 0
+  if en {
+    const r = inner(clk=clk, rst_s=rst_s, rst_a=rst_a, flush=flush)
+    s = r.s
+    a = r.a
+  }
+}
+test cond_rst_gate.run {
+  mut d = cond_rst_gate
+  mut ws:U8 = 10
+  mut wa:U8 = 20
+  tick 10 {
+    const active = clock == 1 or clock == 2 or clock == 6 or clock >= 8
+    const cs     = clock == 0 or clock == 4
+    const fl     = clock == 7
+    const ca     = clock == 0 or clock == 3 or clock == 5
+    d.rst_s = cs
+    d.rst_a = ca
+    d.flush = fl
+    d.en    = active
+    if cs or fl { ws = 10 } elif active { wrap ws += 1 }
+    if ca { wa = 20 } elif active or cs or fl { wrap wa += 1 }
+    step
+    if active {
+      assert(d.s == ws and d.a == wa, "gated async+sync and combined sync reset")
+    }
+  }
+}
+PRP
+LHD_SIM_LNAST_GATE=1 "$LHD" sim "$W/cond_rst_gate.prp" --workdir "$W/crg" >"$W/crg.out" 2>&1 || { cat "$W/crg.out"; fail "conditional reset gate: sim"; }
+grep -q '"status":"pass"' "$W/crg.out" || { cat "$W/crg.out"; fail "conditional reset gate: not a pass"; }
+echo "ok conditional async+sync and combined sync reset under LHD_SIM_LNAST_GATE=1"

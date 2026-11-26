@@ -87,6 +87,35 @@ int for_each_test(const std::string& file, const std::string& test_sel, std::str
 
 }  // namespace
 
+std::string unsupported_test_loop(const std::string& file, const std::string& test_sel) {
+  std::string src, parse_error, error;
+  for_each_test(file, test_sel, src, parse_error, [&](TSNode test, const std::string& name) {
+    // Walk every statement container (if/else, match arms, nested scopes,
+    // tick bodies); a loop inside a lambda is the lambda's own business.
+    const auto visit = [&](auto&& self, TSNode node) -> void {
+      const auto kind = ntype(node);
+      if (kind == "for_statement" || kind == "while_statement" || kind == "loop_statement") {
+        error = file + ":" + std::to_string(ts_node_start_point(node).row + 1) + ": unsupported statement in test "
+                + name + ": `" + std::string(kind) + "`; use `tick` for a cycle loop";
+        return;
+      }
+      if (kind == "lambda") {
+        return;
+      }
+      for (TSNode child : ts_node_named_children(node)) {
+        if (!error.empty()) {
+          break;
+        }
+        self(self, child);
+      }
+    };
+    if (error.empty()) {
+      visit(visit, field(test, "code"));
+    }
+  });
+  return error;  // Normal source elaboration owns read and parse errors.
+}
+
 std::vector<Param_raw> read_params_raw(const std::string& src, TSNode test) {
   std::vector<Param_raw> out;
   TSNode                 inp = field(test, "input");

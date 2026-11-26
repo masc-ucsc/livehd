@@ -1,0 +1,35 @@
+/*
+:name: conditional_config_array
+:type: simulation
+*/
+comptime const direct = (const ways=1, const sets=4)
+comptime const assoc = (const ways=4, const sets=2)
+
+// The array dimension and element width are local to the selected arm.
+mod victim<C>(clk:Clock, write:Bool, idx:U2) -> (way:U2@[]) {
+  mut selected:U2 = 0
+  if C.ways > 1 {
+    reg next:[C.sets]Unsigned(bits=std.clog2(C.ways)):[ordering="old"] = 0
+    const set = idx % C.sets
+    selected = next[set]
+    if write { next[set] = (next[set]+1) % C.ways }
+  }
+  way = selected
+}
+pub mod conditional_config_array(clk:Clock, write:Bool, idx:U2) -> (a:U2@[], b:U2@[]) {
+  a = victim<direct>(clk=clk, write=write, idx=idx)
+  b = victim<assoc>(clk=clk, write=write, idx=idx)
+}
+test conditional_config_array.sets {
+  mut dut = conditional_config_array
+  dut.idx = 0
+  dut.write = true
+  step
+  step
+  dut.write = false
+  step
+  assert(dut.a == 0 and dut.b == 2, "only the associative profile allocates replacement state")
+  dut.idx = 1
+  step
+  assert(dut.b == 0, "each set has independent state")
+}

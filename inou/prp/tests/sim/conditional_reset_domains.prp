@@ -1,0 +1,94 @@
+/*
+:name: conditional_reset_domains
+:type: simulation
+*/
+mod left_lane(clk:Clock, rst_n:Reset) -> (q:U8@[0]) {
+  reg count:U8:[clock_pin=clk, reset_pin=rst_n, negreset=true] = 10
+  wrap count += 1
+  q = count
+}
+
+mod combo_reset_lane(clk:Clock, rst_n:Reset, flush:Bool) -> (q:U8@[0]) {
+  const local_rst = !rst_n or flush
+  reg count:U8:[clock_pin=clk, reset_pin=local_rst] = 7
+  wrap count += 1
+  q = count
+}
+
+mod disabled_reset_lane<HAS_RST=false>(clk:Clock, rst:Reset) -> (q:U8@[0]) {
+  const gated_rst = rst and HAS_RST
+  reg count:U8:[clock_pin=clk, reset_pin=gated_rst] = 0
+  wrap count += 1
+  q = count
+}
+
+mod lanes(clock_a:Clock, clock_b:Clock, clock_c:Clock, reset_a:Reset, reset_b:Reset, reset_async:Reset, flush:Bool) -> (
+  a:U8@[0], b:U8@[0], c:U8@[0], d_async:U8@[0], e_combo:U8@[0]
+) {
+  reg count:U8:[clock_pin=clock_b, reset_pin=reset_b] = 20
+  reg count_async:U8:[clock_pin=clock_b, reset_pin=reset_async, async=true] = 30
+  wrap count += 1
+  wrap count_async += 1
+  b       = count
+  d_async = count_async
+  a       = left_lane(clk=clock_a, rst_n=reset_a)
+  c       = disabled_reset_lane<HAS_RST=false>(clk=clock_b, rst=reset_b)
+  e_combo = combo_reset_lane(clk=clock_c, rst_n=reset_a, flush=flush)
+}
+
+pub mod conditional_reset_domains(
+  clk_a:Clock, clk_b:Clock, clk_c:Clock, rst_a:Reset, rst_b:Reset, rst_async:Reset, flush:Bool, en:Bool
+) -> (a:U8@[0], b:U8@[0], c:U8@[0], d_async:U8@[0], e_combo:U8@[0]) {
+  a       = 0
+  b       = 0
+  c       = 0
+  d_async = 0
+  e_combo = 0
+  if en {
+    const pair = lanes(
+      clock_a=clk_a, clock_b=clk_b, clock_c=clk_c,
+      reset_a=rst_a, reset_b=rst_b, reset_async=rst_async, flush=flush
+    )
+    a       = pair.a
+    b       = pair.b
+    c       = pair.c
+    d_async = pair.d_async
+    e_combo = pair.e_combo
+  }
+}
+
+test conditional_reset_domains.independent_resets {
+  mut d = conditional_reset_domains
+  mut want_a:U8 = 10
+  mut want_b:U8 = 20
+  mut want_c:U8 = 0
+  mut want_async:U8 = 30
+  mut want_combo:U8 = 7
+  tick 10 {
+    const active      = clock == 1 or clock == 2 or clock == 5 or clock >= 8
+    const clear_a     = clock == 0 or clock == 3
+    const clear_b     = clock == 0 or clock == 6
+    const clear_async = clock == 0 or clock == 4 or clock == 7
+    const do_flush    = clock == 4
+    d.rst_a     = !clear_a
+    d.rst_b     = clear_b
+    d.rst_async = clear_async
+    d.flush     = do_flush
+    d.en        = active
+    if clear_a { want_a = 10 } elif active { wrap want_a += 1 }
+    if clear_b { want_b = 20 } elif active { wrap want_b += 1 }
+    if active or clear_b { wrap want_c += 1 }
+    if clear_async { want_async = 30 } elif active or clear_b { wrap want_async += 1 }
+    if clear_a or do_flush { want_combo = 7 } elif active { wrap want_combo += 1 }
+    step
+    if active {
+      assert(d.a == want_a, "left domain follows its active-low reset")
+      assert(d.b == want_b, "right domain holds over a left-only or async-only reset")
+      assert(d.c == want_c, "constant-inactive reset never clears its lane")
+      assert(d.d_async == want_async, "async flop on shared clock resets without reopening sync gate")
+      assert(d.e_combo == want_combo, "combined !rst_n or flush cone reopens its own clock gate")
+    } else {
+      assert(d.a == 0 and d.b == 0 and d.c == 0 and d.d_async == 0 and d.e_combo == 0, "inactive outputs take caller defaults")
+    }
+  }
+}

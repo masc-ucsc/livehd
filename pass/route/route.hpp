@@ -21,17 +21,20 @@ struct Settings {
   bool        verbose = false, aim_link = true;
   std::string trace, timing, clock_nets, verify_report, only, reserve_cells;
   bool        prelegal = false, tile_move = false, reserve = false, verify = false;
-  double      anchor_frac   = 0;
-  double      time_limit    = 0;  // CPU seconds for the routing loop; 0 is no limit
-  double      long_frac     = 0;  // share of the data nets, by box, routed ahead of the others
-  double      space_frac    = 0;  // worst-slack share of the nets whose long wires keep the next tracks empty
+  bool        access_patterns = false;  // reserve joint M2/M3 escapes on shared-track cells up front and on settle
+  bool        complex_first   = false;  // route multi-sink nets on shared-track cells ahead of ordinary data nets
+  double      cell_cost       = 0;      // extra M2/M3 wire cost over shared-track cells whose pins are not yet routed
+  double      anchor_frac     = 0;
+  double      time_limit      = 0;  // CPU seconds for the routing loop; 0 is no limit
+  double      long_frac       = 0;  // share of the data nets, by box, routed ahead of the others
+  double      space_frac      = 0;  // worst-slack share of the nets whose long wires keep the next tracks empty
   int         space_min_len = 5000, space_min_layer = 1;
-  double      crit_frac = 0;
-  double      pin_cost  = 0;   // extra M2/M3 wire cost over pin-dense tiles: factor 1 + pin_cost * (pins / pin_tile - 1)
-  double      pin_footprint = 0;   // with prelegal: signal pins per um2 of row a floating cell may show; 0 is off
+  double      crit_frac     = 0;
+  double      pin_cost      = 0;  // extra M2/M3 wire cost over pin-dense tiles: factor 1 + pin_cost * (pins / pin_tile - 1)
+  double      pin_footprint = 0;  // with prelegal: signal pins per um2 of row a floating cell may show; 0 is off
   double      spread = 0;  // with prelegal: fill of a tile's free rows above which the cells' wished places spread out; 0 is off
   int         spread_rounds = 60;
-  int         pin_tile  = 27;  // pins in a 32-track tile above which the extra cost starts (20 pins per um2 on ASAP7)
+  int         pin_tile      = 27;  // pins in a 32-track tile above which the extra cost starts (20 pins per um2 on ASAP7)
 };
 
 struct Frame {

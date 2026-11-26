@@ -25,6 +25,8 @@ namespace livehd::synth {
 class Io_store;
 }
 
+struct uPass_detuple_registry;
+
 struct eprp_casecmp_str {
   struct nocase_compare {
     bool operator()(const unsigned char& c1, const unsigned char& c2) const { return std::tolower(c1) < std::tolower(c2); }
@@ -57,6 +59,9 @@ public:
   // when every named tree exists again. Empty means preserve insertion order.
   std::vector<std::string> lnast_order_hint;
 
+  // File-scoped record layouts and import aliases shared across elaboration rounds.
+  std::shared_ptr<uPass_detuple_registry> pyrope_type_layouts;
+
   // Unresolved live imports surfaced by pass.upass when invoked
   // with import_defer:1 (the kernel's iterate-until-converged loop consumes
   // them): (unit that hit the import, import string as written). Empty after
@@ -86,6 +91,7 @@ public:
   [[nodiscard]] std::string_view get(std::string_view name, std::string_view default_value = "") const;
 
   void clear() {
+    pyrope_type_layouts.reset();
     physical_timing_session.reset();
     dict.clear();
     stage_dict.clear();

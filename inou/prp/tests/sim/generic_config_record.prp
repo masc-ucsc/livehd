@@ -1,0 +1,30 @@
+/*
+:name: generic_config_record
+:type: simulation
+*/
+comptime const small = (const queue=(const depth=2, const wide=false), const queues=((const depth=2), (const depth=4)), const gain=1)
+comptime const wide = (const queue=(const depth=5, const wide=true), const queues=((const depth=3), (const depth=5)), const gain=2)
+comptime const same = (const queue=(const depth=2, const wide=false), const queues=((const depth=2), (const depth=4)), const gain=1)
+mod counter<C, I=0>(x:U8) -> (p:Unsigned(bits=C.queues[I].depth + 2)@[0]) {
+  reg acc:U8 = 0
+  if C.queue.wide { wrap acc += x + C.queue.depth } else { wrap acc += x * C.gain }
+  p = acc#[0..<(C.queues[I].depth + 2)]
+}
+mod tile<C=small>(x:U8) -> (p:Unsigned(bits=C.queue.depth + 2)@[0]) {
+  p = counter<C=C>(x=x)
+}
+pub mod generic_config_record(x:U8, y:U8) -> (a:U8@[0], b:U8@[0], c:U8@[0], d_def:U8@[0]) {
+  a = tile<small>(x=x)
+  b = tile<wide>(x=x)
+  c = tile<same>(x=y)
+  d_def = tile(x=x)
+}
+test generic_config_record.separate {
+  mut d = generic_config_record
+  tick 3 {
+    d.x = 1
+    d.y = 3
+    step
+    assert(d.a == clock+1 and d.b == 6*(clock+1) and d.c == 3*(clock+1) and d.d_def == clock+1, "equal and default bindings keep independent state")
+  }
+}

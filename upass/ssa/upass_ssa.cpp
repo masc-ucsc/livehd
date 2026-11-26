@@ -395,9 +395,10 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
   // when an assign's type slot is a `tuple_add`, expand each field with a
   // dotted-name prefix; otherwise emit one leaf entry.
   using Flat_field = Lnast_io_entry;
-  std::vector<Flat_field> flat_inputs;
-  std::vector<Flat_field> flat_outputs;
-  bool                    saw_composite_port = false;
+  std::vector<Flat_field>                     flat_inputs;
+  std::vector<Flat_field>                     flat_outputs;
+  absl::flat_hash_map<std::string, Lnast_nid> input_slots;
+  bool                                        saw_composite_port = false;
 
   // An `a:[N]T` port's array view, as it stood BEFORE this rebuild. uPass_ssa's
   // own staging io re-emits every leaf as a flat prim_type_int (the packed
@@ -431,11 +432,13 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
       }
     }
   }
-  // An array port whose shape does not fold yet (`v:[N]u4` or
-  // `v:[N]unsigned(bits=N)` on a generic lambda): its io entry has no width,
-  // so the staging io re-emits the DECLARED comp_type_array verbatim for the
-  // specializer to fold under the binds (clone_template_specialized).
-  absl::flat_hash_map<std::string, Lnast_nid> unsized_array_type;
+  // The structural IO tree is copied during specialization. Retain array
+  // declarations from the owning unit, including fields of imported types.
+  struct Array_type_source {
+    std::shared_ptr<Lnast> unit;
+    Lnast_nid              node;
+  };
+  absl::flat_hash_map<std::string, Array_type_source> array_type;
 
   auto restore_array_view = [&](std::vector<Flat_field>& fields) {
     for (auto& f : fields) {
@@ -705,6 +708,9 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
       any                 = true;
       const auto leaf     = full + "." + std::string(ex.get_name(f_nid).substr(field_prefix.size()));
       Type_info  field_ti = type_info_from(nt->unit, f_ty);
+      if (Lnast_ntype::is_comp_type_array(ex.get_type(f_ty))) {
+        array_type.insert_or_assign(leaf, Array_type_source{nt->unit, f_ty});
+      }
       if (Lnast_ntype::is_ref(ex.get_type(f_ty))
           && expand_named_type(nt->unit, std::string(ex.get_name(f_ty)), leaf, true, out, smin, smax, field_ti, depth + 1, why)
           && field_ti.kind == Io_kind::none) {
@@ -871,8 +877,10 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
         throw std::runtime_error(why);
       }
     }
-    if (ti.bits == 0 && !type_nid.is_invalid() && Lnast_ntype::is_comp_type_array(lnast->get_type(type_nid))) {
-      unsized_array_type.insert_or_assign(full, type_nid);
+    if (!type_nid.is_invalid() && Lnast_ntype::is_comp_type_array(lnast->get_type(type_nid))) {
+      array_type.insert_or_assign(full, Array_type_source{lnast, type_nid});
+    }
+    if (ti.bits == 0 && array_type.contains(full)) {
       // Outside a template nothing folds a port's shape later: a dimension
       // that is no extent here would otherwise harvest a width-less port
       // (`input signed v`, one bit) and silently drop every lane.
@@ -899,6 +907,10 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
         }
         lvl = elem;
       }
+    }
+    if (collect_is_ref && rhs_nid.is_valid()
+        && !(Lnast_ntype::is_const(lnast->get_type(rhs_nid)) && lnast->get_name(rhs_nid) == "nil")) {
+      input_slots.emplace(full, rhs_nid);
     }
     out.push_back({full, ti.bits, ti.is_signed, is_ref, is_vararg, ti.kind, smin, smax, std::move(type_name)});
     out.back().array_size     = ti.array_size;
@@ -967,28 +979,19 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
 
   // Re-emit the io node with flattened leaf entries (no nested tuple_add
   // type subtree). Width/signedness for each entry come from io_meta.
-  std::function<void(const Lnast_nid&, const Lnast_nid&)> copy_type = [&](const Lnast_nid& src, const Lnast_nid& dst_parent) {
-    const auto t = lnast->get_type(src);
-    Lnast_nid  n;
-    if (Lnast_ntype::is_const(t)) {
-      n = staging->add_child(dst_parent, Lnast_node::create_const(lnast->get_name(src)));
-    } else if (Lnast_ntype::is_ref(t)) {
-      n = staging->add_child(dst_parent, Lnast_node::create_ref(lnast->get_name(src)));
-    } else {
-      n = staging->add_child(dst_parent, t);
-    }
-    for (auto c : lnast->children(src)) {
-      copy_type(c, n);
-    }
-  };
-
   auto new_io       = staging->add_child(new_root, Lnast_ntype::create_io());
   auto emit_section = [&](const std::vector<Flat_field>& fields, bool is_input) {
     auto tup = staging->add_child(new_io, Lnast_ntype::create_tuple_add());
     for (const auto& f : fields) {
       auto a = staging->add_child(tup, Lnast_ntype::create_store());
       staging->add_child(a, Lnast_node::create_ref(f.name));
-      staging->add_child(a, Lnast_node::create_const(is_input && f.is_varargs ? "..." : is_input && f.is_ref ? "ref" : "nil"));
+      // Specialization reads the rebuilt tree. Keep the actual default
+      // (literal, expression reference or comb sentinel) and parameter mode.
+      if (const auto slot = input_slots.find(f.name); is_input && slot != input_slots.end()) {
+        copy_subtree(lnast, slot->second, staging, a);
+      } else {
+        staging->add_child(a, Lnast_node::create_const("nil"));
+      }
       if (!lnast->is_verilog_origin() && f.sig != Io_sig::none) {
         // Specialization clones the structural IO tree, not its old io_meta.
         // Keep signal classes there so a Clock cannot become an untyped port.
@@ -996,8 +999,10 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
                            f.sig == Io_sig::clock ? Lnast_ntype::create_prim_type_clock() : Lnast_ntype::create_prim_type_reset());
       } else if (f.kind == Io_kind::boolean) {
         staging->add_child(a, Lnast_ntype::create_prim_type_bool());
-      } else if (const auto ait = unsized_array_type.find(f.name); f.bits == 0 && ait != unsized_array_type.end()) {
-        copy_type(ait->second, a);
+      } else if (const auto ait = array_type.find(f.name); ait != array_type.end()) {
+        // A specialization clones this IO tree. Preserve the array element
+        // type and lane count even when its packed width is already known.
+        copy_subtree(ait->second.unit, ait->second.node, staging, a);
       } else if (f.bits > 0) {
         // Re-emit the canonical prim_type_int(max,min) from the
         // flat field's (bits, signed).
@@ -1726,6 +1731,33 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
     return false;
   };
 
+  // Split the named prefix of an indexed output write. Array indices
+  // remain operands on the now-flat port, just as for an array at the root.
+  auto indexed_port_store = [&](const std::vector<Lnast_nid>& kids, const Lnast_nid& parent, const Lnast_nid& src) {
+    auto path = resolve_port_path(lnast->get_name(kids.front()));
+    if (!path) {
+      return false;
+    }
+    for (size_t i = 1; i + 2 < kids.size(); ++i) {
+      if (!Lnast_ntype::is_const(lnast->get_type(kids[i]))) {
+        break;
+      }
+      path->push_back('.');
+      path->append(unquote_field(lnast->get_name(kids[i])));
+      const auto* port = meta.find(*path);
+      if (port_out_leaf.contains(*path) && port && port->array_size > 0) {
+        const auto st = staging->add_child(parent, Lnast_ntype::create_store());
+        staging->set_srcid(st, lnast->get_srcid(src));
+        staging->add_child(st, Lnast_node::create_ref(*path));
+        for (++i; i < kids.size(); ++i) {
+          copy_with_rename(lnast, kids[i], staging, st, rename_map);
+        }
+        return true;
+      }
+    }
+    return false;
+  };
+
   // Rewrite a field `store(port, 'f'[, 'g'...], value)` (a tuple-port field
   // WRITE) into a scalar leaf `store(port.f.g, value)` (SSA-versioned LHS).
   auto try_rewrite_port_store = [&](const Lnast_nid& child) -> bool {
@@ -1735,6 +1767,9 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
     }
     if (kids.size() < 3 || !Lnast_ntype::is_ref(lnast->get_type(kids[0]))) {
       return false;  // 2-child scalar store (or odd shape) — normal path
+    }
+    if (indexed_port_store(kids, new_stmts, child)) {
+      return true;
     }
     auto base = resolve_port_path(lnast->get_name(kids[0]));
     if (!base) {
@@ -1979,6 +2014,9 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
         kids.push_back(c);
       }
       if (kids.size() >= 3 && Lnast_ntype::is_ref(lnast->get_type(kids[0]))) {
+        if (indexed_port_store(kids, dst_parent, src_nid)) {
+          return;
+        }
         if (auto base = resolve_port_path(lnast->get_name(kids[0]))) {
           std::string path = *base;
           bool        ok   = true;
@@ -2352,7 +2390,11 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
           // Only names written by the loop were reset to their base above.
           // Copying all reads verbatim loses e.g. a runtime function argument
           // bound before a deferred loop, leaving its declaration-time poison.
-          copy_with_rename(lnast, child, staging, new_stmts, rename_map);
+          if (has_tuple_ports) {
+            copy_branch_port_aware(child, new_stmts);
+          } else {
+            copy_with_rename(lnast, child, staging, new_stmts, rename_map);
+          }
         } else {
           // Independent function scopes must not inherit outer SSA bindings.
           copy_subtree(lnast, child, staging, new_stmts);

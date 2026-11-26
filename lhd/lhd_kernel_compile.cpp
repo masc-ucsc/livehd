@@ -1500,43 +1500,37 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
     } else if (names.size() == 1) {
       selected = names.front();
     } else {
-      // No `--top`: the sole PUB fully-defaulted generic template is the only
-      // unambiguous candidate. Keying on names.size()==1 instead dropped the top
-      // from the emit -- silently, exit 0 -- for the ordinary shape of a generic
-      // `pub mod` beside a private helper, or beside any import.
+      // A generic imported by a concrete DUT is not itself the requested top.
+      // Use public hardware in positional sources first. A testbench-only
+      // source can still select a unique generic DUT from its imports.
+      absl::flat_hash_set<std::string> named_files;
+      for (const auto& f : opts.files) {
+        named_files.insert(std::filesystem::path(f).stem().string());
+      }
       std::vector<std::string> candidates;
+      std::vector<std::string> named_candidates;
+      bool has_named_hardware = false;
       for (const auto& ln : var.lnasts) {
-        if (!ln->is_template() || !fully_defaulted(ln) || !is_pub_entity(ln->get_top_module_name())) {
+        const std::string name(ln->get_top_module_name());
+        if (ln->get_lambda_kind().empty() || !is_pub_entity(name)) {
           continue;
         }
-        candidates.emplace_back(ln->get_top_module_name());
+        const auto file = name.substr(0, name.rfind('.'));
+        const bool named = named_files.contains(std::filesystem::path(file).filename().string());
+        // A `pub comb` helper beside the tests is not a DUT: it must not hide a
+        // unique generic DUT the testbench imports.
+        const auto kind = ln->get_lambda_kind();
+        has_named_hardware |= named && (kind == "mod" || kind == "pipe");
+        if (ln->is_template() && fully_defaulted(ln)) {
+          candidates.push_back(name);
+          if (named) {
+            named_candidates.push_back(name);
+          }
+        }
       }
-      if (candidates.size() == 1) {
-        selected = candidates.front();
-      } else if (candidates.size() > 1) {
-        // Several qualify: a design's own generic IMPORTS qualify exactly as
-        // hard as the design (`pub mod add_node<SW=10>` pulled in by a `pub mod
-        // matched_filter<SIZE=..>`), so declining outright dropped the top of
-        // every such tree -- silently, exit 0, only the non-generic leaves
-        // emitted. The user named the design's FILE on the command line and
-        // never named the file an import reached, so that is the tie-break.
-        // Only a tie that is STILL ambiguous after it declines.
-        absl::flat_hash_set<std::string> named;
-        for (const auto& f : opts.files) {
-          named.insert(std::filesystem::path(f).stem().string());
-        }
-        for (const auto& cand : candidates) {
-          const auto dot  = cand.rfind('.');
-          const auto file = dot == std::string::npos ? cand : cand.substr(0, dot);
-          if (named.count(file) == 0) {
-            continue;
-          }
-          if (!selected.empty()) {
-            selected.clear();  // ambiguous -- decline rather than guess
-            break;
-          }
-          selected = cand;
-        }
+      const auto& eligible = has_named_hardware ? named_candidates : candidates;
+      if (eligible.size() == 1) {
+        selected = eligible.front();
       }
     }
     for (const auto& ln : var.lnasts) {

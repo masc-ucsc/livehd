@@ -1,0 +1,20 @@
+/*
+:name: wrap_merged_operands
+:type: simulation
+*/
+comb narrow<W>(a:Unsigned(bits=W), b:Unsigned(bits=W), n:U2) -> (result:Unsigned(bits=W)) {
+  const x = if n == 0 { a#[0..<32] } else { a }
+  const y = if n == 0 { b#[0..<12] } else { b }
+  wrap result = (x << n) + y
+}
+pub mod wrap_merged_operands(a:U64, b:U64, n:U2) -> (v:U68@[0]) {
+  v = narrow<64>(a=a, b=b, n=n)
+}
+test wrap_merged_operands.widen {
+  mut d = wrap_merged_operands
+  d.a = 0x8000000000000000
+  d.b = 3
+  d.n = 1
+  step
+  assert(d.v == 3, "the callee wraps its result to 64 bits before the caller widens it")
+}

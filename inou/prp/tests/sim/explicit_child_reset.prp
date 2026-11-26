@@ -1,0 +1,27 @@
+/*
+:name: explicit_child_reset
+:type: simulation
+*/
+mod counter(clk:Clock, clear:Reset) -> (q:U8@[]) {
+  reg count:U8 = 17
+  wrap count += 1
+  q = count
+}
+
+// The parent supplies the child's entire reset expression.
+pub mod explicit_child_reset(clk:Clock, reset:U1, flush:Bool) -> (q:U8@[]) {
+  q = counter(clk=clk, clear=(reset != 0 or flush))
+}
+test explicit_child_reset.local_reset {
+  mut dut = explicit_child_reset
+  dut.reset = 1
+  dut.flush = false
+  step
+  assert(dut.q == 17)
+  dut.reset = 0
+  step
+  assert(dut.q == 18)
+  dut.flush = true
+  step
+  assert(dut.q == 17)
+}

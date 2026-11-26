@@ -25,15 +25,19 @@ fail() {
 # the root using a freshly changed sibling. This is Minion's one-module edit
 # shape, reduced to an observable arithmetic result.
 IW="$W/identity"
-mkdir -p "$IW"
-cat > "$IW/g.prp" <<'EOF'
-pub mod madd<W=8>(a:U8, b:U8) -> (r:U8@[0]) { r = (a ^ b) & ((1 << W) - 1) }
+mkdir -p "$IW/units"
+cat > "$IW/units/g.prp" <<'EOF'
+pub mod madd<W=8>(a:U8, b:U8) -> (r:U8@[0]) {
+  mut result:U8 = 0
+  for i in 0..<W { result#[i] = a#[i] ^ b#[i] }
+  r = result
+}
 EOF
 cat > "$IW/leaf.prp" <<'EOF'
 pub comb bump(a:U8) -> (r:U8) { wrap r = a + 1 }
 EOF
 cat > "$IW/tb.prp" <<'EOF'
-const madd = import("g.madd")
+const madd = import("units/g.madd")
 const leaf = import("leaf")
 pub mod top(x:U8) -> (y:U8@[0]) {
   y = madd(a=leaf.bump(a=x), b=x)

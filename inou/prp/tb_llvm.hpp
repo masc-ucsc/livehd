@@ -27,6 +27,9 @@
 
 namespace prp_tb {
 
+// Resolve the modules instantiated by test blocks against the compiled definitions.
+bool discover_duts(const std::string& file, const std::vector<std::string>& modules, std::vector<std::string>& used, std::string& err);
+
 // Parse `file`, lower every `test` matching `test_sel` (empty = all) against the `<stem>.dut.json`
 // files in `simdir`, and write the object + manifest. Returns 0 and fills `tests`, or non-zero with `err`.
 // `also_trace`: write `drv.tb.trace.o` as well, the same tests with a per-step trace hook and a stop flag (the observation

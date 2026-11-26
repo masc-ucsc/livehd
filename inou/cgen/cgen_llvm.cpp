@@ -2754,6 +2754,12 @@ Cgen_llvm::Value Cgen_llvm::binary(Binary_op op, Value lhs, Value rhs, uint32_t 
   if ((ordered && (!lhs.unsign || !rhs.unsign)) || ((op == Binary_op::eq || op == Binary_op::ne) && lhs.unsign != rhs.unsign)) {
     ++operation_width;
   }
+  if (op == Binary_op::div || op == Binary_op::rem) {
+    // Truncating either operand before division changes the quotient and remainder.
+    // A mixed-sign divide also needs a zero sign bit on the unsigned operand.
+    const bool mixed = lhs.unsign != rhs.unsign;
+    operation_width  = std::max({result_width, lhs.width + (mixed && lhs.unsign), rhs.width + (mixed && rhs.unsign)});
+  }
   left  = cast_integer(impl_->builder, left, operation_width, lhs.unsign);
   right = cast_integer(impl_->builder, right, operation_width, rhs.unsign);
 

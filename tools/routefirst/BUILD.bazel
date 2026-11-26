@@ -64,6 +64,18 @@ cc_binary(
     deps = ["//inou/lefdef:inou_lefdef"],
 )
 
+py_library(
+    name = "rf_shared_tracks_lib",
+    srcs = ["rf_shared_tracks.py"],
+    imports = ["."],
+)
+
+py_binary(
+    name = "rf_shared_tracks",
+    srcs = ["rf_shared_tracks.py"],
+    legacy_create_init = 0,
+)
+
 py_test(
     name = "rf_route_test",
     size = "small",
@@ -71,6 +83,7 @@ py_test(
     args = ["$(location //lhd)", "$(location :rf_chunks)", "$(location :rf_feedback)"],
     data = ["//lhd", ":rf_chunks", ":rf_feedback"],
     legacy_create_init = 0,
+    deps = [":rf_shared_tracks_lib"],
 )
 
 py_library(

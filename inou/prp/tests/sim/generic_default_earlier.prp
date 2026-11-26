@@ -1,0 +1,20 @@
+/*
+:name: generic_default_earlier
+:type: simulation
+*/
+mod lane<W=32, XLEN=W>(x:U8) -> (y:U8@[]) {
+  y = x ^ std.clog2(XLEN / 8)
+}
+
+pub mod generic_default_earlier(x:U8) -> (n:U8@[], w:U8@[], explicit:U8@[]) {
+  n = lane(x=x)
+  w = lane<W=64>(x=x)
+  explicit = lane<W=64, XLEN=32>(x=x)
+}
+
+test generic_default_earlier.widths {
+  mut d = generic_default_earlier
+  d.x = 0x10
+  step
+  assert(d.n == 0x12 and d.w == 0x13 and d.explicit == 0x12)
+}

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <algorithm>
+#include <compare>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -481,19 +482,45 @@ int lift_latch_level_resets(hhds::Graph* g);
 // The cache is caller-owned because graph preparation can inline gate cells or
 // materialize occurrences. Sharing a process-global answer across those
 // rewrites would make the result depend on which consumer queried first.
-struct Reset_input_port {
-  uint32_t port_id    = 0;
-  bool     active_low = false;
+// Canonical boolean expression over a callee's input ports describing when a
+// clock domain's synchronous reset is asserted (always normalized to active-high).
+struct Reset_expr {
+  enum class Kind : uint8_t { Const, Port, And, Or };
 
-  friend bool operator==(const Reset_input_port&, const Reset_input_port&) = default;
+  Kind                    kind    = Kind::Const;
+  bool                    value   = false;  // Const: level; Port: active_low
+  uint32_t                port_id = 0;      // Port
+  std::vector<Reset_expr> children;         // And / Or (sorted, deduplicated)
+
+  friend bool operator==(const Reset_expr& a, const Reset_expr& b) {
+    return a.kind == b.kind && a.value == b.value && a.port_id == b.port_id && a.children == b.children;
+  }
+  friend std::strong_ordering operator<=>(const Reset_expr& a, const Reset_expr& b) {
+    if (auto c = a.kind <=> b.kind; c != 0) {
+      return c;
+    }
+    if (auto c = a.value <=> b.value; c != 0) {
+      return c;
+    }
+    if (auto c = a.port_id <=> b.port_id; c != 0) {
+      return c;
+    }
+    const auto n = std::min(a.children.size(), b.children.size());
+    for (size_t i = 0; i < n; ++i) {
+      if (auto c = a.children[i] <=> b.children[i]; c != 0) {
+        return c;
+      }
+    }
+    return a.children.size() <=> b.children.size();
+  }
 };
 
 struct Clock_input_ports {
   absl::flat_hash_set<uint32_t> ports;
   // A reset can reopen only the clock that drives the corresponding state.
-  std::map<uint32_t, std::vector<Reset_input_port>> resets;
-  bool                                              complete        = true;
-  bool                                              resets_complete = true;
+  std::map<uint32_t, std::vector<Reset_expr>> resets;
+  bool                                        complete        = true;
+  bool                                        resets_complete = true;
 };
 
 struct Clock_port_cache {

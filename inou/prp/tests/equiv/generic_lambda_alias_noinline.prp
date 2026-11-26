@@ -17,7 +17,12 @@
 const apply  = import("generic_lambda_alias_noinline/lib.apply")
 const applyv = import("generic_lambda_alias_noinline/lib.applyv")
 const inc    = import("generic_lambda_alias_noinline/lib2.hh")
-pub mod top(a:U8) -> (z:U8@[0], y:U8@[0], x:U8@[0]) {
+comb low<N>(a:U8) -> (r:U8) { r = a#[0..<N] }
+
+pub mod top(a:U8) -> (z:U8@[0], y:U8@[0], x:U8@[0], lo:U8@[0]) {
+  // The imported function's original name remains available for a local width.
+  comptime const hh = 3
+  lo = low<hh>(a=a)
   z = apply<inc>(a=a)
   y = inc(v=a)
   x = applyv(f=inc, a=a)

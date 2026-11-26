@@ -1,0 +1,17 @@
+/*
+:name: nested_array_argument_length
+:type: error
+:error: has 2 lanes
+:help: pass an array of the declared length
+*/
+type Pair = (lanes:[2]U8, ready:Bool)
+type Quad = (lanes:[4]U8, ready:Bool)
+mod pair(x:U8) -> (data:Pair@[]) {
+  data.ready = true
+  for i in 0..<2 { data.lanes[i] = x }
+}
+comb read(data:Quad) -> (r:U8) { r = data.lanes[0] }
+pub mod nested_array_argument_length(x:U8) -> (r:U8@[]) {
+  const a = pair(x=x)
+  r = read(data=a.data)
+}

@@ -187,23 +187,11 @@ Sim_emitted emit_sim(const Sim_request& request) {
     if (!entity.empty() && entity.front() == '%') {
       continue;
     }
-    if (!request.top.empty() ? (request.top == full || request.top == entity) : !instantiated.contains(full)) {
+    const bool selected = !request.top.empty()    ? request.top == full || request.top == entity
+                          : !request.duts.empty() ? std::ranges::find(request.duts, full) != request.duts.end()
+                                                  : !instantiated.contains(full);
+    if (selected) {
       roots.push_back(full);
-    }
-  }
-  if (request.top.empty() && !request.duts.empty()) {
-    std::vector<std::string> named;
-    for (const auto& full : roots) {
-      const auto entity = entity_of(full);
-      for (const auto& dut : request.duts) {
-        if (dut == full || dut == entity || entity_of(dut) == entity) {
-          named.push_back(full);
-          break;
-        }
-      }
-    }
-    if (!named.empty()) {
-      roots = std::move(named);
     }
   }
   if (roots.empty()) {

@@ -27,8 +27,10 @@ void Pass_lnastfmt::fmt_begin(Eprp_var& var) {
   Pass_lnastfmt p(var);
 
   for (const auto& ln : var.lnasts) {
-    if (ln->is_pre_elaborated()) {
-      continue;  // a loaded import is already validated/formatted (post-upass body)
+    if (ln->is_pre_elaborated() || ln->is_graph_restored()) {
+      // Imports and graph-cache hits carry post-upass bodies. Their lifted
+      // callees have resolved unit paths, while this pass checks source IR.
+      continue;
     }
     p.validate(ln.get());
   }

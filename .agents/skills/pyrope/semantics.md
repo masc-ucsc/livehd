@@ -544,9 +544,11 @@ Three statements, distinguished by **who discharges the obligation**
   warns per encounter); `assume_nocheck_synth(expr)` is a synthesis-only
   don't-care, invisible to verification.
 
-**TRAP — guards are NOT inherited**: `if c { assert(x) }` lowers as an
-*unconditional* `assert(x)` (known compiler limitation). Always
-write the guard into the condition: `assert(c implies x)`.
+**Guards ARE inherited by `assert` and `assume`**: `if c { assert(x) }` and
+`match` arms fold their path condition into the obligation as an implication
+(`c implies x`), and a conditional `mod` call composes its `__valid` guard
+into callee properties as well. `cassert` stays an unconditional elaboration
+check (compile-time only).
 
 **TRAP — `lhd sim` does not execute design-body asserts**: only assertions
 written inside a `test` block are checked at simulation time. Design-body

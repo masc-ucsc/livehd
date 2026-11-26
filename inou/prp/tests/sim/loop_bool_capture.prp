@@ -1,0 +1,27 @@
+/*
+:name: loop_bool_capture
+:type: simulation
+:expect_instances: u_loop_0=1 *=1
+*/
+
+// A computed Bool and a U1 have the same range but distinct loop port types.
+pub comb loop_bool_capture(a:U2, enable:Bool) -> (mask:U2) {
+  const low = a#[1] == 0 and enable
+  const bit = a#[0]
+  mask = 0
+  for i in 0..<2 {
+    const select = if i == 0 { low } else { !low }
+    if select { mask#[i] = bit ^ 1 }
+  }
+}
+
+test loop_bool_capture.truth_table {
+  mut d = loop_bool_capture
+  tick 8 {
+    d.a = clock#[0..<2]
+    d.enable = clock >= 4
+    step
+    const want = if clock#[0] != 0 { 0 } elif clock == 4 { 1 } else { 2 }
+    assert(d.mask == want)
+  }
+}

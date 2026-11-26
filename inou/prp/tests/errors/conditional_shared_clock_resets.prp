@@ -1,0 +1,28 @@
+/*
+:name: conditional_shared_clock_resets
+:type: error
+:tolg: 1
+:error: independent reset bindings
+*/
+mod left_lane(clk:Clock, rst_n:Reset) -> (q:U8@[0]) {
+  reg count:U8:[clock_pin=clk, reset_pin=rst_n, negreset=true] = 10
+  wrap count += 1
+  q = count
+}
+
+mod lanes(clk:Clock, reset_a:Reset, reset_b:Reset) -> (a:U8@[0], b:U8@[0]) {
+  reg count:U8:[clock_pin=clk, reset_pin=reset_b] = 20
+  wrap count += 1
+  b = count
+  a = left_lane(clk=clk, rst_n=reset_a)
+}
+
+pub mod conditional_shared_clock_resets(clk:Clock, rst_a:Reset, rst_b:Reset, en:Bool) -> (a:U8@[0], b:U8@[0]) {
+  a = 0
+  b = 0
+  if en {
+    const pair = lanes(clk=clk, reset_a=rst_a, reset_b=rst_b)
+    a = pair.a
+    b = pair.b
+  }
+}

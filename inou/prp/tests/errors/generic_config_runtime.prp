@@ -1,0 +1,13 @@
+/*
+:name: generic_config_runtime
+:type: error
+:tolg: 1
+:error: a runtime value
+*/
+mod add<C>(x:U8) -> (y:U8@[0]) {
+  wrap y = x + C.offset
+}
+pub mod generic_config_runtime(x:U8) -> (y:U8@[0]) {
+  const config = (const offset=x, const wide=false)
+  y = add<config>(x=x)
+}

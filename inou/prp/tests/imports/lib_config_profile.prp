@@ -1,0 +1,3 @@
+// The importer can see the callable before the exporter publishes its record.
+pub comb profile(width=8) -> (cfg) { cfg = (const width=width, const bytes=width/8) }
+pub const small = profile()

@@ -50,6 +50,7 @@
 #include "lhd_sim_options.hpp"
 #include "lnast.hpp"
 #include "lnast_sim.hpp"
+#include "tb_llvm.hpp"
 #include "log.hpp"
 #include "node_util.hpp"
 #include "width_validation.hpp"
@@ -3071,14 +3072,14 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
         }
       }
       // the last source holds the test blocks; the modules it imports are the DUTs
-      if (!opts.files.empty()) {
-        std::ifstream     tb(opts.files.back());
-        std::stringstream text;
-        text << tb.rdbuf();
-        static const std::regex import_re(R"re(import\(\s*"(?:lg:|ln:)?([^"]+)"\s*\))re");
-        const std::string       body = text.str();
-        for (std::sregex_iterator it(body.begin(), body.end(), import_re), end; it != end; ++it) {
-          request.duts.push_back((*it)[1].str());
+      if (request.top.empty() && !opts.sim_testbench_file.empty()) {
+        std::vector<std::string> names;
+        for (const auto& graph : request.graphs) {
+          names.emplace_back(graph->get_name());
+        }
+        std::string err;
+        if (!prp_tb::discover_duts(opts.sim_testbench_file, names, request.duts, err)) {
+          throw Lhd_error{"unsupported", err, ""};
         }
       }
       Phase_timer phase(res, "pass.lnast_sim");

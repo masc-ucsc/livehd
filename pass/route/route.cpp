@@ -78,7 +78,7 @@ struct Id_map {
   size_t slot(int64_t id) const {
     return ((size_t((uint64_t(id >> 5) * 0x9E3779B97F4A7C15ull) >> (64 - bits)) & ~size_t(31)) | size_t(id & 31));
   }
-  V* find(int64_t id) {
+  const V* find(int64_t id) const {
     if (live == 0) {
       return nullptr;
     }
@@ -91,7 +91,8 @@ struct Id_map {
       }
     }
   }
-  bool has(int64_t id) {
+  V*   find(int64_t id) { return const_cast<V*>(static_cast<const Id_map*>(this)->find(id)); }
+  bool has(int64_t id) const {
     const V* p = find(id);
     return p && *p;
   }
@@ -203,6 +204,7 @@ struct Router {
   };
   Id_map<Node>                   node;       // states the running search reached
   Id_map<uint8_t>                mark, ban;  // tree states of the net being routed; states a rejected commit ruled out
+  Id_map<uint8_t>                pocket_seen, pocket_goal;  // bounded BFS tables for walled-in pocket detection
   int64_t                        expansions = 0, search_budget = 0;
   const char*                    why     = "";
   double                         time_ok = 0, time_fail = 0, anchor_slack = -1e30;
@@ -241,28 +243,42 @@ struct Router {
   // Range of centre coordinates around `a` where a piece of `net` keeps R1 against other owners.
   // During a move probe the wires of the nets on the probed cell do not count: they would be ripped with the move.
   std::vector<uint32_t> probe_skip;
-  uint32_t              probe_tag = 0;
-  bool                  probing   = false;
-  bool                  skipped(int net) const { return probing && net >= 0 && probe_skip[net] == probe_tag; }
+  uint32_t              probe_tag     = 0;
+  bool                  probing       = false;
   // Spacing kept beside a critical wire: a keep-out piece on the neighbouring track, owned by that net.
-  static constexpr int  keep_base = -100000000;
+  // Pin-escape corridors on shared-track cells use `pin_keep_base` so adjacent tracks also keep R2 corner clearance.
+  static constexpr int  keep_base     = -100000000;
+  static constexpr int  pin_keep_base = -500000000;
   static int            keep_of(int net) { return keep_base - net; }
+  static int            pin_keep_of(int net) { return pin_keep_base - net; }
+  static bool           is_pin_keep(int owner) { return owner <= pin_keep_base; }
   static bool           is_keep(int owner) { return owner <= keep_base; }
-  bool                  free_range(int l, int t, int net, int a, int& fl, int& fh) const {
+  static bool           own_keep(int owner, int net) { return net >= 0 && (owner == keep_of(net) || owner == pin_keep_of(net)); }
+  static int            owner_net(int owner) {
+    return is_pin_keep(owner) ? pin_keep_base - owner : (is_keep(owner) ? keep_base - owner : owner);
+  }
+  bool skipped(int owner) const {
+    if (!probing) {
+      return false;
+    }
+    const int n = owner_net(owner);
+    return n >= 0 && size_t(n) < probe_skip.size() && probe_skip[n] == probe_tag;
+  }
+  bool free_range(int l, int t, int net, int a, int& fl, int& fh) const {
     const auto& T = L[l].tr[t].s;
     const int   m = L[l].e2e + L[l].ext;
     fl            = -(1 << 28);
     fh            = 1 << 28;
     auto it       = std::upper_bound(T.begin(), T.end(), a, [](int v, const Seg& s) { return v < s.lo; });
     for (auto r = it; r != T.end(); ++r) {
-      if (r->net != net && !skipped(r->net) && r->net != keep_of(net)) {
+      if (r->net != net && !skipped(r->net) && !own_keep(r->net, net)) {
         fh = r->lo - m;
         break;
       }
     }
     for (auto l2 = it; l2 != T.begin();) {
       --l2;
-      if (l2->net != net && !skipped(l2->net) && l2->net != keep_of(net)) {
+      if (l2->net != net && !skipped(l2->net) && !own_keep(l2->net, net)) {
         fl = l2->hi + m;
         break;
       }
@@ -295,7 +311,7 @@ struct Router {
             }
             continue;
           }
-          if (skipped(o.net)) {
+          if (own_keep(o.net, net) || skipped(o.net)) {
             continue;
           }
           const int64_t dx = std::max({0, o.xl - xh, xl - o.xh});
@@ -485,8 +501,8 @@ struct Router {
       if (ly.name != layer) {
         continue;
       }
-      const int plo = int(ly.horiz ? r.yl : r.xl), phi = int(ly.horiz ? r.yh : r.xh);
-      const int alo = int(ly.horiz ? r.xl : r.yl), ahi = int(ly.horiz ? r.xh : r.yh);
+      const int  plo = int(ly.horiz ? r.yl : r.xl), phi = int(ly.horiz ? r.yh : r.xh);
+      const int  alo = int(ly.horiz ? r.xl : r.yl), ahi = int(ly.horiz ? r.xh : r.yh);
       const auto taken = [&](size_t track) {
         for (const auto& sg : ly.tr[track].s) {
           if (sg.net != id && !skipped(sg.net) && sg.hi > alo - ly.e2e - ly.cs && sg.lo < ahi + ly.e2e + ly.cs) {
@@ -858,11 +874,11 @@ struct Router {
       const auto& m = tech.macros.at(c.macro.str());
       cinfo[i].x0 = cinfo[i].gx = int(c.place.x);
       cinfo[i].y0 = cinfo[i].gy = int(c.place.y);
-      cinfo[i].w                = int(std::llround(m.width * fp.dbu));
+      cinfo[i].w = cinfo[i].macro_w = int(std::llround(m.width * fp.dbu));
       if (const auto gap = gap_width.find(int(i)); gap != gap_width.end()) {
         cinfo[i].w = gap->second;  // a stretch of a row no cell may use
       }
-      def_place[i]     = c.place;
+      def_place[i] = c.place;
       if (const auto row = row_orient.find(int(c.place.y)); row != row_orient.end()) {
         cinfo[i].flipped = c.place.orientation == mirrored(row->second)
                            && ph::orientation_allowed(m, c.place.orientation);  // the input may hold mirrored cells already
@@ -992,6 +1008,8 @@ struct Router {
     own.resize(nets.size());
     pin_keeps.resize(nets.size());
     resv.resize(nets.size());
+    esc_keeps.resize(nets.size());
+    esc_saved.resize(nets.size());
     for (size_t ni = 0; ni < fp.nets.size(); ++ni) {
       auto& net = nets[ni];
       if (net.skip) {
@@ -1169,6 +1187,33 @@ struct Router {
       for (int c : requested) {
         if (cinfo[c].settled && reserve_cell(c)) {
           ++stat["cells_reserved_up_front"];
+        }
+      }
+    }
+    cell_grid_init();
+    for (size_t c = 0; c < cinfo.size(); ++c) {
+      cinfo[c].shared_tracks = is_shared_track_cell(int(c));
+      if (cinfo[c].shared_tracks) {
+        ++stat["shared_track_cells"];
+        if (cinfo[c].settled) {
+          cell_grid_update(int(c), 1);
+        }
+      }
+    }
+    if (opt.access_patterns) {
+      // Order shared-track cells with the most shared-track pins first so the tightest cells pick patterns first.
+      std::vector<int> shared_cells;
+      for (size_t c = 0; c < cinfo.size(); ++c) {
+        if (cinfo[c].settled && cinfo[c].shared_tracks && !cinfo[c].reserved) {
+          shared_cells.push_back(int(c));
+        }
+      }
+      std::stable_sort(shared_cells.begin(), shared_cells.end(), [&](int a, int b) {
+        return cinfo[a].pins.size() > cinfo[b].pins.size();
+      });
+      for (int c : shared_cells) {
+        if (reserve_cell(c)) {
+          ++stat["pattern_cells_reserved"];
         }
       }
     }
@@ -1441,6 +1486,9 @@ struct Router {
         const auto& T  = ly.tr[b - ly.tc.begin()].s;
         auto        it = std::lower_bound(T.begin(), T.end(), alo, [](const Seg& sg, int v) { return sg.hi < v; });
         for (; it != T.end() && it->lo < alo + tile; ++it) {
+          if (is_keep(it->net)) {
+            continue;
+          }
           if ((it->net >= 0) == signal) {
             sum += std::min(it->hi, alo + tile) - std::max(it->lo, alo);
           }
@@ -1458,7 +1506,7 @@ struct Router {
             if (ly.horiz == horiz) {
               const int plo  = (horiz ? ty : tx) * tile;
               tracks        += double(std::lower_bound(ly.tc.begin(), ly.tc.end(), plo + tile)
-                               - std::lower_bound(ly.tc.begin(), ly.tc.end(), plo));
+                                      - std::lower_bound(ly.tc.begin(), ly.tc.end(), plo));
             }
           }
           (horiz ? cap_h : cap_v)[size_t(ty) * tnx + tx] = float(std::max(1.0, tracks - tile_metal(tx, ty, horiz, false)));
@@ -1475,7 +1523,7 @@ struct Router {
     double      tracks    = 0;
     const auto& m2        = L[0];
     tracks                = double(std::lower_bound(m2.tc.begin(), m2.tc.end(), (ty + 1) * tile)
-                    - std::lower_bound(m2.tc.begin(), m2.tc.end(), ty * tile));
+                                   - std::lower_bound(m2.tc.begin(), m2.tc.end(), ty * tile));
     const double free_len = std::max(1.0, (tracks - tile_metal(tx, ty, true, false, 0)) * tile);
     return tile_pins[size_t(ty) * tnx + tx] / (free_len / 72.0);
   }
@@ -1558,13 +1606,61 @@ struct Router {
     stat["tile_access_max_pct_" + tag] = int64_t(access * 100);
   }
 
+  // Fine 4-site by 1-row grid counting unrouted signal pins on shared-track cells, so passing M2/M3 wires can pay extra
+  // directly over cells whose shared-track pins are still waiting to escape, and pay nothing once those pins are out.
+  static constexpr int cbin_w = 216, cbin_h = 270;
+  int                  cbnx = 1, cbny = 1;
+  std::vector<int16_t> cell_unrouted;
+  void                 cell_grid_init() {
+    cbnx = int(fp.die.xh) / cbin_w + 2;
+    cbny = int(fp.die.yh) / cbin_h + 2;
+    cell_unrouted.assign(size_t(cbnx) * cbny, 0);
+  }
+  size_t cbin_of(int x, int y) const {
+    return size_t(std::clamp(y / cbin_h, 0, cbny - 1)) * cbnx + std::clamp(x / cbin_w, 0, cbnx - 1);
+  }
+  void cell_grid_span(int x, int y, int w, int delta) {
+    if (cell_unrouted.empty() || delta == 0) {
+      return;
+    }
+    const int by  = std::clamp((y + 135) / cbin_h, 0, cbny - 1);
+    const int bx0 = std::clamp(x / cbin_w, 0, cbnx - 1);
+    const int bx1 = std::clamp(std::max(x, x + w - 1) / cbin_w, 0, cbnx - 1);
+    for (int bx = bx0; bx <= bx1; ++bx) {
+      auto& v = cell_unrouted[size_t(by) * cbnx + bx];
+      v       = int16_t(std::max(0, int(v) + delta));
+    }
+  }
+  void cell_grid_update(int c, int sign) {
+    if (!cinfo[c].shared_tracks || cell_unrouted.empty()) {
+      return;
+    }
+    int unrouted = 0;
+    for (const auto& [ni, pi] : cinfo[c].pins) {
+      if (!nets[ni].skip && !nets[ni].routed) {
+        ++unrouted;
+      }
+    }
+    cell_grid_span(int(fp.components[c].place.x), int(fp.components[c].place.y), cinfo[c].macro_w, sign * unrouted);
+  }
+  void cell_grid_net(int ni, int sign) {
+    if (cell_unrouted.empty()) {
+      return;
+    }
+    for (const auto& p : nets[ni].pins) {
+      if (p.comp >= 0 && cinfo[p.comp].settled && cinfo[p.comp].shared_tracks) {
+        cell_grid_span(int(fp.components[p.comp].place.x), int(fp.components[p.comp].place.y), cinfo[p.comp].macro_w, sign);
+      }
+    }
+  }
+
   // ---------- sites ----------
   struct Site_pick {
     bool   ok = false;
     int    x = 0, y = 0;
     double cost = 1e30;
   };
-  bool pins_reachable(int c) {
+  bool pins_reachable_basic(int c) {
     for (const auto& [n2, pi] : cinfo[c].pins) {
       Pin tmp = nets[n2].pins[pi];
       pin_access(tmp, tmp.lef);
@@ -1578,16 +1674,25 @@ struct Router {
     }
     return true;
   }
+  bool pins_reachable(int c) {
+    if (!pins_reachable_basic(c)) {
+      return false;
+    }
+    if (opt.access_patterns && cinfo[c].shared_tracks) {
+      return check_cell_escapes_at_pose(c);
+    }
+    return true;
+  }
   // Nearest free site to (ax, ay) for an unplaced cell: displacement plus the crowding of the tile it lands in.
   // `keep_off` excludes the neighbourhood the cell is leaving.
   Site_pick find_site(int c, int ax, int ay, bool need_access, int max_dist, int off_y = INT32_MIN, int off_lo = 0,
                       int off_hi = 0) {
-    Site_pick  best;
-    auto&      comp = fp.components[c];
+    Site_pick   best;
+    auto&       comp   = fp.components[c];
     const auto& master = tech.macros.at(comp.macro.str());
-    const auto keep = comp.place;
-    const int  w = cinfo[c].w, site = 54;
-    const int  base = int(std::lower_bound(row_ys.begin(), row_ys.end(), ay) - row_ys.begin());
+    const auto  keep   = comp.place;
+    const int   w = cinfo[c].w, site = 54;
+    const int   base = int(std::lower_bound(row_ys.begin(), row_ys.end(), ay) - row_ys.begin());
     for (int k = 0; k < int(row_ys.size()); ++k) {
       bool any_row = false;
       for (int ri : {base - 1 - k, base + k}) {
@@ -1667,6 +1772,10 @@ struct Router {
     comp_obstacles(c, true);
     attach_cell(c);
     cinfo[c].settled = true;
+    cell_grid_update(c, 1);
+    if (opt.access_patterns && cinfo[c].shared_tracks && !cinfo[c].reserved && reserve_cell(c)) {
+      ++stat["pattern_cells_settled"];
+    }
   }
   // First use of a floating cell: it takes the free site nearest to its input pose.
   void reindex(int y) {
@@ -1858,8 +1967,8 @@ struct Router {
       std::set<int> dirty;
       for (int c : todo) {  // nearest row with room that has not refused the cell
         const auto& master = tech.macros.at(fp.components[c].macro.str());
-        const int base = int(std::lower_bound(row_ys.begin(), row_ys.end(), cinfo[c].gy) - row_ys.begin());
-        int       pick = INT32_MIN;
+        const int   base   = int(std::lower_bound(row_ys.begin(), row_ys.end(), cinfo[c].gy) - row_ys.begin());
+        int         pick   = INT32_MIN;
         for (int k = 0; k < int(row_ys.size()) && pick == INT32_MIN; ++k) {
           int best = INT32_MIN;
           for (int ri : {base - 1 - k, base + k}) {
@@ -1987,14 +2096,17 @@ struct Router {
     int        pick        = INT32_MIN;
     comp.place.y           = y;
     comp.place.orientation = site_orientation(c, y);
-    for (int pass = 0; pass < 2 && pick == INT32_MIN; ++pass) {  // with pin access first, then any site that fits
-      for (int k = 0; k <= (hi - lo) / site && pick == INT32_MIN && (pass == 1 || k <= 8); ++k) {
+    const int max_pass     = (opt.access_patterns && cinfo[c].shared_tracks) ? 3 : 2;
+    for (int pass = 0; pass < max_pass && pick == INT32_MIN; ++pass) {  // pattern access, then per-pin access, then any fit
+      for (int k = 0; k <= (hi - lo) / site && pick == INT32_MIN && (pass == max_pass - 1 || k <= 8); ++k) {
         for (int x : {want - k * site, want + k * site}) {
           if (x < lo || x > hi || pick != INT32_MIN) {
             continue;
           }
           comp.place.x = x;
-          if (comp_obstacles(c, false) && (pass == 1 || pins_reachable(c))) {
+          // The obstacle check is cheap; pin reachability (escape DFS on shared-track cells) only runs on a fit.
+          if (comp_obstacles(c, false)
+              && (pass == max_pass - 1 || (pass == 0 ? pins_reachable(c) : pins_reachable_basic(c)))) {
             pick = x;
           }
         }
@@ -2012,7 +2124,7 @@ struct Router {
     apply_site(c, pick, y);
     cinfo[c].x0                 = pick;
     cinfo[c].y0                 = y;
-    const int64_t d              = std::abs(pick - int64_t(def_place[c].x)) + std::abs(y - int64_t(def_place[c].y));
+    const int64_t d             = std::abs(pick - int64_t(def_place[c].x)) + std::abs(y - int64_t(def_place[c].y));
     stat["settle_cells"]       += 1;
     stat["settle_disp_nm"]     += d;
     stat["settle_disp_max_nm"]  = std::max<int64_t>(stat["settle_disp_max_nm"], d);
@@ -2044,6 +2156,8 @@ struct Router {
       return false;
     }
     count_pins(c, -1);
+    cell_grid_update(c, -1);
+    clear_cell_keeps(c);
     remove_owner(-10 - c);
     auto& v = row_cells[y];
     v.erase(std::find(v.begin(), v.end(), c));
@@ -2103,76 +2217,454 @@ struct Router {
     return false;
   }
   bool cand_usable(int ni, const Cand& cd) const { return cand_ok(ni, cd) && (!cd.v1 || pad_escapes(ni, cd)); }
-  // The pins of one cell take their pads together: the scarcest pin first, backtracking over the others. The pads
-  // stay as metal of their nets, so later wires route around them. The nets of the cell are already ripped.
-  bool reserve_cell(int c) {
-    std::vector<std::pair<int, int>> todo;
-    for (const auto& [n2, pi] : cinfo[c].pins) {
-      const auto& p = nets[n2].pins[pi];
-      if (!p.cands.empty() && p.cands[0].v1 && !nets[n2].skip) {
-        todo.emplace_back(n2, pi);
+  // Does `c` have 3 or more M1 signal pins on close columns sharing a tight band of M2 tracks (e.g. AO222x2, AO221x1,
+  // AO32x1, OR4x1)? Computed from the LEF pin geometry alone so no technology cell names are hardcoded.
+  bool is_shared_track_cell(int c) const {
+    if (off_rows(c) || gap_width.contains(c) || cinfo[c].pins.size() < 3) {
+      return false;
+    }
+    const auto& comp = fp.components[c];
+    const auto  mit  = tech.macros.find(comp.macro.str());
+    if (mit == tech.macros.end() || !mit->second.klass.starts_with("CORE")) {
+      return false;
+    }
+    const auto& m    = mit->second;
+    Ann_place   pose = comp.place;
+    if (!row_ys.empty() && row_span.find(int(pose.y)) == row_span.end()) {
+      pose.y           = row_ys.front();
+      pose.x           = row_span.at(row_ys.front()).first;
+      pose.orientation = site_orientation(c, row_ys.front());
+    }
+    struct Pin_col {
+      int              cx;
+      std::vector<int> tracks;
+    };
+    std::vector<Pin_col> cols;
+    const auto&          m2 = L[0];
+    for (const auto& [ni, pi] : cinfo[c].pins) {
+      if (nets[ni].skip) {
+        continue;
+      }
+      const auto& pdef = m.pins.at(nets[ni].pins[pi].lef);
+      if (pdef.use == "POWER" || pdef.use == "GROUND") {
+        continue;
+      }
+      std::vector<ph::Rect> rs;
+      ph::Rect              hull{1e18, 1e18, -1e18, -1e18};
+      bool                  upper = false;
+      for (const auto& s : pdef.shapes) {
+        if (s.layer == "M1") {
+          rs.push_back(ph::placed_rect(m, pose, fp.dbu, s.rect));
+          hull = hull.hull(rs.back());
+        } else if (s.layer[0] == 'M') {
+          upper = true;
+        }
+      }
+      if (upper || rs.empty()) {
+        continue;
+      }
+      Pin_col pc{int((hull.xl + hull.xh) / 2), {}};
+      auto    t0 = std::lower_bound(m2.tc.begin(), m2.tc.end(), int(hull.yl));
+      for (; t0 != m2.tc.end() && *t0 <= hull.yh; ++t0) {
+        for (const auto& r : rs) {
+          if (r.yl <= *t0 - 11 && r.yh >= *t0 + 11 && r.xh - r.xl >= 18) {
+            pc.tracks.push_back(int(t0 - m2.tc.begin()));
+            break;
+          }
+        }
+      }
+      if (!pc.tracks.empty()) {
+        cols.push_back(std::move(pc));
       }
     }
-    std::sort(todo.begin(), todo.end(), [&](const auto& a, const auto& b) {
-      return nets[a.first].pins[a.second].cands.size() < nets[b.first].pins[b.second].cands.size();
-    });
-    std::vector<int>                  choice(todo.size(), -1);
-    std::vector<bool>                 new_cut(todo.size());
-    int                               nodes = 0;
-    std::vector<Undo>                 undo(todo.size());
-    const std::function<bool(size_t)> dfs = [&](size_t i) {
-      if (i == todo.size()) {
+    if (cols.size() < 3) {
+      return false;
+    }
+    std::sort(cols.begin(), cols.end(), [](const Pin_col& a, const Pin_col& b) { return a.cx < b.cx; });
+    const int tight_dx = 2 * L[1].pitch;  // 72 nm on ASAP7 (adjacent 54 nm poly columns)
+    for (size_t i = 0; i < cols.size(); ++i) {
+      std::set<int> trs(cols[i].tracks.begin(), cols[i].tracks.end());
+      size_t        j = i;
+      while (j + 1 < cols.size() && cols[j + 1].cx - cols[j].cx <= tight_dx) {
+        ++j;
+        trs.insert(cols[j].tracks.begin(), cols[j].tracks.end());
+      }
+      const size_t run = j - i + 1;
+      if (run >= 3 && trs.size() <= run + 1) {
         return true;
       }
-      const auto [n2, pi] = todo[i];
-      const auto& p       = nets[n2].pins[pi];
-      for (size_t k = 0; k < p.cands.size() && nodes < 4000; ++k) {
-        const auto& cd = p.cands[k];
-        ++nodes;
-        bool already_owned = false;
-        if (!cand_ok(n2, cd, &already_owned)) {
+      if (run >= 2 && cols[i].tracks.size() <= 3 && cols.size() >= 4) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  struct Esc_item {
+    int c = -1, pin = -1, cell_x = 0, cell_y = 0;
+    int t2 = 0, lo2 = 0, hi2 = 0;
+    int x1 = 0, y2 = 0;
+    int t3 = -1, x3 = 0, lo3 = 0, hi3 = 0;
+  };
+  struct Esc_active {
+    std::vector<std::pair<int, int>> tracks;
+    std::vector<Via_rec>             cuts;
+  };
+  std::vector<Esc_active>            esc_keeps;  // per net: live pin_keep_of(ni) segments and cuts
+  std::vector<std::vector<Esc_item>> esc_saved;  // per net: escape geometry to put back if `ni` is ripped
+
+  void clear_esc_keeps(int ni) {
+    if (ni < 0 || size_t(ni) >= esc_keeps.size()) {
+      return;
+    }
+    const int owner = pin_keep_of(ni);
+    for (const auto& [kl, kt] : esc_keeps[ni].tracks) {
+      auto& T = L[kl].tr[kt].s;
+      T.erase(std::remove_if(T.begin(), T.end(), [&](const Seg& sg) { return sg.net == owner; }), T.end());
+    }
+    for (const auto& v : esc_keeps[ni].cuts) {
+      del_cut(v.cl, v.x, v.y, owner);
+    }
+    esc_keeps[ni].tracks.clear();
+    esc_keeps[ni].cuts.clear();
+  }
+  void restore_esc_keeps(int ni) {
+    if (ni < 0 || size_t(ni) >= esc_saved.size() || nets[ni].routed || nets[ni].skip) {
+      return;
+    }
+    clear_esc_keeps(ni);
+    const int owner = pin_keep_of(ni);
+    for (const auto& e : esc_saved[ni]) {
+      if (e.c < 0 || int(fp.components[e.c].place.x) != e.cell_x || int(fp.components[e.c].place.y) != e.cell_y) {
+        continue;
+      }
+      if (!cut_ok(0, e.x1, e.y2, ni) || (e.t3 >= 0 && !cut_ok(1, e.x3, e.y2, ni))) {
+        continue;
+      }
+      Undo u;
+      bool ok = place(0, e.t2, e.lo2, e.hi2, owner, u);
+      if (ok && e.t3 >= 0) {
+        ok = place(1, e.t3, e.lo3, e.hi3, owner, u);
+      }
+      if (!ok) {
+        restore(u);
+        continue;
+      }
+      add_cut(0, e.x1, e.y2, owner);
+      esc_keeps[ni].cuts.push_back({0, e.x1, e.y2});
+      esc_keeps[ni].tracks.emplace_back(0, e.t2);
+      if (e.t3 >= 0) {
+        add_cut(1, e.x3, e.y2, owner);
+        esc_keeps[ni].cuts.push_back({1, e.x3, e.y2});
+        esc_keeps[ni].tracks.emplace_back(1, e.t3);
+      }
+    }
+  }
+  void clear_cell_keeps(int c, bool reset_tries = true) {
+    cinfo[c].reserved = false;
+    if (reset_tries) {
+      cinfo[c].reserve_tries = 0;
+    }
+    for (const auto& [n2, pi] : cinfo[c].pins) {
+      if (size_t(n2) >= esc_saved.size() || esc_saved[n2].empty()) {
+        continue;
+      }
+      auto&      sv     = esc_saved[n2];
+      const auto before = sv.size();
+      sv.erase(std::remove_if(sv.begin(), sv.end(), [&](const Esc_item& e) { return e.c == c; }), sv.end());
+      if (sv.size() != before && !nets[n2].routed) {
+        clear_esc_keeps(n2);
+        restore_esc_keeps(n2);
+      }
+    }
+  }
+  // Once `ni` has routed, update any saved escape on a reserved cell to the exact M2 pad and M3 riser `ni` actually
+  // committed, so if `ni` is later ripped up, `restore_esc_keeps(ni)` locks the vacated access against blockers.
+  void record_used_escapes(int ni) {
+    if (ni < 0 || size_t(ni) >= esc_saved.size()) {
+      return;
+    }
+    const auto& net = nets[ni];
+    const auto& m2  = L[0];
+    const auto& m3  = L[1];
+    for (size_t pi = 0; pi < net.pins.size(); ++pi) {
+      const auto& p = net.pins[pi];
+      if (p.comp < 0 || !cinfo[p.comp].reserved || p.used < 0 || size_t(p.used) >= p.cands.size() || !p.cands[p.used].v1) {
+        continue;
+      }
+      const Cand& cd  = p.cands[size_t(p.used)];
+      const Seg*  sg2 = nullptr;
+      for (const auto& sg : m2.tr[cd.t].s) {
+        if (sg.net == ni && sg.lo <= cd.x && cd.x <= sg.hi) {
+          sg2 = &sg;
+          break;
+        }
+      }
+      if (!sg2) {
+        continue;
+      }
+      int lo2 = std::max(sg2->lo, cd.x - 108 - m2.ext), hi2 = std::min(sg2->hi, cd.x + 108 + m2.ext);
+      if (hi2 - lo2 < m2.minlen) {
+        lo2 = std::max(sg2->lo, std::min(lo2, sg2->hi - m2.minlen));
+        hi2 = std::min(sg2->hi, lo2 + m2.minlen);
+      }
+      int t3 = -1, x3 = 0, lo3 = 0, hi3 = 0;
+      for (const auto& v : net.vias) {
+        if (v.cl == 1 && v.y == cd.y && v.x >= lo2 && v.x <= hi2) {
+          const int tk3 = find(m3.tc, v.x);
+          if (tk3 < 0) {
+            continue;
+          }
+          for (const auto& sg : m3.tr[tk3].s) {
+            if (sg.net == ni && sg.lo <= cd.y && cd.y <= sg.hi) {
+              t3  = tk3;
+              x3  = v.x;
+              lo3 = std::max(sg.lo, cd.y - 120 - m3.ext);
+              hi3 = std::min(sg.hi, cd.y + 120 + m3.ext);
+              if (hi3 - lo3 < m3.minlen) {
+                lo3 = std::max(sg.lo, std::min(lo3, sg.hi - m3.minlen));
+                hi3 = std::min(sg.hi, lo3 + m3.minlen);
+              }
+              break;
+            }
+          }
+          if (t3 >= 0) {
+            break;
+          }
+        }
+      }
+      auto& sv = esc_saved[ni];
+      sv.erase(std::remove_if(sv.begin(), sv.end(), [&](const Esc_item& e) { return e.c == p.comp && e.pin == int(pi); }),
+               sv.end());
+      sv.push_back({p.comp,
+                    int(pi),
+                    int(fp.components[p.comp].place.x),
+                    int(fp.components[p.comp].place.y),
+                    cd.t,
+                    lo2,
+                    hi2,
+                    cd.x,
+                    cd.y,
+                    t3,
+                    x3,
+                    lo3,
+                    hi3});
+    }
+  }
+
+  // Build candidate M1->V1->M2->V2->M3 (to an open M4 crossing) escapes for one pin and check/commit a joint assignment
+  // across all unrouted M1 pins of `c`. Because every pin's M2 jog and M3 way-up are placed together during DFS, two
+  // pins of one cell can never claim colliding M2 pads, diagonal R2 ends, V2 cuts, or M3 columns.
+  bool solve_cell_escapes(int c, const std::vector<std::pair<int, int>>& pins_list,
+                          const std::vector<std::vector<Cand>>& cand_lists, bool commit_keeps) {
+    if (pins_list.empty()) {
+      return true;
+    }
+    std::vector<size_t> idx(pins_list.size());
+    std::iota(idx.begin(), idx.end(), 0);
+    // Scarcest pins first; break ties by proximity to the middle of the pin cluster (inner pins have neighbours on both sides).
+    int mid_x = 0;
+    for (size_t i : idx) {
+      mid_x += cand_lists[i].empty() ? 0 : cand_lists[i].front().x;
+    }
+    mid_x /= int(idx.size());
+    std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) {
+      if (cand_lists[a].size() != cand_lists[b].size()) {
+        return cand_lists[a].size() < cand_lists[b].size();
+      }
+      const int xa = cand_lists[a].empty() ? 0 : cand_lists[a].front().x;
+      const int xb = cand_lists[b].empty() ? 0 : cand_lists[b].front().x;
+      return std::abs(xa - mid_x) < std::abs(xb - mid_x);
+    });
+
+    const auto&                        m2     = L[0];
+    const auto&                        m3     = L[1];
+    const bool                         has_m4 = L.size() > 2;
+    std::vector<std::vector<Esc_item>> options(idx.size());
+    const int                          cell_x = int(fp.components[c].place.x), cell_y = int(fp.components[c].place.y);
+    for (size_t order_i = 0; order_i < idx.size(); ++order_i) {
+      const auto [n2, pi] = pins_list[idx[order_i]];
+      const auto& cands   = cand_lists[idx[order_i]];
+      struct Scored {
+        int      cost;
+        Esc_item item;
+      };
+      std::vector<Scored> scored;
+      for (const auto& cd : cands) {
+        if (cd.L != 0 || !cd.v1) {
           continue;
         }
-        undo[i]    = Undo{};
-        new_cut[i] = !already_owned;
-        if (new_cut[i]) {
-          add_cut(0, cd.x, cd.y, n2);
+        int fl2, fh2;
+        if (!free_range(0, cd.t, n2, m2.stops[cd.s], fl2, fh2) || cd.x < fl2 || cd.x > fh2 || !cut_ok(0, cd.x, cd.y, n2)) {
+          continue;
         }
-        const int a = std::min(cd.x, L[0].stops[cd.s]), b = std::max(cd.x, L[0].stops[cd.s]);
-        if (place(0, cd.t, a - L[0].ext, b + L[0].ext, n2, undo[i]) && pad_escapes(n2, cd)) {
-          choice[i] = int(k);
-          if (dfs(i + 1)) {
+        const int s3 = m2.tk_up[cd.t];
+        if (s3 < 0) {
+          continue;
+        }
+        auto it = std::lower_bound(m2.stops.begin(), m2.stops.end(), std::max(fl2, cd.x - 108));
+        for (; it != m2.stops.end() && *it <= std::min(fh2, cd.x + 108); ++it) {
+          const int t3 = m2.stop_up[it - m2.stops.begin()];
+          if (t3 < 0) {
+            continue;
+          }
+          const int x3 = *it;
+          int       fl3, fh3;
+          if (!cut_ok(1, x3, cd.y, n2) || !free_range(1, t3, n2, m3.stops[s3], fl3, fh3) || fh3 - fl3 + 2 * m3.ext < m3.minlen) {
+            continue;
+          }
+          const int lo2      = std::min({cd.x, x3, m2.stops[cd.s]}) - m2.ext;
+          const int hi2      = std::max({cd.x, x3, m2.stops[cd.s]}) + m2.ext;
+          bool      added_m4 = false;
+          if (has_m4) {
+            const auto& m4 = L[2];
+            auto        t4 = std::lower_bound(m4.tc.begin(), m4.tc.end(), std::max(fl3, cd.y - 120));
+            for (; t4 != m4.tc.end() && *t4 <= std::min(fh3, cd.y + 120); ++t4) {
+              const int y4 = *t4;
+              int       fl4, fh4;
+              if (!cut_ok(2, x3, y4, n2) || !free_range(2, int(t4 - m4.tc.begin()), n2, x3, fl4, fh4)
+                  || fh4 - fl4 + 2 * m4.ext < m4.minlen) {
+                continue;
+              }
+              int lo3 = std::min(cd.y, y4) - m3.ext, hi3 = std::max(cd.y, y4) + m3.ext;
+              if (hi3 - lo3 < m3.minlen) {
+                const int pad = (m3.minlen - (hi3 - lo3) + 1) / 2;
+                lo3           = std::max(fl3 - m3.ext, lo3 - pad);
+                hi3           = std::min(fh3 + m3.ext, lo3 + m3.minlen);
+              }
+              scored.push_back({
+                  2 * std::abs(x3 - cd.x) + std::abs(y4 - cd.y),
+                  {c, pi, cell_x, cell_y, cd.t, lo2, hi2, cd.x, cd.y, t3, x3, lo3, hi3}
+              });
+              added_m4 = true;
+            }
+          }
+          if (!added_m4 && fh3 - fl3 >= 96) {
+            const int half = std::max(m3.ext, (m3.minlen + 1) / 2);
+            const int lo3  = std::max(fl3 - m3.ext, cd.y - half);
+            const int hi3  = std::min(fh3 + m3.ext, std::max(cd.y + half, lo3 + m3.minlen));
+            if (hi3 - lo3 >= m3.minlen) {
+              scored.push_back({
+                  2 * std::abs(x3 - cd.x) + 160,
+                  {c, pi, cell_x, cell_y, cd.t, lo2, hi2, cd.x, cd.y, t3, x3, lo3, hi3}
+              });
+            }
+          }
+        }
+      }
+      if (scored.empty()) {
+        return false;
+      }
+      std::stable_sort(scored.begin(), scored.end(), [](const Scored& a, const Scored& b) { return a.cost < b.cost; });
+      if (scored.size() > 14) {
+        scored.resize(14);
+      }
+      options[order_i].reserve(scored.size());
+      for (const auto& s : scored) {
+        options[order_i].push_back(s.item);
+      }
+    }
+
+    std::vector<int>                  pick(idx.size(), -1);
+    std::vector<Undo>                 undo(idx.size());
+    int                               nodes = 0;
+    const std::function<bool(size_t)> dfs   = [&](size_t depth) {
+      if (depth == idx.size()) {
+        return true;
+      }
+      const int n2    = pins_list[idx[depth]].first;
+      const int owner = pin_keep_of(n2);
+      for (size_t k = 0; k < options[depth].size() && nodes < 3000; ++k) {
+        const auto& e = options[depth][k];
+        ++nodes;
+        if (!cut_ok(0, e.x1, e.y2, n2) || (e.t3 >= 0 && !cut_ok(1, e.x3, e.y2, n2))) {
+          continue;
+        }
+        undo[depth] = Undo{};
+        add_cut(0, e.x1, e.y2, owner);
+        if (e.t3 >= 0) {
+          add_cut(1, e.x3, e.y2, owner);
+        }
+        if (place(0, e.t2, e.lo2, e.hi2, owner, undo[depth]) && (e.t3 < 0 || place(1, e.t3, e.lo3, e.hi3, owner, undo[depth]))) {
+          pick[depth] = int(k);
+          if (dfs(depth + 1)) {
             return true;
           }
         }
-        restore(undo[i]);
-        if (new_cut[i]) {
-          del_cut(0, cd.x, cd.y, n2);
+        restore(undo[depth]);
+        if (e.t3 >= 0) {
+          del_cut(1, e.x3, e.y2, owner);
         }
+        del_cut(0, e.x1, e.y2, owner);
       }
       return false;
     };
-    if (todo.empty() || !dfs(0)) {
+
+    const bool ok = dfs(0);
+    if (!ok || !commit_keeps) {
+      if (ok) {
+        for (size_t depth = idx.size(); depth-- > 0;) {
+          const int   n2    = pins_list[idx[depth]].first;
+          const int   owner = pin_keep_of(n2);
+          const auto& e     = options[depth][size_t(pick[depth])];
+          restore(undo[depth]);
+          if (e.t3 >= 0) {
+            del_cut(1, e.x3, e.y2, owner);
+          }
+          del_cut(0, e.x1, e.y2, owner);
+        }
+      }
+      return ok;
+    }
+
+    for (size_t depth = 0; depth < idx.size(); ++depth) {
+      const int   n2 = pins_list[idx[depth]].first;
+      const auto& e  = options[depth][size_t(pick[depth])];
+      esc_keeps[n2].tracks.emplace_back(0, e.t2);
+      esc_keeps[n2].cuts.push_back({0, e.x1, e.y2});
+      if (e.t3 >= 0) {
+        esc_keeps[n2].tracks.emplace_back(1, e.t3);
+        esc_keeps[n2].cuts.push_back({1, e.x3, e.y2});
+      }
+      esc_saved[n2].push_back(e);
+    }
+    return true;
+  }
+
+  bool check_cell_escapes_at_pose(int c) {
+    std::vector<std::pair<int, int>> pins_list;
+    std::vector<std::vector<Cand>>   cand_lists;
+    for (const auto& [n2, pi] : cinfo[c].pins) {
+      if (nets[n2].skip || nets[n2].routed) {
+        continue;
+      }
+      Pin tmp = nets[n2].pins[pi];
+      pin_access(tmp, tmp.lef);
+      if (!tmp.cands.empty() && tmp.cands[0].v1) {
+        pins_list.emplace_back(n2, pi);
+        cand_lists.push_back(std::move(tmp.cands));
+      }
+    }
+    return solve_cell_escapes(c, pins_list, cand_lists, false);
+  }
+
+  // The pins of one cell take compatible M1->V1->M2->V2->M3 escape corridors together, held as per-net keep-outs until
+  // each net routes (and put back if ripped) without throwing away the pin's other candidates or freezing the cell.
+  bool reserve_cell(int c) {
+    clear_cell_keeps(c, false);
+    std::vector<std::pair<int, int>> todo;
+    std::vector<std::vector<Cand>>   cand_lists;
+    for (const auto& [n2, pi] : cinfo[c].pins) {
+      const auto& p = nets[n2].pins[pi];
+      if (!p.cands.empty() && p.cands[0].v1 && !nets[n2].skip && !nets[n2].routed) {
+        todo.emplace_back(n2, pi);
+        cand_lists.push_back(p.cands);
+      }
+    }
+    if (todo.empty() || !solve_cell_escapes(c, todo, cand_lists, true)) {
       return false;
     }
-    for (size_t i = 0; i < todo.size(); ++i) {
-      const auto [n2, pi] = todo[i];
-      auto&       p       = nets[n2].pins[pi];
-      Cand        cd      = p.cands[choice[i]];
-      const auto& T       = L[0].tr[cd.t].s;
-      auto        it      = std::upper_bound(T.begin(), T.end(), cd.x, [](int v, const Seg& sg) { return v < sg.lo; });
-      --it;
-      term_segs.push_back({n2, 0, cd.t, it->lo, it->hi});
-      own[n2].push_back({n2, 0, cd.t, it->lo, it->hi, pi});
-      if (new_cut[i]) {
-        resv[n2].push_back({0, cd.x, cd.y});
-      }
-      cd.v1   = false;
-      cd.cut  = -1;  // the pad and its via are reserved metal of the net already
-      p.cands = {cd};
-    }
     cinfo[c].reserved = true;
-    pinned.insert(c);
     ++stat["cells_reserved"];
     return true;
   }
@@ -2284,8 +2776,8 @@ struct Router {
           if (s.hi <= lo - ly.e2e || s.lo >= hi + ly.e2e) {
             continue;
           }
-          if (s.net == keep_of(net)) {
-            continue;  // its own spacing gives way to the net itself
+          if (own_keep(s.net, net)) {
+            continue;  // its own spacing or pin-escape keep-out gives way to the net itself
           }
           if (s.net != net) {
             ++stat[std::string("reject_r1_") + (round ? "after_fix_" : "") + ly.name];
@@ -2302,7 +2794,7 @@ struct Router {
         int need    = ly.minlen - (hi - lo);
         int room_hi = INT32_MAX / 2, room_lo = INT32_MAX / 2;
         for (const auto& s : T) {
-          if (s.net == net) {
+          if (s.net == net || own_keep(s.net, net)) {
             continue;
           }
           if (s.lo >= hi) {
@@ -2328,8 +2820,8 @@ struct Router {
           continue;
         }
         for (const auto& s : ly.tr[u].s) {
-          if (is_keep(s.net)) {
-            continue;  // a keep-out is not metal
+          if (own_keep(s.net, net) || (is_keep(s.net) && !is_pin_keep(s.net))) {
+            continue;  // soft spacing keep-outs and our own keep-outs do not force corner lengthening
           }
           if (s.lo >= hi && s.lo - hi < ly.cs) {
             hi      = s.lo + 2;
@@ -2422,16 +2914,52 @@ struct Router {
     node.clear();
     using Item = std::pair<float, int64_t>;
     std::priority_queue<Item, std::vector<Item>, std::greater<>> pq;
-    const auto                                                   heur = [&](int x, int y) {
+    int src_xl = INT32_MAX, src_yl = INT32_MAX, src_xh = INT32_MIN, src_yh = INT32_MIN;
+    for (const auto& c : src) {
+      src_xl = std::min(src_xl, c.x);
+      src_xh = std::max(src_xh, c.x);
+      src_yl = std::min(src_yl, c.y);
+      src_yh = std::max(src_yh, c.y);
+    }
+    const bool use_cell_cost = opt.cell_cost > 0 && !cell_unrouted.empty();
+    const auto heur          = [&](int l, int x, int y) {
       const int dx = std::max({0, goal.xl - x, x - goal.xh}), dy = std::max({0, goal.yl - y, y - goal.yh});
-      return float((dx + dy) * opt.hmin * opt.hweight);
+      int       min_vias = 0;
+      if (mark_layers != 0) {
+        int dl = 8;
+        for (int m = 0; m < int(L.size()); ++m) {
+          if ((mark_layers >> m) & 1u) {
+            dl = std::min(dl, std::abs(l - m));
+          }
+        }
+        min_vias = dl;
+        if (dl == 0 && mark_box.xl <= mark_box.xh) {
+          const int mdx = std::max({0, mark_box.xl - x, x - mark_box.xh});
+          const int mdy = std::max({0, mark_box.yl - y, y - mark_box.yh});
+          if (L[l].horiz ? mdy > 0 : mdx > 0) {
+            min_vias = (mark_layers == uint8_t(1u << l)) ? 2 : 1;
+          }
+        }
+      }
+      return float(((dx + dy) * opt.hmin + min_vias * opt.via_cost) * opt.hweight);
     };
     // A state is queued twice: first for its moves along the track, then, one via cost later, for its vias. A via
     // from it could not be taken from the queue before that, so the order is the same, and a long straight run
     // does not pay for the vias it never takes.
     constexpr int64_t via_phase = int64_t(1) << 62;
     const float       via_cost  = float(opt.via_cost);
-    const auto        push      = [&](int64_t id, float g, int64_t from, int x, int y, int entry, int fl, int fh) {
+    const auto        min_via_f = [&](int l, int t, int s, int x, int y, float g) {
+      float       best = std::numeric_limits<float>::infinity();
+      const auto& ly   = L[l];
+      if (l + 1 < int(L.size()) && ly.stop_up[s] >= 0 && ly.tk_up[t] >= 0) {
+        best = std::min(best, g + via_cost + heur(l + 1, x, y));
+      }
+      if (l > 0 && ly.stop_dn[s] >= 0 && ly.tk_dn[t] >= 0) {
+        best = std::min(best, g + via_cost + heur(l - 1, x, y));
+      }
+      return best;
+    };
+    const auto push = [&](int64_t id, int l, float g, int64_t from, int x, int y, int entry, int fl, int fh) {
       if (ban.has(id & id_mask)) {
         return;
       }
@@ -2449,7 +2977,7 @@ struct Router {
       n.entry  = entry;
       n.fl     = fl;
       n.fh     = fh;
-      pq.emplace(g + heur(x, y), id);
+      pq.emplace(g + heur(l, x, y), id);
     };
     why = "source-blocked";
     for (const auto& c : src) {
@@ -2461,7 +2989,7 @@ struct Router {
       const int a = L[c.L].stops[c.s];
       xy(c.L, c.t, c.s, sx, sy);
       free_range(c.L, c.t, ni, a, fl, fh);
-      push(run_key(sid(c.L, c.t, c.s), 0), 0, -1, sx, sy, a, fl, fh);
+      push(run_key(sid(c.L, c.t, c.s), 0), c.L, 0, -1, sx, sy, a, fl, fh);
     }
     int64_t budget = search_budget > 0 ? search_budget : opt.max_expand;
     while (!pq.empty()) {
@@ -2473,9 +3001,10 @@ struct Router {
       unsid(id & id_mask, l, t, s);
       int x, y;
       xy(l, t, s, x, y);
-      const Node  n = *node.find(id);  // a copy: a push may move the table
-      const float g = n.g;
-      if (f - (vias ? via_cost : 0.0f) > g + heur(x, y) + 0.5f) {
+      const Node  n        = *node.find(id);  // a copy: a push may move the table
+      const float g        = n.g;
+      const float expected = vias ? min_via_f(l, t, s, x, y, g) : (g + heur(l, x, y));
+      if (f > expected + 0.5f) {
         continue;
       }
       const auto& ly = L[l];
@@ -2495,7 +3024,14 @@ struct Router {
         }
         ++expansions;
         for (int d : {-1, 1}) {  // the free stretch around a state is that of every state inside it
-          const int s2 = s + d;
+          int s2 = s + d;
+          while (l == 0 && s2 >= 0 && s2 < int(ly.stops.size()) && ly.stop_up[s2] < 0 && !mark.has(sid(0, t, s2))) {
+            if (ban.has(sid(0, t, s2))) {
+              s2 = -1;
+              break;
+            }
+            s2 += d;
+          }
           if (s2 < 0 || s2 >= int(ly.stops.size())) {
             continue;
           }
@@ -2512,9 +3048,20 @@ struct Router {
           if (l <= 1 && !tile_cost.empty()) {
             step *= tile_cost[tile_of(x2, y2)];
           }
-          push(run_key(sid(l, t, s2), a2 - n.entry), g + step, id, x2, y2, n.entry, n.fl, n.fh);
+          if (l <= 1 && use_cell_cost) {
+            if (const int cu = cell_unrouted[cbin_of(x2, y2)]; cu > 0) {
+              const bool near_src  = x2 >= src_xl - 162 && x2 <= src_xh + 162 && y2 >= src_yl - 135 && y2 <= src_yh + 135;
+              const bool near_goal = x2 >= goal.xl - 162 && x2 <= goal.xh + 162 && y2 >= goal.yl - 135 && y2 <= goal.yh + 135;
+              if (!near_src && !near_goal) {
+                step *= float(1.0 + opt.cell_cost * double(std::min(cu, 4)));
+              }
+            }
+          }
+          push(run_key(sid(l, t, s2), a2 - n.entry), l, g + step, id, x2, y2, n.entry, n.fl, n.fh);
         }
-        pq.emplace(f + via_cost, id | via_phase);
+        if (const float vf = min_via_f(l, t, s, x, y, g); std::isfinite(vf)) {
+          pq.emplace(vf, id | via_phase);
+        }
         continue;
       }
       for (int d : {-1, 1}) {
@@ -2572,7 +3119,7 @@ struct Router {
         if (!free_range(l2, t2, ni, a2, gl, gh) || gh - gl + 2 * L[l2].ext < L[l2].minlen) {
           continue;
         }
-        push(run_key(sid(l2, t2, s2), 0), g + via_cost, id, x, y, a2, gl, gh);
+        push(run_key(sid(l2, t2, s2), 0), l2, g + via_cost, id, x, y, a2, gl, gh);
       }
     }
     return false;
@@ -2592,36 +3139,136 @@ struct Router {
     }
     return true;
   }
-  void mark_seg(int l, int t, int lo, int hi) {
-    const auto& ly = L[l];
-    auto        s0 = std::lower_bound(ly.stops.begin(), ly.stops.end(), lo);
-    for (; s0 != ly.stops.end() && *s0 <= hi; ++s0) {
-      mark.at(sid(l, t, int(s0 - ly.stops.begin()))) = 1;
+  uint8_t              mark_layers = 0;
+  Window               mark_box{INT32_MAX, INT32_MAX, INT32_MIN, INT32_MIN};
+  std::vector<int64_t> tree_sids;
+  void                 clear_marks() {
+    mark.clear();
+    mark_layers = 0;
+    mark_box    = {INT32_MAX, INT32_MAX, INT32_MIN, INT32_MIN};
+    tree_sids.clear();
+  }
+  void mark_state(int l, int t, int s) {
+    const int64_t id = sid(l, t, s);
+    auto&         mv = mark.at(id);
+    if (mv) {
+      return;
+    }
+    mv           = 1;
+    mark_layers |= uint8_t(1u << l);
+    int x, y;
+    xy(l, t, s, x, y);
+    mark_box.xl = std::min(mark_box.xl, x);
+    mark_box.xh = std::max(mark_box.xh, x);
+    mark_box.yl = std::min(mark_box.yl, y);
+    mark_box.yh = std::max(mark_box.yh, y);
+    if (tree_sids.size() < 512) {
+      tree_sids.push_back(id);
     }
   }
+  bool in_unconn_own(int ni, int l, int t, int pos) const {
+    const int m = L[l].e2e + L[l].ext - 1;
+    for (const auto& o : own[ni]) {
+      if (o.l == l && o.t == t && !nets[ni].pins[o.pin].conn && pos >= o.lo - m && pos <= o.hi + m) {
+        return true;
+      }
+    }
+    return false;
+  }
   void mark_net(int ni) {
+    clear_marks();
     for (size_t l = 0; l < L.size(); ++l) {
+      const auto& ly = L[l];
+      const int   m  = ly.e2e + ly.ext - 1;
       for (int t : touched[ni][l]) {
-        for (const auto& s : L[l].tr[t].s) {
+        for (const auto& s : ly.tr[t].s) {
           if (s.net == ni) {  // a piece this close is merged by R1, so reaching it already connects
-            const int m = L[l].e2e + L[l].ext - 1;
-            mark_seg(int(l), t, s.lo - m, s.hi + m);
+            auto s0 = std::lower_bound(ly.stops.begin(), ly.stops.end(), s.lo - m);
+            for (; s0 != ly.stops.end() && *s0 <= s.hi + m; ++s0) {
+              if (!in_unconn_own(ni, int(l), t, *s0)) {
+                mark_state(int(l), t, int(s0 - ly.stops.begin()));
+              }
+            }
           }
         }
       }
     }
-    for (const auto& o : own[ni]) {  // metal of a pin that has not joined the tree is not the tree
-      if (!nets[ni].pins[o.pin].conn) {
-        const auto& ly = L[o.l];
-        const int   m  = ly.e2e + ly.ext - 1;
-        auto        s0 = std::lower_bound(ly.stops.begin(), ly.stops.end(), o.lo - m);
-        for (; s0 != ly.stops.end() && *s0 <= o.hi + m; ++s0) {
-          if (auto* m2 = mark.find(sid(o.l, o.t, int(s0 - ly.stops.begin())))) {
-            *m2 = 0;
+  }
+  // Relaxed unweighted BFS from `starts` (ignoring search window, self-cut-clash and ban): if the whole connected
+  // component of legal track/via states has fewer than `limit` states and none is in `goals`, no retry can ever connect.
+  bool pocket_trapped(int ni, const std::vector<int64_t>& starts, const Id_map<uint8_t>& goals, int limit = 256) {
+    if (starts.empty()) {
+      return true;
+    }
+    if (int(starts.size()) >= limit) {
+      return false;
+    }
+    pocket_seen.clear();
+    std::vector<int64_t> q;
+    q.reserve(size_t(limit));
+    for (int64_t id : starts) {
+      if (goals.has(id)) {
+        return false;
+      }
+      if (!pocket_seen.has(id)) {
+        pocket_seen.at(id) = 1;
+        q.push_back(id);
+      }
+    }
+    for (size_t head = 0; head < q.size() && int(q.size()) < limit; ++head) {
+      int l, t, s;
+      unsid(q[head], l, t, s);
+      const auto& ly = L[l];
+      const int   a  = ly.stops[s];
+      int         fl, fh;
+      if (!free_range(l, t, ni, a, fl, fh)) {
+        continue;
+      }
+      for (int d : {-1, 1}) {
+        const int s2 = s + d;
+        if (s2 < 0 || s2 >= int(ly.stops.size()) || ly.stops[s2] < fl || ly.stops[s2] > fh) {
+          continue;
+        }
+        const int64_t id2 = sid(l, t, s2);
+        if (goals.has(id2)) {
+          return false;
+        }
+        if (!pocket_seen.has(id2)) {
+          pocket_seen.at(id2) = 1;
+          q.push_back(id2);
+          if (int(q.size()) >= limit) {
+            return false;
+          }
+        }
+      }
+      int x, y;
+      xy(l, t, s, x, y);
+      for (int d : {-1, 1}) {
+        const int l2 = l + d;
+        if (l2 < 0 || l2 >= int(L.size())) {
+          continue;
+        }
+        const int t2 = d > 0 ? ly.stop_up[s] : ly.stop_dn[s];
+        const int s2 = d > 0 ? ly.tk_up[t] : ly.tk_dn[t];
+        int       gl, gh;
+        if (t2 < 0 || s2 < 0 || !cut_ok(std::max(l, l2), x, y, ni) || !free_range(l2, t2, ni, L[l2].stops[s2], gl, gh)
+            || gh - gl + 2 * L[l2].ext < L[l2].minlen) {
+          continue;
+        }
+        const int64_t id2 = sid(l2, t2, s2);
+        if (goals.has(id2)) {
+          return false;
+        }
+        if (!pocket_seen.has(id2)) {
+          pocket_seen.at(id2) = 1;
+          q.push_back(id2);
+          if (int(q.size()) >= limit) {
+            return false;
           }
         }
       }
     }
+    return int(q.size()) < limit;
   }
   std::vector<std::array<std::set<int>, 6>> touched;
   struct Term_seg {
@@ -2629,8 +3276,8 @@ struct Router {
   };
   std::vector<Term_seg> term_segs;
   struct Comp_info {
-    bool                             movable = false, clock_sink = false, fixed_wire = false;
-    int                              moves = 0, x0 = 0, y0 = 0, w = 0;
+    bool                             movable = false, clock_sink = false, fixed_wire = false, shared_tracks = false;
+    int                              moves = 0, x0 = 0, y0 = 0, w = 0, macro_w = 0;
     std::vector<std::pair<int, int>> pins;  // net, pin index
     bool                             settled = true, reserved = false;
     bool                             flipped       = false;  // mirrored about its vertical axis against the orientation of its row
@@ -2811,9 +3458,12 @@ struct Router {
       p.used = -1;
       p.conn = false;
     }
-    if (net.routed && !net.gr_on && !net.skip && !gr_h.empty()) {
-      gr_net(ni, 1);
-      net.gr_on = true;
+    if (net.routed) {
+      cell_grid_net(ni, 1);
+      if (!net.gr_on && !net.skip && !gr_h.empty()) {
+        gr_net(ni, 1);
+        net.gr_on = true;
+      }
     }
     net.routed = false;
     for (const auto& ts : term_segs) {
@@ -2821,6 +3471,7 @@ struct Router {
         block(ts.l, ts.t, ts.lo, ts.hi, ni);
       }
     }
+    restore_esc_keeps(ni);
   }
 
   bool route_net(int ni) {
@@ -2875,7 +3526,7 @@ struct Router {
         }
       }
     }
-    mark.clear();
+    clear_marks();
     const double base_hweight = opt.hweight;
     struct Restore_weight {
       double& ref;
@@ -2889,9 +3540,10 @@ struct Router {
     }
     net.pins[0].conn = true;
     for (size_t k = 1; k < n; ++k) {
-      auto&       p     = net.pins[order[k]];
-      const auto& other = net.pins[link[k]];
-      bool        ok    = false;
+      auto&       p            = net.pins[order[k]];
+      const auto& other        = net.pins[link[k]];
+      bool        ok           = false;
+      bool        tree_trapped = false;
       ban.clear();
       int grow = 0, hw_steps = 0, commit_tries = 0;
       opt.hweight = base_hweight;
@@ -2903,23 +3555,30 @@ struct Router {
         const int m0   = std::max(opt.margin, span / 16);
         const int m    = grow == 0 ? m0 : grow == 1 ? m0 * 6 : INT32_MAX / 4;
         search_budget  = opt.max_expand + int64_t(span) * 3 / 2;
+        if (attempt == 0 && hw_steps == 0 && !exact_runs && opt.hweight <= 1.15) {
+          search_budget = std::min<int64_t>(search_budget, 12000 + int64_t(span) / 2);
+        } else if (exact_runs && grow >= 2) {
+          search_budget = std::min<int64_t>(search_budget, 60000);
+        }
         Window                   w{std::min(p.cx, other.cx) - m,
-                 std::min(p.cy, other.cy) - m,
-                 std::max(p.cx, other.cx) + m,
-                 std::max(p.cy, other.cy) + m};
+                                   std::min(p.cy, other.cy) - m,
+                                   std::max(p.cx, other.cx) + m,
+                                   std::max(p.cy, other.cy) + m};
         // targets: the tree, or the candidates of the first pin while the tree is empty
         const bool               first = k == 1 && net.pins[order[0]].used < 0 && net.pins[order[0]].comp >= 0;
         std::vector<const Cand*> seeds;
         if (first) {
+          clear_marks();
           for (const auto& c : net.pins[order[0]].cands) {
             if (cand_ok(ni, c)) {
-              mark.at(sid(c.L, c.t, c.s)) = 1;
+              mark_state(c.L, c.t, c.s);
               seeds.push_back(&c);
             }
           }
         } else if (k == 1) {
+          clear_marks();
           for (const auto& c : net.pins[order[0]].cands) {
-            mark.at(sid(c.L, c.t, c.s)) = 1;
+            mark_state(c.L, c.t, c.s);
           }
         }
         std::vector<int64_t> path;
@@ -3014,15 +3673,42 @@ struct Router {
           }
         }
         if (!found) {
-          if (!exact_runs && std::string_view(why) != "source-blocked") {  // complete before greedier or wider
-            exact_runs = true;
-            ++stat["exact_run_retries"];
-            continue;
+          if (std::string_view(why) == "source-blocked") {
+            break;
+          }
+          if (attempt == 0 && std::string_view(why) != "commit") {
+            std::vector<int64_t> src_sids;
+            pocket_goal.clear();
+            for (const auto& c : p.cands) {
+              if (cand_ok(ni, c)) {
+                const int64_t id = sid(c.L, c.t, c.s);
+                src_sids.push_back(id);
+                pocket_goal.at(id) = 1;
+              }
+            }
+            if (pocket_trapped(ni, src_sids, mark, 512)) {
+              why = "pocket-blocked";
+              ++stat["pocket_source_aborts"];
+              break;
+            }
+            if (tree_sids.empty() || (tree_sids.size() < 512 && pocket_trapped(ni, tree_sids, pocket_goal, 512))) {
+              why          = "root-blocked";
+              tree_trapped = true;
+              ++stat["pocket_tree_aborts"];
+              break;
+            }
           }
           if (std::string_view(why) == "budget" && hw_steps < 3) {  // greedier before wider
             ++hw_steps;
             opt.hweight = std::max(1.3, opt.hweight * 1.4);
             ++stat["greedy_retries"];
+          } else if (grow < 2) {
+            ++grow;
+          } else if (!exact_runs) {  // last resort: keep near-via run offsets distinct
+            exact_runs  = true;
+            grow        = 1;
+            opt.hweight = base_hweight;
+            ++stat["exact_run_retries"];
           } else {
             ++grow;
           }
@@ -3068,7 +3754,7 @@ struct Router {
         }
         if (first) {
           // un-mark the seeds that were not used
-          mark.clear();
+          clear_marks();
           net.pins[order[0]].used = int(dst - net.pins[order[0]].cands.data());
         }
         p.used                  = int(src - p.cands.data());
@@ -3100,7 +3786,21 @@ struct Router {
         net.fail_pin   = order[k];
         net.fail_other = link[k];
         net.fail_why   = why;
-        if (k == 1 && std::string_view(why) == "no-path") {  // was the root reachable at all?
+        if (tree_trapped) {
+          int blamed = k == 1 ? order[0] : link[k];
+          if (net.pins[blamed].comp < 0) {
+            for (size_t j = 0; j < k; ++j) {
+              if (net.pins[order[j]].comp >= 0) {
+                blamed = order[j];
+                break;
+              }
+            }
+          }
+          if (net.pins[blamed].comp >= 0) {
+            net.fail_pin   = blamed;
+            net.fail_other = order[k];
+          }
+        } else if (k == 1 && std::string_view(why) == "no-path") {  // was the root reachable at all?
           bool any = false;
           for (const auto& c : net.pins[order[0]].cands) {
             any = any || cand_ok(ni, c);
@@ -3114,6 +3814,9 @@ struct Router {
       }
     }
     net.routed = true;
+    record_used_escapes(ni);
+    clear_esc_keeps(ni);
+    cell_grid_net(ni, -1);
     return true;
   }
 
@@ -3217,6 +3920,24 @@ struct Router {
       }
       stat["long_first_nets"] = count;
     }
+    std::vector<int> shared_pri;
+    if (opt.complex_first) {
+      shared_pri.assign(nets.size(), 0);
+      int64_t complex_nets = 0;
+      for (int ni : order) {
+        if (nets[ni].pins.size() > 8 || nets[ni].bbox_hp > 24 * tile) {
+          continue;  // global fanouts keep their place; local shared-track pin escapes go ahead
+        }
+        for (const auto& p : nets[ni].pins) {
+          if (p.comp >= 0 && cinfo[p.comp].shared_tracks) {
+            shared_pri[ni] = 1;
+            ++complex_nets;
+            break;
+          }
+        }
+      }
+      stat["complex_first_nets"] = complex_nets;
+    }
     std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
       if (nets[a].clock != nets[b].clock) {
         return nets[a].clock;  // the clock tree takes its tracks before data
@@ -3227,6 +3948,19 @@ struct Router {
       }
       if (la && nets[a].bbox_hp != nets[b].bbox_hp) {
         return nets[a].bbox_hp > nets[b].bbox_hp;
+      }
+      const bool aa = nets[a].slack <= anchor_slack, ab = nets[b].slack <= anchor_slack;
+      if (aa != ab) {
+        return aa;
+      }
+      if (aa && nets[a].slack != nets[b].slack) {
+        return nets[a].slack < nets[b].slack;
+      }
+      if (opt.complex_first) {
+        const int sa = shared_pri[a], sb = shared_pri[b];
+        if (sa != sb) {
+          return sa > sb;
+        }
       }
       const bool ca = nets[a].slack <= crit_slack, cb = nets[b].slack <= crit_slack;
       if (ca != cb) {
@@ -3322,9 +4056,10 @@ struct Router {
         if (pin < 0) {
           continue;
         }
-        auto& failed_pin = net.pins[pin];
-        if (!failed_pin.extra_access && failed_pin.comp >= 0 && !cinfo[failed_pin.comp].reserved
-            && (net.fail_why == "no-candidates" || net.fail_why == "source-blocked" || net.fail_why == "root-blocked")) {
+        auto&      failed_pin = net.pins[pin];
+        const bool access_blocked
+            = net.fail_why == "source-blocked" || net.fail_why == "root-blocked" || net.fail_why == "pocket-blocked";
+        if (!failed_pin.extra_access && failed_pin.comp >= 0 && (net.fail_why == "no-candidates" || access_blocked)) {
           const auto& m      = tech.macros.at(fp.components[failed_pin.comp].macro.str());
           const auto& shapes = m.pins.at(failed_pin.lef).shapes;
           if (!ph::hard_macro(m) && !shapes.empty()
@@ -3332,15 +4067,16 @@ struct Router {
             const auto old          = failed_pin.cands.size();
             failed_pin.extra_access = true;
             pin_access(failed_pin, failed_pin.lef);
-            if (failed_pin.cands.size() > old
-                && std::any_of(failed_pin.cands.begin(), failed_pin.cands.end(), [&](const Cand& cd) { return cand_ok(ni, cd); })) {
+            if (failed_pin.cands.size() > old && std::any_of(failed_pin.cands.begin(), failed_pin.cands.end(), [&](const Cand& cd) {
+                  return cand_usable(ni, cd);
+                })) {
               ++stat["pin_access_retries"];
               queue.push_front(ni);
               continue;
             }
           }
         }
-        if (opt.shift > 0 && (net.fail_why == "source-blocked" || net.fail_why == "root-blocked" || net.fail_why == "no-path")) {
+        if (opt.shift > 0 && (access_blocked || net.fail_why == "no-path")) {
           const auto again = shift_repair(ni, net.pins[pin]);
           if (!again.empty()) {
             for (auto it = again.rbegin(); it != again.rend(); ++it) {
@@ -3352,9 +4088,7 @@ struct Router {
             continue;
           }
         }
-        if (opt.reserve && pass > 0 && net.pins[pin].comp >= 0 && !cinfo[net.pins[pin].comp].reserved
-            && cinfo[net.pins[pin].comp].reserve_tries < 2
-            && (net.fail_why == "source-blocked" || net.fail_why == "root-blocked")) {
+        if (opt.reserve && pass > 0 && net.pins[pin].comp >= 0 && cinfo[net.pins[pin].comp].reserve_tries < 2 && access_blocked) {
           // Leftover: clear the tracks over the cell, give all its pins a pad at once, then let everything come back.
           const int        c = net.pins[pin].comp;
           std::vector<int> again{ni};
@@ -3478,9 +4212,9 @@ struct Router {
     auto& comp = fp.components[c];
     int   lo, hi;  // room among the placed neighbours, less the cells still planned in between
     plan_bounds(c, lo, hi);
-    const int x    = int(comp.place.x);
-    const int site = 54;
-    int       best = 0, best_score = 0;
+    const int  x    = int(comp.place.x);
+    const int  site = 54;
+    int        best = 0, best_score = 0;
     // A position is as good as its worst pin: the fewest access points any pin of the cell keeps there.
     const auto score_here = [&] {
       if (!comp_obstacles(c, false)) {
@@ -3524,6 +4258,8 @@ struct Router {
     probing        = false;
     const auto out = take_nets();
     count_pins(c, -1);
+    cell_grid_update(c, -1);
+    clear_cell_keeps(c);
     remove_owner(-10 - c);
     comp.place.x = x + best * site;
     comp_obstacles(c, true);
@@ -3534,6 +4270,10 @@ struct Router {
       pin_access(nets[n2].pins[pi], nets[n2].pins[pi].lef);
     }
     count_pins(c, 1);
+    cell_grid_update(c, 1);
+    if (opt.access_patterns && cinfo[c].shared_tracks) {
+      reserve_cell(c);
+    }
     ++stat["cell_moves"];
     stat["cell_move_sites"] += std::abs(best);
     return out;
@@ -3610,6 +4350,8 @@ struct Router {
       }
       for (int k : chain) {
         count_pins(k, -1);
+        cell_grid_update(k, -1);
+        clear_cell_keeps(k);
         remove_owner(-10 - k);
         fp.components[k].place.x += dir * site;
       }
@@ -3619,11 +4361,19 @@ struct Router {
           pin_access(nets[n2].pins[pi], nets[n2].pins[pi].lef);
         }
         count_pins(k, 1);
+        cell_grid_update(k, 1);
         ++cinfo[k].moves;
         ++stat["cell_moves"];
         ++stat["cell_move_sites"];
         if (cinfo[k].clock_sink) {
           ++stat["flop_moves"];
+        }
+      }
+      if (opt.access_patterns) {
+        for (int k : chain) {
+          if (cinfo[k].shared_tracks) {
+            reserve_cell(k);
+          }
         }
       }
       ++stat["chain_pushes"];
@@ -3639,7 +4389,7 @@ struct Router {
                 << (cand_ok(ni, c) ? " ok" : " BLOCKED") << (c.v1 && !cut_ok(0, c.x, c.y, ni) ? " cut" : "") << '\n';
     }
     {  // how far can the pin reach with nothing to find?
-      mark.clear();
+      clear_marks();
       ban.clear();
       const int64_t        before = expansions;
       std::vector<int64_t> path;
@@ -3767,7 +4517,7 @@ struct Router {
       const auto& ly = L[l];
       const int   c  = ly.tc[t];
       ly.horiz ? note(kind, ly.name, names, lo, c - ly.w / 2, hi, c + ly.w / 2)
-                  : note(kind, ly.name, names, c - ly.w / 2, lo, c + ly.w / 2, hi);
+               : note(kind, ly.name, names, c - ly.w / 2, lo, c + ly.w / 2, hi);
     };
     struct Piece {
       int lo, hi, net;
@@ -4046,9 +4796,9 @@ struct Router {
               if (j == i || (v[i].net >= 0 && j < i)) {  // a pair of signal cuts is seen from its first cut only
                 continue;
               }
-              const int64_t dx = std::max({0, v[j].xl - v[i].xh, v[i].xl - v[j].xh}),
-                            dy = std::max({0, v[j].yl - v[i].yh, v[i].yl - v[j].yh});
-              const auto both  = net_name(v[i].net) + " " + net_name(v[j].net);
+              const int64_t dx   = std::max({0, v[j].xl - v[i].xh, v[i].xl - v[j].xh}),
+                            dy   = std::max({0, v[j].yl - v[i].yh, v[i].yl - v[j].yh});
+              const auto    both = net_name(v[i].net) + " " + net_name(v[j].net);
               if (v[i].xl == v[j].xl && v[i].yl == v[j].yl && v[i].xh == v[j].xh && v[i].yh == v[j].yh && v[i].net == v[j].net) {
                 ++cut_dup;
                 note("cut-duplicate", CL[k].name, both, v[i].xl, v[i].yl, v[i].xh, v[i].yh);
@@ -4403,6 +5153,12 @@ void parse_options(Settings& opt, const std::vector<std::string>& args, std::vec
       opt.reserve = true;
     } else if (a == "--reserve-cells") {
       opt.reserve_cells = next();
+    } else if (a == "--access-patterns") {
+      opt.access_patterns = true;
+    } else if (a == "--complex-first") {
+      opt.complex_first = true;
+    } else if (a == "--cell-cost") {
+      opt.cell_cost = std::stod(next());
     } else if (a == "--verify-report") {
       opt.verify        = true;
       opt.verify_report = next();
@@ -4452,6 +5208,7 @@ void run(Router& r, const livehd::routing::Frame& frame, const std::string& repo
                       r.opt.via_cost,
                       r.opt.hweight,
                       r.opt.pin_cost,
+                      r.opt.cell_cost,
                       r.opt.pin_footprint,
                       r.opt.spread}) {
     if (!std::isfinite(cost) || cost < 0) {

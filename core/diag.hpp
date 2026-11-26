@@ -245,6 +245,14 @@ public:
   [[nodiscard]] Mark mark() const;
   void               rollback(const Mark& m);
 
+  // A trial that will be inspected and rolled back must not reach the output
+  // channels at all: while muted, emit() still records, counts and dedups (so
+  // the caller can read the trial's records and rollback() restores state) but
+  // writes nothing to stderr or diagnostics.jsonl, and progress() is dropped.
+  // Nestable; prefer the RAII Mute_scope below.
+  void push_mute();
+  void pop_mute();
+
   // Tag subsequent records with a pipeline step (resets the per-step dedup set).
   void set_step(std::string_view step);
 
@@ -298,6 +306,7 @@ private:
   bool        human_stderr_ = false;
   bool        stderr_jsonl_ = false;  // stderr channel renders JSONL, not text
   bool        configured_   = false;  // env read or setter called
+  int         muted_        = 0;      // push_mute() depth; > 0 keeps records off the output channels
 
   // emit() is shared by the bounded parallel source parser.  Parse-local
   // staged diagnostics and excerpt locators are thread_local (diag.cpp); this
@@ -307,6 +316,18 @@ private:
 
 // The active process-global sink.
 Sink& sink();
+
+// Scoped output mute for a retracted trial (see Sink::push_mute). Exception-safe.
+class Mute_scope {
+public:
+  explicit Mute_scope(Sink& s = sink()) : s_(s) { s_.push_mute(); }
+  Mute_scope(const Mute_scope&)            = delete;
+  Mute_scope& operator=(const Mute_scope&) = delete;
+  ~Mute_scope() { s_.pop_mute(); }
+
+private:
+  Sink& s_;
+};
 
 // Scoped excerpt provider: registers `sl` with the sink for the lifetime of
 // the scope and restores the previous one on exit (exception-safe — fatal()

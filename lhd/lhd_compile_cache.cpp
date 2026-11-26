@@ -49,6 +49,7 @@
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 #include "semdiff.hpp"
+#include "upass_runner.hpp"
 #include "woothash.hpp"
 #include "worker_pool.hpp"  // livehd::run_workers (big-stack workers)
 
@@ -1309,7 +1310,7 @@ void write_graph_inventory(const std::string& path, const Result& res, const std
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("schema_version");
-  w.Int(7);
+  w.Int(8);
   w.Key("whole_design_only");
   w.Bool(whole_design_only);
   w.Key("code_salt");
@@ -1443,7 +1444,7 @@ std::optional<Graph_inventory> read_graph_inventory(const Result& res) {
   rapidjson::Document doc;
   doc.Parse(text->data(), text->size());
   if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("schema_version") || !doc["schema_version"].IsInt()
-      || doc["schema_version"].GetInt() != 7 || !doc.HasMember("whole_design_only") || !doc["whole_design_only"].IsBool()
+      || doc["schema_version"].GetInt() != 8 || !doc.HasMember("whole_design_only") || !doc["whole_design_only"].IsBool()
       || !doc.HasMember("code_salt") || !doc["code_salt"].IsUint64() || doc["code_salt"].GetUint64() != livehd::kCompileSrcSalt
       || !doc.HasMember("context") || !doc["context"].IsString() || res.compile_cache_context != doc["context"].GetString()
       || !doc.HasMember("closure_key") || !doc["closure_key"].IsString() || !doc.HasMember("lnast_order")
@@ -1580,6 +1581,106 @@ std::string read_string(std::istream& is) {
     throw Lhd_error{"config", "truncated compact compile-cache LNAST string", "the unit will be rebuilt cold"};
   }
   return text;
+}
+
+// File wrappers publish named record layouts during uPass. A restored wrapper
+// skips that walk, but a live caller can specialize one of its templates again.
+// Store the semantic data with the lowered forest and restore only clean owners.
+void save_type_layouts(const fs::path& path, const uPass_detuple_registry* registry) {
+  std::ofstream os(path, std::ios::binary | std::ios::trunc);
+  // Hash-table iteration order varies between processes. Use stable key order
+  // at each level so identical layouts produce the same cache artifact.
+  auto          write_map = [&](const auto& map, const auto& write_value) {
+    std::set<std::string_view> keys;
+    for (const auto& entry : map) {
+      keys.emplace(entry.first);
+    }
+    write_pod<uint32_t>(os, keys.size());
+    for (auto key : keys) {
+      write_string(os, key);
+      write_value(map.at(key));
+    }
+  };
+  const uPass_detuple_registry empty;
+  const auto&                  layouts = registry ? *registry : empty;
+  write_map(layouts.named_types, [&](const auto& fields) {
+    write_pod<uint32_t>(os, fields.size());
+    for (const auto& [name, type] : fields) {
+      write_string(os, name);
+      write_pod<uint8_t>(os, static_cast<uint8_t>(type.kind));
+      for (const auto* bound : {&type.max, &type.min}) {
+        write_string(os, bound->is_invalid() ? "" : bound->to_pyrope());
+      }
+      write_pod<uint32_t>(os, type.dimensions.size());
+      for (const auto& dim : type.dimensions) {
+        write_string(os, dim);
+      }
+    }
+  });
+  write_map(layouts.file_imports,
+            [&](const auto& imports) { write_map(imports, [&](const auto& target) { write_string(os, target); }); });
+  os.close();
+  if (!os) {
+    throw Lhd_error{"config", "could not store cached Pyrope type layouts", "check --workdir space"};
+  }
+}
+
+std::shared_ptr<uPass_detuple_registry> load_type_layouts(const fs::path& path, const std::set<std::string>& owners) {
+  auto          result = std::make_shared<uPass_detuple_registry>();
+  std::ifstream is(path, std::ios::binary);
+  const auto    count = [&]() {
+    const auto n = read_pod<uint32_t>(is);
+    if (n > (1U << 24)) {
+      throw Lhd_error{"config", "invalid cached Pyrope type layout count", ""};
+    }
+    return n;
+  };
+  for (auto n = count(); n; --n) {
+    const auto key = read_string(is);
+    const auto sep = key.find('\n');
+    if (sep == std::string::npos) {
+      throw Lhd_error{"config", "invalid cached Pyrope type owner", ""};
+    }
+    uPass_detuple_registry::Layout fields;
+    for (auto f = count(); f; --f) {
+      auto& field     = fields.emplace_back();
+      field.name      = read_string(is);
+      field.type.kind = static_cast<upass::Kind>(read_pod<uint8_t>(is));
+      if (!field.type.valid()) {
+        throw Lhd_error{"config", "invalid cached Pyrope field kind", ""};
+      }
+      for (auto* bound : {&field.type.max, &field.type.min}) {
+        if (const auto text = read_string(is); !text.empty()) {
+          const auto value = Dlop::from_pyrope(text);
+          if (!value || !value->is_integer()) {
+            throw Lhd_error{"config", "invalid cached Pyrope field range", ""};
+          }
+          *bound = *value;
+        }
+      }
+      for (auto d = count(); d; --d) {
+        field.type.dimensions.push_back(read_string(is));
+      }
+    }
+    if (owners.contains(key.substr(0, sep))) {
+      result->named_types.emplace(key, std::move(fields));
+    }
+  }
+  for (auto n = count(); n; --n) {
+    const auto file = read_string(is);
+    const bool keep = owners.contains(file);
+    for (auto i = count(); i; --i) {
+      auto alias  = read_string(is);
+      auto target = read_string(is);
+      if (keep) {
+        result->file_imports[file].emplace(std::move(alias), std::move(target));
+      }
+    }
+  }
+  if (is.peek() != std::istream::traits_type::eof()) {
+    throw Lhd_error{"config", "trailing data in cached Pyrope type layouts", ""};
+  }
+  return result;
 }
 
 void write_compact_node(std::ostream& os, const Lnast& ln, const Lnast_nid& nid) {
@@ -3083,6 +3184,11 @@ Graph_restore compile_cache_restore_graphs(Result& res, Eprp_var& var, const std
       }
     }
 
+    std::shared_ptr<uPass_detuple_registry> layouts;
+    if (!full_clean && !eligible_names.empty()) {
+      layouts = load_type_layouts(fs::path(res.compile_cache_scope) / "lg/lowered_ln/type_layouts.bin", restored_owners);
+    }
+
     // Never mix a final caller with a retired specialization of a live
     // owner. Its callee can acquire different port ids during live lowering.
     for (const auto& name : eligible_names) {
@@ -3221,8 +3327,9 @@ Graph_restore compile_cache_restore_graphs(Result& res, Eprp_var& var, const std
           ordered.push_back(std::move(rest));
         }
       }
-      var.lnasts           = std::move(ordered);
-      var.lnast_order_hint = expected->lnast_order;
+      var.pyrope_type_layouts = std::move(layouts);
+      var.lnasts              = std::move(ordered);
+      var.lnast_order_hint    = expected->lnast_order;
     }
     // Past the last refusal: the restored graphs, their hit count and their
     // names become visible to the caller together or not at all.
@@ -3603,6 +3710,7 @@ void compile_cache_store_graphs(Options& opts, Result& res, const Eprp_var& var,
     if (!whole_design_only && !var.lnasts.empty()) {
       const auto lowered_dir = fs::path(temp) / "lowered_ln";
       fs::create_directories(lowered_dir);
+      save_type_layouts(lowered_dir / "type_layouts.bin", var.pyrope_type_layouts.get());
       for (size_t i = 0; i < var.lnasts.size(); ++i) {
         // Restored clean graphs skip both upass and tolg, so bulky CONCRETE
         // `mod`/`pipe` statement bodies — always Sub instances, never inlined

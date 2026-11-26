@@ -2291,18 +2291,21 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
           if (op == Ntype_op::Rem) {
             const auto ra = bwmap.find(get_driver_of_sink_name(node, "a").get_class_index());
             const auto rb = bwmap.find(get_driver_of_sink_name(node, "b").get_class_index());
-            if (ra != bwmap.end() && rb != bwmap.end() && ra->second.get_min().is_just_i64() && ra->second.get_max().is_just_i64()
-                && rb->second.get_min().is_just_i64() && rb->second.get_max().is_just_i64()) {
-              const int64_t alo = ra->second.get_min().to_just_i64();
-              const int64_t ahi = ra->second.get_max().to_just_i64();
-              const int64_t blo = rb->second.get_min().to_just_i64();
-              const int64_t bhi = rb->second.get_max().to_just_i64();
-              if (blo > 0 || bhi < 0) {  // the divisor can never be zero
-                const int64_t m  = std::max(blo < 0 ? -blo : blo, bhi < 0 ? -bhi : bhi) - 1;
-                const int64_t hi = ahi > 0 ? std::min(ahi, m) : 0;
-                const int64_t lo = alo < 0 ? std::max(alo, -m) : 0;
-                Bitwidth_range refined(lo, hi);
-                if (!refined.get_min().lt_op(bw.get_min())->is_known_true() && !refined.get_max().gt_op(bw.get_max())->is_known_true()) {
+            if (ra != bwmap.end() && rb != bwmap.end()) {
+              const auto blo = rb->second.get_min();
+              const auto bhi = rb->second.get_max();
+              if ((!blo.is_negative() && !blo.is_known_zero()) || bhi.is_negative()) {
+                const auto magnitude      = bhi.is_negative() ? *blo.neg_op() : bhi;
+                const auto bound          = *magnitude.sub_op(*Dlop::create_integer(1));
+                const auto negative_bound = *bound.neg_op();
+                const auto alo            = ra->second.get_min();
+                const auto ahi            = ra->second.get_max();
+                const auto zero           = *Dlop::create_integer(0);
+                const auto lo = alo.is_negative() ? (alo.lt_op(negative_bound)->is_known_true() ? negative_bound : alo) : zero;
+                const auto hi = ahi.is_positive() ? (ahi.gt_op(bound)->is_known_true() ? bound : ahi) : zero;
+                const Bitwidth_range refined(lo, hi);
+                if (!refined.get_min().lt_op(bw.get_min())->is_known_true()
+                    && !refined.get_max().gt_op(bw.get_max())->is_known_true()) {
                   bw = refined;
                 }
               }

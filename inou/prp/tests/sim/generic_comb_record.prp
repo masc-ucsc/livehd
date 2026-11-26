@@ -1,0 +1,20 @@
+/*
+:name: generic_comb_record
+:type: simulation
+*/
+// The inline comb and its specialized body share a single binding of C.
+comptime const small = (const width=4, const bias=2)
+comptime const wide = (const width=8, const bias=7)
+comb add_bias<C>(x:Unsigned(bits=C.width)) -> (y:Unsigned(bits=C.width)) {
+  wrap y = x + C.bias
+}
+pub mod generic_comb_record(x:U8) -> (a:U4@[0], b:U8@[0]) {
+  a = add_bias<small>(x=x#[0..<4])
+  b = add_bias<wide>(x=x)
+}
+test generic_comb_record.profiles {
+  mut dut = generic_comb_record
+  dut.x = 31
+  step
+  assert(dut.a == 1 and dut.b == 38, "each call uses its own record")
+}

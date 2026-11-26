@@ -302,6 +302,7 @@ cc_library(
         "//pass/lnast_llvm:lnast_llvm",
         "//pass/prp_writer:pass_prp_writer",
         "//pass/upass:pass_upass",
+        "//upass/runner:upass_runner",
         "//upass/tolg:upass_tolg",
         "@hhds//hhds:tree_edit_distance",
         "@opentimer//:taskflow",  # the OT-bundled copy — see ../OpenTimer/BUILD.bazel for the ODR rule

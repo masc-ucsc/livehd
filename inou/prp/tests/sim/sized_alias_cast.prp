@@ -1,0 +1,17 @@
+/*
+:name: sized_alias_cast
+:type: simulation
+*/
+pub mod sized_alias_cast<W=8>(a:U4) -> (literal:U4@[0], ones:Unsigned(bits=W)@[0], inverted:Unsigned(bits=W)@[0]) {
+  type Mask = Unsigned(bits=W)
+  literal = ~U4(0)
+  ones = ~Mask(0)
+  inverted = ~Mask(a)
+}
+
+test sized_alias_cast.width {
+  mut d = sized_alias_cast
+  d.a = 5
+  step
+  assert(d.literal == 15 and d.ones == 255 and d.inverted == 250)
+}

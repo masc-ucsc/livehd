@@ -172,6 +172,123 @@ struct Dut {
   }
 };
 
+const Dut* resolve_dut(TSNode rv, const std::string& src, const std::string& file_short,
+                       const std::map<std::string, TSNode>& fconsts, const std::vector<Dut>& duts) {
+  rv = prp_ast::unwrap_expression(rv);
+  if (ntype(rv) != "identifier") {
+    return nullptr;
+  }
+  std::string nm = text_of(src, rv);
+  std::string ref;
+  // File constants can alias another import binding, or a local module.
+  // Stopping at a scalar constant keeps ordinary test locals out of the DUT catalog.
+  size_t      remaining = fconsts.size();
+  auto        it        = fconsts.find(nm);
+  while (it != fconsts.end()) {
+    const auto value = prp_ast::unwrap_expression(it->second);
+    if (ntype(value) != "identifier") {
+      break;
+    }
+    if (remaining-- == 0) {
+      return nullptr;
+    }
+    nm = text_of(src, value);
+    it = fconsts.find(nm);
+  }
+  if (it != fconsts.end()) {
+    const auto node = prp_ast::unwrap_expression(it->second);
+    TSNode     path;
+    if (ntype(node) == "import_statement") {
+      path = field(node, "module");
+    } else if (ntype(node) == "function_call_expression" && text_of(src, field(node, "function")) == "import") {
+      path = ts_node_named_child(field(node, "argument"), 0);
+    } else {
+      return nullptr;
+    }
+    const auto unit = prp_ast::literal_string(path, src);
+    if (!unit) {
+      return nullptr;
+    }
+    const bool artifact = unit->starts_with("lg:") || unit->starts_with("ln:");
+    ref                 = artifact ? unit->substr(3) : str_tools::canonical_escaped_path(*unit);
+    // An artifact reference (`lg:`/`ln:`) is exact by construction: it must name a simulated module, never fall back
+    // to "the sole module" or "the unique root" (a typo would simulate some other module and pass).
+    if (artifact) {
+      for (const auto& d : duts) {
+        if (d.module == ref || d.stem == ref) {
+          return &d;
+        }
+      }
+      // an entity name (`lg:memimg` against a source defining `memimg.memimg`) is exact too, when only one module has it
+      const Dut* by_tail = nullptr;
+      size_t     tails   = 0;
+      for (const auto& d : duts) {
+        const auto at   = d.module.find_last_of('.');
+        const auto tail = d.module.substr(at == std::string::npos ? 0 : at + 1);
+        if (tail == ref) {
+          by_tail = &d;
+          ++tails;
+        }
+      }
+      if (tails == 1) {
+        return by_tail;
+      }
+      std::string have;
+      for (const auto& d : duts) {
+        have += (have.empty() ? "" : ", ")
+                + d.module.substr(d.module.find_last_of('.') == std::string::npos ? 0 : d.module.find_last_of('.') + 1);
+      }
+      fail("import(\"" + ref + "\") names no simulated module (simulated modules: " + have + ")");
+    }
+  } else {
+    ref             = nm;
+    // A bare module name several units define is the testbench file's OWN unit's one (`imp_tb.top`), never a guess
+    // between them.
+    const auto unit = file_short.substr(0, file_short.rfind('.'));
+    for (const auto& d : duts) {
+      if (d.module == unit + "." + nm || d.stem == unit + "." + nm) {
+        return &d;
+      }
+    }
+  }
+  const Dut* found = nullptr;
+  for (const auto& d : duts) {
+    if (d.module == ref || d.stem == ref) {
+      return &d;
+    }
+  }
+  for (const auto& d : duts) {  // the entity tail
+    const auto tail = d.module.substr(d.module.find_last_of('.') == std::string::npos ? 0 : d.module.find_last_of('.') + 1);
+    if (tail == ref || tail == nm) {
+      if (found != nullptr) {
+        return nullptr;  // ambiguous: never guess
+      }
+      found = &d;
+    }
+  }
+  if (found == nullptr && fconsts.count(nm) != 0 && duts.size() == 1) {
+    return &duts.front();
+  }
+  return found;
+}
+
+template <typename Visitor>
+void visit_instances(TSNode n, const std::string& src, const std::string& file_short, const std::map<std::string, TSNode>& fconsts,
+                     const std::vector<Dut>& duts, const Visitor& visit) {
+  if (ntype(n) == "assignment") {
+    const auto name = lvalue_name(src, field(n, "lvalue"));
+    const auto rv   = field(n, "rvalue");
+    if (!name.empty() && !ts_node_is_null(rv)) {
+      if (const auto* dut = resolve_dut(rv, src, file_short, fconsts, duts)) {
+        visit(name, dut);
+      }
+    }
+  }
+  for (const auto child : ts_node_named_children(n)) {
+    visit_instances(child, src, file_short, fconsts, duts, visit);
+  }
+}
+
 std::string sanitize(std::string_view s) {
   std::string o;
   for (const char c : s) {
@@ -592,7 +709,9 @@ public:
       collect_locals(s);
     }
     for (auto& [an, arr] : arrays_) {
-      add_frame_array(an, arr.slot, arr.width, arr.elems.size());
+      if (arr.size != 0) {
+        add_frame_array(an, arr.slot, arr.width, arr.size);
+      }
     }
     for (const auto& in : insts_) {
       if (in.explicit_clk) {
@@ -718,121 +837,12 @@ private:
   }
 
   // ---- discovery ----
-  const Dut* resolve_dut(TSNode rv) const {
-    rv = prp_ast::unwrap_expression(rv);
-    if (ntype(rv) != "identifier") {
-      return nullptr;
-    }
-    std::string nm = text_of(src_, rv);
-    std::string ref;
-    // File constants can alias another import binding, or a local module.
-    // Stopping at a scalar constant keeps ordinary test locals out of the DUT catalog.
-    size_t      remaining = fconsts_.size();
-    auto        it        = fconsts_.find(nm);
-    while (it != fconsts_.end()) {
-      const auto value = prp_ast::unwrap_expression(it->second);
-      if (ntype(value) != "identifier") {
-        break;
-      }
-      if (remaining-- == 0) {
-        return nullptr;
-      }
-      nm = text_of(src_, value);
-      it = fconsts_.find(nm);
-    }
-    if (it != fconsts_.end()) {
-      const auto node = prp_ast::unwrap_expression(it->second);
-      TSNode     path;
-      if (ntype(node) == "import_statement") {
-        path = field(node, "module");
-      } else if (ntype(node) == "function_call_expression" && text_of(src_, field(node, "function")) == "import") {
-        path = ts_node_named_child(field(node, "argument"), 0);
-      } else {
-        return nullptr;
-      }
-      const auto unit = prp_ast::literal_string(path, src_);
-      if (!unit) {
-        return nullptr;
-      }
-      const bool artifact = unit->starts_with("lg:") || unit->starts_with("ln:");
-      ref                 = artifact ? unit->substr(3) : str_tools::canonical_escaped_path(*unit);
-      // An artifact reference (`lg:`/`ln:`) is exact by construction: it must name a simulated module, never fall back
-      // to "the sole module" or "the unique root" (a typo would simulate some other module and pass).
-      if (artifact) {
-        for (const auto& d : duts_) {
-          if (d.module == ref || d.stem == ref) {
-            return &d;
-          }
-        }
-        // an entity name (`lg:memimg` against a source defining `memimg.memimg`) is exact too, when only one module has it
-        const Dut* by_tail = nullptr;
-        size_t     tails   = 0;
-        for (const auto& d : duts_) {
-          const auto at   = d.module.find_last_of('.');
-          const auto tail = d.module.substr(at == std::string::npos ? 0 : at + 1);
-          if (tail == ref) {
-            by_tail = &d;
-            ++tails;
-          }
-        }
-        if (tails == 1) {
-          return by_tail;
-        }
-        std::string have;
-        for (const auto& d : duts_) {
-          have += (have.empty() ? "" : ", ") + d.module.substr(d.module.find_last_of('.') == std::string::npos ? 0 : d.module.find_last_of('.') + 1);
-        }
-        fail("import(\"" + ref + "\") names no simulated module (simulated modules: " + have + ")");
-      }
-    } else {
-      ref = nm;
-      // A bare module name several units define is the testbench file's OWN unit's one (`imp_tb.top`), never a guess
-      // between them.
-      const auto unit = file_short_.substr(0, file_short_.rfind('.'));
-      for (const auto& d : duts_) {
-        if (d.module == unit + "." + nm || d.stem == unit + "." + nm) {
-          return &d;
-        }
-      }
-    }
-    const Dut* found = nullptr;
-    for (const auto& d : duts_) {
-      if (d.module == ref || d.stem == ref) {
-        return &d;
-      }
-    }
-    for (const auto& d : duts_) {  // the entity tail
-      const auto tail = d.module.substr(d.module.find_last_of('.') == std::string::npos ? 0 : d.module.find_last_of('.') + 1);
-      if (tail == ref || tail == nm) {
-        if (found != nullptr) {
-          return nullptr;  // ambiguous: never guess
-        }
-        found = &d;
-      }
-    }
-    if (found == nullptr && fconsts_.count(nm) != 0 && duts_.size() == 1) {
-      return &duts_.front();
-    }
-    return found;
-  }
-
   void discover(TSNode n) {
-    if (ts_node_is_null(n)) {
-      return;
-    }
-    if (ntype(n) == "assignment") {
-      const std::string ln = lvalue_name(src_, field(n, "lvalue"));
-      if (!ln.empty() && !ts_node_is_null(field(n, "rvalue"))) {
-        if (const Dut* d = resolve_dut(field(n, "rvalue")); d != nullptr) {
-          if (inst_index(ln) < 0) {
-            insts_.push_back({ln, d, 0, false});
-          }
-        }
+    visit_instances(n, src_, file_short_, fconsts_, duts_, [&](const std::string& name, const Dut* dut) {
+      if (inst_index(name) < 0) {
+        insts_.push_back({name, dut, 0, false});
       }
-    }
-    for (TSNode c : ts_node_named_children(n)) {
-      discover(c);
-    }
+    });
   }
 
   void discover_clock_drives(TSNode n) {
@@ -888,6 +898,39 @@ private:
     }
     return false;
   }
+  struct Array_info {
+    std::vector<TSNode> initializers;
+    TSNode              length{};
+    bool                fixed       = false;
+    bool                is_unsigned = false;
+    size_t              size        = 0;
+    unsigned            width       = kDefaultTbWidth;  // element width: the widest element, floored like a local
+    llvm::AllocaInst*   slot        = nullptr;
+  };
+  static TSNode array_type(TSNode lv) {
+    if (!ts_node_is_null(lv) && ntype(lv) == "typed_identifier") {
+      const TSNode cast = field(lv, "type");
+      if (!ts_node_is_null(cast)) {
+        const TSNode type = field(cast, "type");
+        if (!ts_node_is_null(type) && ntype(type) == "array_type") {
+          return type;
+        }
+      }
+    }
+    return {};
+  }
+
+  static std::vector<TSNode> array_items(TSNode literal) {
+    std::vector<TSNode> items;
+    for (uint32_t i = 0; i < ts_node_child_count(literal); ++i) {
+      const char* name = ts_node_field_name_for_child(literal, i);
+      if (name != nullptr && std::string_view(name) == "item") {
+        items.push_back(ts_node_child(literal, i));
+      }
+    }
+    return items;
+  }
+
   void collect_assigns(TSNode n) {
     if (ts_node_is_null(n)) {
       return;
@@ -900,16 +943,33 @@ private:
         refs_[ln] = rv;
         return;
       }
-      if (!ln.empty() && !ts_node_is_null(rv) && inst_index(ln) < 0 && ntype(rv) == "tuple_sq") {
-        auto& arr = arrays_[ln];
-        arr.elems.clear();
-        for (TSNode c : ts_node_named_children(rv)) {
-          arr.elems.push_back(c);
+      const TSNode type = array_type(lv);
+      if (!ln.empty() && !ts_node_is_null(rv) && inst_index(ln) < 0) {
+        if (ntype(rv) == "tuple_sq" || (ntype(rv) == "tuple" && (!ts_node_is_null(type) || arrays_.contains(ln)))) {
+          const auto items    = array_items(rv);
+          auto [it, inserted] = arrays_.try_emplace(ln);
+          auto& arr           = it->second;
+          if (!inserted && items.size() != arr.size) {
+            fail("array assignment changes the length of test-local '" + ln + "'");
+          }
+          arr.size = items.size();
+          arr.initializers.insert(arr.initializers.end(), items.begin(), items.end());
+          if (!ts_node_is_null(type)) {
+            const TSNode base = field(type, "base");
+            if (const int width = scalar_width(src_, base); width > 0) {
+              arr.fixed       = true;
+              arr.is_unsigned = ntype(base) == "uint_type";
+              arr.width       = static_cast<unsigned>(width);
+            }
+            const TSNode length = field(type, "length");
+            if (!ts_node_is_null(length)) {
+              arr.length = field(length, "index");
+            }
+          }
+          return;
         }
-      }
-      if (!ln.empty() && !ts_node_is_null(rv) && inst_index(ln) < 0 && ntype(rv) != "tuple_sq") {
         if (const int dw = declared_slop_width(src_, lv); dw > 0) {
-          local_w_[ln]   = std::max(local_w_.count(ln) ? local_w_[ln] : 0u, static_cast<unsigned>(dw));
+          local_w_[ln] = std::max(local_w_.count(ln) ? local_w_[ln] : 0u, static_cast<unsigned>(dw));
           declared_.insert(ln);
         } else if (!local_w_.count(ln)) {
           local_w_[ln] = kDefaultTbWidth;
@@ -923,36 +983,28 @@ private:
       collect_assigns(c);
     }
   }
+  static int scalar_width(const std::string& src, TSNode type) {
+    if (ts_node_is_null(type)) {
+      return 0;
+    }
+    const auto kind = ntype(type);
+    const auto name = text_of(src, type);
+    const int  bits = name.size() > 1 ? std::atoi(name.c_str() + 1) : 0;
+    if (bits > 0 && kind == "uint_type") {
+      return bits + 1;
+    }
+    return kind == "sint_type" || kind == "int_type" ? bits : 0;
+  }
+
   static int declared_slop_width(const std::string& src, TSNode lv) {
     if (ts_node_is_null(lv) || ntype(lv) != "typed_identifier") {
       return 0;
     }
-    for (TSNode c : ts_node_named_children(lv)) {
-      if (ntype(c) != "type_cast") {
-        continue;
-      }
-      for (TSNode tc : ts_node_named_children(c)) {
-        const auto        tt = ntype(tc);
-        const std::string tx = text_of(src, tc);
-        if (tx.size() < 2) {
-          continue;
-        }
-        const int n = std::atoi(tx.c_str() + 1);
-        if (n <= 0) {
-          continue;
-        }
-        if (tt == "uint_type") {
-          return n + 1;
-        }
-        if (tt == "int_type" || tt == "sint_type") {
-          return n;
-        }
-      }
-    }
-    return 0;
+    const TSNode cast = field(lv, "type");
+    return ts_node_is_null(cast) ? 0 : scalar_width(src, field(cast, "type"));
   }
   void infer_widths(std::vector<Param_raw>& params) {
-    scratch_ = true;
+    scratch_       = true;
     const auto fty = llvm::FunctionType::get(m_.i64_, {m_.ptr_, m_.ptr_, m_.ptr_}, false);
     for (int pass = 0; pass < 4; ++pass) {
       begin_function(llvm::GlobalValue::InternalLinkage, "__tb_scratch", fty);
@@ -960,9 +1012,19 @@ private:
       make_arrays();
       bool changed = false;
       for (auto& [name, arr] : arrays_) {  // an array element is as wide as its widest initializer
-        for (TSNode e : arr.elems) {
+        if (!ts_node_is_null(arr.length)) {
+          const auto n = const_of(dat(eval(arr.length)));
+          if (!n || n->isNegative() || n->getLimitedValue() != arr.size) {
+            fail("initializer for test-local array '" + name + "' must match its declared length");
+          }
+        }
+        for (TSNode e : arr.initializers) {
           const Val v = dat(eval(e));
-          if (v.w > arr.width) {
+          if (arr.fixed) {
+            if (const auto c = const_of(v); c && (!c->isSignedIntN(arr.width) || (arr.is_unsigned && c->isNegative()))) {
+              fail("initializer element for test-local array '" + name + "' exceeds its declared range");
+            }
+          } else if (v.w > arr.width) {
             arr.width = v.w;
             changed   = true;
           }
@@ -996,7 +1058,7 @@ private:
   void make_arrays() {
     for (auto& [name, arr] : arrays_) {
       llvm::IRBuilder<> eb(entry_, entry_->begin());
-      arr.slot = eb.CreateAlloca(llvm::ArrayType::get(ity(arr.width), std::max<size_t>(arr.elems.size(), 1)), nullptr, name);
+      arr.slot = eb.CreateAlloca(llvm::ArrayType::get(ity(arr.width), std::max<size_t>(arr.size, 1)), nullptr, name);
     }
   }
 
@@ -1016,7 +1078,7 @@ private:
   Val array_read(const std::string& name, TSNode index) {
     auto&       arr = arrays_.at(name);
     const Val   iv  = dat(eval(index));
-    const auto  n   = arr.elems.size();
+    const auto  n   = arr.size;
     const unsigned cw = std::max<unsigned>(iv.w, 33);
     Value*      i   = resize(iv.v, iv.w, cw);
     Value*      ok  = b_.CreateAnd(b_.CreateICmpSGE(i, ConstantInt::get(ity(cw), 0)), b_.CreateICmpSLT(i, ConstantInt::get(ity(cw), n)));
@@ -1026,10 +1088,18 @@ private:
     return data(b_.CreateSelect(ok, x, ConstantInt::get(ity(arr.width), 0)), arr.width);
   }
 
+  Value* array_element(const Array_info& arr, Val v) {
+    Value* value = at(v, arr.width).v;
+    if (arr.is_unsigned) {
+      value = b_.CreateAnd(value, ConstantInt::get(ity(arr.width), low_mask(phys(arr.width), arr.width - 1)));
+    }
+    return value;
+  }
+
   void array_write(const std::string& name, TSNode index, Val v) {
     auto&          arr = arrays_.at(name);
     const Val      iv  = dat(eval(index));
-    const auto     n   = arr.elems.size();
+    const auto     n   = arr.size;
     const unsigned cw  = std::max<unsigned>(iv.w, 33);
     Value*         i   = resize(iv.v, iv.w, cw);
     Value*         ok  = b_.CreateAnd(b_.CreateICmpSGE(i, ConstantInt::get(ity(cw), 0)), b_.CreateICmpSLT(i, ConstantInt::get(ity(cw), n)));
@@ -1038,7 +1108,7 @@ private:
     b_.CreateCondBr(ok, then, cont);
     b_.SetInsertPoint(then);
     Value* p = b_.CreateGEP(llvm::ArrayType::get(ity(arr.width), std::max<size_t>(n, 1)), arr.slot, {c64(0), resize(i, cw, 64)});
-    b_.CreateStore(at(v, arr.width).v, p);
+    b_.CreateStore(array_element(arr, v), p);
     b_.CreateBr(cont);
     b_.SetInsertPoint(cont);
   }
@@ -1150,7 +1220,8 @@ private:
     if (ntype(n) == "assignment") {
       const std::string ln = lvalue_name(src_, field(n, "lvalue"));
       TSNode            rv = field(n, "rvalue");
-      if (!ln.empty() && !ts_node_is_null(rv) && inst_index(ln) < 0 && ntype(rv) != "tuple_sq" && !is_ref_call(rv) && locals_.find(ln) == locals_.end()) {
+      if (!ln.empty() && !ts_node_is_null(rv) && inst_index(ln) < 0 && !arrays_.contains(ln) && !is_ref_call(rv)
+          && locals_.find(ln) == locals_.end()) {
         local(ln);
         add_frame(ln, locals_[ln], local_w_[ln]);
       }
@@ -2384,11 +2455,14 @@ private:
     if (inst_index(lname) >= 0) {
       return;  // `mut acc = Module`: the instance was laid out up front
     }
-    if (ntype(rv) == "tuple_sq") {  // `const t = [a, b, ..]`: fill the table where the statement runs
-      auto& arr = arrays_.at(lname);
-      for (size_t i = 0; i < arr.elems.size(); ++i) {
-        Value* p = b_.CreateGEP(llvm::ArrayType::get(ity(arr.width), std::max<size_t>(arr.elems.size(), 1)), arr.slot, {c64(0), c64(static_cast<int64_t>(i))});
-        b_.CreateStore(at(eval(arr.elems[i]), arr.width).v, p);
+    if (arrays_.contains(lname) && (ntype(rv) == "tuple" || ntype(rv) == "tuple_sq")) {
+      auto&      arr   = arrays_.at(lname);
+      const auto items = array_items(rv);
+      for (size_t i = 0; i < items.size(); ++i) {
+        Value* p = b_.CreateGEP(llvm::ArrayType::get(ity(arr.width), std::max<size_t>(arr.size, 1)),
+                                arr.slot,
+                                {c64(0), c64(static_cast<int64_t>(i))});
+        b_.CreateStore(array_element(arr, eval(items[i])), p);
       }
       return;
     }
@@ -2807,12 +2881,7 @@ private:
   std::map<std::string, llvm::AllocaInst*> locals_;
   std::map<std::string, unsigned>      local_w_;  // each local's width in bits (signed, sign bit included)
   std::set<std::string>                declared_;
-  struct Array_info {
-    std::vector<TSNode> elems;
-    unsigned            width = kDefaultTbWidth;  // element width: the widest element, floored like a local
-    llvm::AllocaInst*   slot  = nullptr;
-  };
-  std::map<std::string, Array_info>    arrays_;  // test-local `[a, b, ..]` tables
+  std::map<std::string, Array_info>    arrays_;  // test-local positional tables
   std::vector<Assign>                  assigns_;
   std::vector<Assert_site>             sites_;
   std::vector<Print_site>              prints_;
@@ -2926,7 +2995,58 @@ bool emit_object(llvm::Module& mod, const std::string& path, std::string& err, b
   return true;
 }
 
+std::map<std::string, TSNode> file_bindings(TSNode root_node, const std::string& src) {
+  std::map<std::string, TSNode> fconsts;
+  for (TSNode c : ts_node_named_children(root_node)) {
+    if (ntype(c) == "import_statement") {
+      fconsts[text_of(src, field(c, "alias"))] = c;
+      continue;
+    }
+    TSNode decl = ntype(c) == "assignment" ? field(c, "decl") : TSNode{};
+    TSNode kind = ts_node_is_null(decl) ? TSNode{} : field(decl, "storage");
+    if (!ts_node_is_null(kind) && ntype(kind) == "const_decl") {
+      if (const auto nm = lvalue_name(src, field(c, "lvalue")); !nm.empty() && !ts_node_is_null(field(c, "rvalue"))) {
+        fconsts[nm] = field(c, "rvalue");
+      }
+    }
+  }
+  return fconsts;
+}
+
 }  // namespace
+
+bool discover_duts(const std::string& file, const std::vector<std::string>& modules, std::vector<std::string>& used,
+                   std::string& err) {
+  try {
+    const auto              src = slurp(file);
+    prpparse::Source_buffer buf(file, src);
+    prpparse::Parser        parser(buf);
+    TSNode                  root{parser.parse_ast(), &buf};
+    const auto              bindings = file_bindings(root, src);
+    const auto              basename = fs::path(file).filename().string();
+    std::vector<Dut>        catalog;
+    for (const auto& name : modules) {
+      auto& dut  = catalog.emplace_back();
+      dut.stem   = name;
+      dut.module = name;
+    }
+    std::set<std::string> names;
+    for (const auto node : ts_node_named_children(root)) {
+      if (ntype(node) == "test_statement") {
+        visit_instances(node, src, basename, bindings, catalog, [&](const std::string&, const Dut* dut) {
+          names.insert(dut->module);
+        });
+      }
+    }
+    used.assign(names.begin(), names.end());
+    return true;
+  } catch (const Gen_error& e) {
+    err = e.msg;
+  } catch (const std::exception& e) {
+    err = e.what();
+  }
+  return false;
+}
 
 int generate(const std::string& file, const std::string& simdir, const std::string& test_sel,
              std::vector<prp_sim::Test_info>& tests, std::string& err, bool also_trace, bool dump_bitcode, bool eval_counts,
@@ -2948,20 +3068,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
     }
     TSNode root_node{root, &buf};
 
-    std::map<std::string, TSNode> fconsts;
-    for (TSNode c : ts_node_named_children(root_node)) {
-      if (ntype(c) == "import_statement") {
-        fconsts[text_of(src, field(c, "alias"))] = c;
-        continue;
-      }
-      TSNode decl = ntype(c) == "assignment" ? field(c, "decl") : TSNode{};
-      TSNode kind = ts_node_is_null(decl) ? TSNode{} : field(decl, "storage");
-      if (!ts_node_is_null(kind) && ntype(kind) == "const_decl") {
-        if (const auto nm = lvalue_name(src, field(c, "lvalue")); !nm.empty() && !ts_node_is_null(field(c, "rvalue"))) {
-          fconsts[nm] = field(c, "rvalue");
-        }
-      }
-    }
+    const auto fconsts = file_bindings(root_node, src);
 
     const auto        duts       = load_duts(simdir);
     const std::string file_short = fs::path(file).filename().string();

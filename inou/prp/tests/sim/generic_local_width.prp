@@ -1,0 +1,23 @@
+/*
+:name: generic_local_width
+:type: simulation
+*/
+// A generic local may grow beyond the width of its initializer.
+mod join_words<W>(low:U32, high:U32) -> (word:Unsigned(bits=W)@[0]) {
+  mut beat:Unsigned(bits=W) = low
+  if W == 64 { beat = (high << 32) | low }
+  word = beat
+}
+
+pub mod generic_local_width(low:U32, high:U32) -> (a:U32@[0], b:U64@[0]) {
+  a = join_words<32>(low=low, high=high)
+  b = join_words<64>(low=low, high=high)
+}
+
+test generic_local_width.join {
+  mut d = generic_local_width
+  d.low = 0x80000001
+  d.high = 0xcafefeed
+  step
+  assert(d.a == 0x80000001 and d.b == 0xcafefeed80000001, "specialize each beat width")
+}

@@ -230,6 +230,7 @@ struct Options {
   // A version 1 JSON batch. The runtime schedules its ranges over retained
   // checkpoint intervals and reports answers in the "query" member.
   std::string              sim_query;
+  std::string              sim_testbench_file;  // resolved testbench among the positional sources
   bool                     sim_dump_bitcode = false;
   bool                     sim_observe = false;  // setup-time hierarchical instrumentation needed by VCD/probe/query
   bool sim_runtime_support = true;  // generated checkpoint/probe/query methods; false only for a lean checkpoint-off setup

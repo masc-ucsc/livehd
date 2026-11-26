@@ -1,0 +1,29 @@
+/*
+:name: single_trip_array
+:type: simulation
+*/
+mod select<N>(clk:Clock, write:Bool, data:U8, enable:Bool) -> (value:U8@[]) {
+  reg rows:[N]U8:[clock_pin=clk, ordering="old"] = nil
+  if write { rows[0] = data }
+  value = 0
+  for i in 0..<N {
+    if i == 0 {
+      if enable { value = rows[i] }
+    }
+  }
+}
+pub mod single_trip_array(clk:Clock, write:Bool, data:U8, enable:Bool) -> (value:U8@[]) {
+  value = select<1>(clk=clk, write=write, data=data, enable=enable)
+}
+test single_trip_array.read_lane {
+  mut d = single_trip_array
+  d.write = true
+  d.data = 85
+  d.enable = false
+  step
+  assert(d.value == 0)
+  d.write = false
+  d.enable = true
+  step
+  assert(d.value == 85)
+}

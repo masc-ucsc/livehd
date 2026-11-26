@@ -1,0 +1,27 @@
+/*
+:name: tb_array_initializer
+:type: simulation
+*/
+
+pub comb echo(x:U96) -> (q:U96) { q = x }
+
+test echo.typed_table {
+  mut d = echo
+  mut table:[3]U96 = (7, 11, 0x100000000000000000003)
+  const bias = (3 + 4)
+  d.x = table[0] + bias
+  step
+  assert(d.q == 14)
+  d.x = table[2]
+  step
+  assert(d.q == 0x100000000000000000003)
+  table = (0x200000000000000000001, 5, 9)
+  d.x = table[0]
+  step
+  assert(d.q == 0x200000000000000000001)
+  tick 3 {
+    d.x = table[clock]
+    step
+    if clock == 1 { assert(d.q == 5) }
+  }
+}

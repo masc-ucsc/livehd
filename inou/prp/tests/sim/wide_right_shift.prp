@@ -1,0 +1,21 @@
+pub mod wide_right_shift(clk:Clock, address:U64, delta:S96, count:U2)
+    -> (page:U52@[], scaled:S48@[], sign:S1@[]) {
+  reg saved:U52
+  saved = address >> 12
+  page = saved
+  scaled = delta >> (48+count)
+  sign = delta >> 99
+}
+test wide_right_shift.extremes {
+  mut d = wide_right_shift
+  d.address = 0xffffffffffffffff
+  d.delta = -(1 << 95)
+  d.count = 0
+  step
+  assert(d.page == 0xfffffffffffff and d.scaled == -(1 << 47) and d.sign == -1)
+  d.address = 0
+  d.delta = (1 << 95)-1
+  d.count = 3
+  step
+  assert(d.page == 0 and d.scaled == (1 << 44)-1 and d.sign == 0)
+}

@@ -10,6 +10,8 @@ import tempfile
 import time
 import unittest
 
+import rf_shared_tracks
+
 ROUTER = pathlib.Path(sys.argv.pop(1)).resolve()
 CHUNKS = pathlib.Path(sys.argv.pop(1)).resolve()
 FEEDBACK = pathlib.Path(sys.argv.pop(1)).resolve()
@@ -618,6 +620,50 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(stats["verify_short"], 2)
         # The two foreign wires are also closer than the end-to-end spacing across the 40 nm port.
         self.assertEqual(self.findings(), {("short", "M2", "b sig"), ("short", "M2", "sig c"), ("end-to-end", "M2", "b c")})
+
+    def test_shared_track_multi_metal_mux_crossbar(self):
+        self.assertIn("costs", self.run_router(self.two_cells(), "--cell-cost", "-0.1", success=False))
+        for mode, prelegal in (("legal", False), ("prelegal", True)):
+            with self.subTest(mode=mode):
+                bundle = self.root / f"xbar_{mode}"
+                _, total_nets = rf_shared_tracks.build_shared_track_bundle(bundle, bits=8, prelegal=prelegal)
+                workdir = self.root / f"work_{mode}"
+                extra = ["--set", "route.prelegal=true", "--set", "route.spread=0.8", "--set", "route.pin_footprint=25"] if prelegal else []
+                run = subprocess.run(
+                    [
+                        ROUTER,
+                        "route",
+                        f"def:{bundle}",
+                        f"timing:{bundle / 'timing.tsv'}",
+                        "--workdir",
+                        str(workdir),
+                        "--set",
+                        "lhd.incremental=false",
+                        "--set",
+                        "route.access_patterns=true",
+                        "--set",
+                        "route.complex_first=true",
+                        "--set",
+                        "route.cell_cost=0.2",
+                        *extra,
+                        "--result-json",
+                        str(self.root / f"res_{mode}.json"),
+                    ],
+                    cwd=self.root,
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                )
+                self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+                result = json.loads((self.root / f"res_{mode}.json").read_text())
+                stats = json.loads((workdir / "route" / "stats.json").read_text())
+                self.assertTrue(result["qor"]["complete"], result["qor"])
+                self.assertEqual(result["qor"]["unrouted"], 0)
+                self.assertEqual(result["qor"]["violations"], {})
+                self.assertEqual(stats["nets_routed"], total_nets)
+                self.assertEqual(stats["shared_track_cells"], 32)  # 24 stage-1 + 8 stage-2 muxes; BUFx2 and DFFHQNx1 excluded
+                self.assertGreater(stats.get("pattern_cells_reserved", 0) + stats.get("pattern_cells_settled", 0), 0)
+                self.assertGreater(stats.get("complex_first_nets", 0), 0)
 
 
 if __name__ == "__main__":

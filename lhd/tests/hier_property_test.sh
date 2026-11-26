@@ -190,4 +190,65 @@ else
   fail "design-body assume_nocheck must compile"
 fi
 
+# --- 6. if / match / conditional-call guards are inherited by assert/assume --
+cat > "$W/guarded_ok.prp" <<'EOF'
+mod nz_child(x:U8) -> (y:U8@[0]) {
+  assert(x != 0)
+  y = x
+}
+pub mod guarded_ok(sel:U2, en:Bool, x:U8) -> (y:U8@[0]) {
+  y = 0
+  if sel == 0 {
+    assert(sel == 0)
+  } else {
+    y = x
+  }
+  match sel {
+    == 1 { assert(sel == 1) }
+    else {}
+  }
+  if en and (x != 0) {
+    y = nz_child(x=x)
+  }
+}
+EOF
+cat > "$W/guarded_bad.prp" <<'EOF'
+mod nz_child(x:U8) -> (y:U8@[0]) {
+  assert(x != 0)
+  y = x
+}
+pub mod guarded_bad(en:Bool, x:U8) -> (y:U8@[0]) {
+  y = 0
+  if en {
+    y = nz_child(x=x)
+  }
+}
+EOF
+if $LHD formal verify "$W/guarded_ok.prp" --top guarded_ok --workdir "$W/w6ok" >"$W/l6ok.log" 2>&1; then
+  echo "ok: if/match/conditional-call guarded assert and assume_nocheck proven"
+else
+  fail "if/match/conditional-call guarded obligations should prove: $(cat "$W/l6ok.log")"
+fi
+if $LHD formal verify "$W/guarded_bad.prp" --top guarded_bad --workdir "$W/w6bad" >"$W/l6bad.log" 2>&1; then
+  fail "unguarded conditional-call assert(x!=0) must refute"
+else
+  echo "ok: unguarded conditional-call assert refuted"
+fi
+# A guarded assume constrains only its own branch: it must not discharge an
+# unguarded assert outside it.
+cat > "$W/assume_leak.prp" <<'EOF'
+pub mod assume_leak(en:Bool, x:U8) -> (y:U8@[0]) {
+  y = x
+  if en {
+    assume_nocheck(x < 10)
+  }
+  assert(x < 10)
+}
+EOF
+if $LHD formal verify "$W/assume_leak.prp" --top assume_leak --workdir "$W/w6leak" >"$W/l6leak.log" 2>&1; then
+  fail "an if-guarded assume must not discharge an unguarded assert"
+else
+  echo "ok: guarded assume stays inside its branch"
+fi
+
 exit $rc

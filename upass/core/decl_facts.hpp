@@ -23,6 +23,7 @@
 #include "kind.hpp"
 #include "ssa_demote.hpp"
 #include "lnast.hpp"
+#include "range_bits.hpp"
 #include "symbol_table.hpp"
 
 namespace upass::decl_facts {
@@ -242,6 +243,30 @@ inline std::optional<Facts> lookup(const Symbol_table& st, const Lnast* ln, std:
     return std::nullopt;
   }
   return ti;
+}
+
+// A scalar alias with the exact envelope of U<N>/S<N> uses that same
+// cast for constant folding and hardware lowering, including in an inline frame.
+inline std::optional<Typecast_info> resolve_typecast(const Symbol_table& st, const Lnast* ln, std::string_view raw,
+                                                     std::string_view scoped) {
+  if (auto builtin = classify_typecast(raw)) {
+    return builtin;
+  }
+  const auto binding = st.get_bundle(scoped);
+  if (!binding || binding->get_mode() != Mode::type_kind) {
+    return std::nullopt;
+  }
+  const auto facts = lookup(st, ln, scoped);
+  if (!facts || !facts->bits || !facts->range_min || !facts->range_max
+      || (facts->kind != Num::signed_int && facts->kind != Num::unsigned_int)) {
+    return std::nullopt;
+  }
+  const bool sign = facts->kind == Num::signed_int;
+  if (!facts->range_min->same_repr(min_from_bits(facts->bits, sign))
+      || !facts->range_max->same_repr(max_from_bits(facts->bits, sign))) {
+    return std::nullopt;
+  }
+  return Typecast_info{Typecast_kind::to_sized, sign, static_cast<int>(facts->bits)};
 }
 
 // The kind a symbol-table value carries. Shape FIRST: a multi-entry /

@@ -81,4 +81,37 @@ import sys
 r = json.load(open(sys.argv[1]))
 assert r["lec"]["verdict"] == "proven-full", r
 PYCHECK
+# A newly specialized generic uses the record layout published by its own file
+# wrapper, even when that wrapper was restored from a previous compilation.
+W="$W/layout"
+mkdir -p "$W/src"
+cat > "$W/src/child.prp" <<'EOF'
+type Request = (data:U8, valid:Bool)
+pub mod child<K>(clk:Clock, a:U8, replay:Bool) -> (y:U8@[]) {
+  reg saved:Request = nil
+  const incoming:Request = (data=a, valid=a != 0)
+  if !replay { saved = incoming }
+  const req = if replay { saved } else { incoming }
+  y = if req.valid { req.data ^ K } else { 0 }
+}
+EOF
+cat > "$W/src/top.prp" <<'EOF'
+const child = import("child.child")
+pub mod top(clk:Clock, a:U8, replay:Bool) -> (y:U8@[]) {
+  const c = child<3>(clk=clk, a=a, replay=replay)
+  y = c.y
+}
+EOF
+compile before warm_work
+sed 's/child<3>/child<5>/' "$W/src/top.prp" > "$W/new.prp"
+mv "$W/new.prp" "$W/src/top.prp"
+compile edited warm_work
+compile cold cold_work --set lhd.incremental=false
+[ "$("$LHD" tool diff "lg:$W/cold" "lg:$W/edited" --structural -q)" = identical ]
+python3 - "$W/edited.json" <<'PYCHECK'
+import json
+import sys
+v = json.load(open(sys.argv[1]))["incremental"]["compile"]
+assert v["hits"] > 0 and v["misses"] > 0 and v["refused"] == 0 and v["store_failed"] == 0, v
+PYCHECK
 echo "PASS: specialized callee survives incremental caller edits"

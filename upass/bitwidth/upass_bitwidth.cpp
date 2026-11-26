@@ -17,6 +17,7 @@
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
 #include "range_bits.hpp"
+#include "singleton_range.hpp"
 
 // ── Plugin registration ───────────────────────────────────────────────────────
 static upass::uPass_plugin plugin_bitwidth("bitwidth", upass::uPass_wrapper<uPass_bitwidth>::get_upass, {"constprop"});
@@ -396,16 +397,16 @@ const uPass_bitwidth::Pre_cap* uPass_bitwidth::pre_cap(std::string_view name, co
   return at == caps.end() ? nullptr : &*at;
 }
 
-void uPass_bitwidth::commit_merged(std::string_view name, const Lnast_range& r, bool wide) {
+void uPass_bitwidth::commit_merged(std::string_view name, const Lnast_range& r, bool wide, bool multiple_defs) {
   // The per-name wide flag is last-writer state: after the arms it holds only
   // the LAST arm's write, so the merge passes what every path left.
-  set_range(name, r, r.is_unbounded() && wide);
+  set_range(name, r, r.is_unbounded() && wide, multiple_defs);
   // If this if is nested inside another uncertain arm, the merged value is
   // `name`'s contribution to that outer arm's path.
   record_arm_write(name, r);
 }
 
-void uPass_bitwidth::set_range(std::string_view name, const Lnast_range& r, bool wide) {
+void uPass_bitwidth::set_range(std::string_view name, const Lnast_range& r, bool wide, bool multiple_defs) {
   // Refresh the scalar "0" entry DIRECTLY: the arm's leave_scope invalidated
   // the trivial, so write_bw's `is_empty() || has_trivial` guard would skip
   // the bundle write and leave the stale narrow bw fields that range_of_operand
@@ -413,6 +414,14 @@ void uPass_bitwidth::set_range(std::string_view name, const Lnast_range& r, bool
   if (auto b = (runner_st != nullptr) ? runner_st->get_bundle_for_write(name) : nullptr; b) {
     Bundle::Entry e = b->get_entry(bundle_path::of_string("0"));
     e.immutable     = false;
+    if (multiple_defs && Lnast::is_tmp(name)) {
+      // An if/match expression is not a typed alias (docs 04, bitwise not).
+      // The arm stores share a result temp. Its copied type can describe just
+      // one arm, e.g. a U32 slice selected against U64. Only the joined
+      // value range bounds this result, even when that range is unbounded.
+      e.decl_min = Bundle::invalid_lconst;
+      e.decl_max = Bundle::invalid_lconst;
+    }
     if (r.is_unbounded()) {
       e.bw_max = Bundle::invalid_lconst;
       e.bw_min = Bundle::invalid_lconst;
@@ -600,12 +609,13 @@ void uPass_bitwidth::notify_if_merge_end(bool all_paths_covered) {
     const bool  all_arms = f.arm_writes.at(var) == f.uncertain_arms;
     const bool  covered  = all_arms && (all_paths_covered || (cap != nullptr && cap->fresh));
     if (covered) {
-      commit_merged(var, arm_union, f.arm_wide.contains(var));
+      commit_merged(var, arm_union, f.arm_wide.contains(var), f.arm_writes.at(var) > 1);
       continue;
     }
     commit_merged(var,
                   cap == nullptr ? Lnast_range::make_unbounded() : arm_union.join(cap->pre),
-                  f.arm_wide.contains(var) || (cap != nullptr && cap->wide));
+                  f.arm_wide.contains(var) || (cap != nullptr && cap->wide),
+                  f.arm_writes.at(var) > 1 || (cap != nullptr && !cap->fresh));
   }
   if_merge_stack_.pop_back();
   if (if_merge_stack_.empty()) {
@@ -763,6 +773,7 @@ std::optional<Lnast_range> uPass_bitwidth::check_declared_fit(std::string_view n
   if (r.is_unbounded() && why != Unbounded::wide) {
     if (why == Unbounded::unknown && runner_st != nullptr) {
       runner_st->unchecked_typed.emplace(base);
+      lm->get_lnast()->bw_meta().ranges.erase(upass::singleton_range_key(base));
     }
     return std::nullopt;
   }
@@ -1252,7 +1263,18 @@ upass::Vote uPass_bitwidth::process_div(std::string_view dst_name, Bundle& dst, 
 upass::Vote uPass_bitwidth::process_mod(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   // |a % d| < |d| and <= |a|; sign follows the dividend.
   if (src.size() < 2) { return stamp_carry(dst_name, dst, Lnast_range::make_unbounded(), src); }
-  return stamp_carry(dst_name, dst, range_of_operand(src[0]).mod(range_of_operand(src[1])), src);
+  const auto dividend = range_of_operand(src[0]);
+  auto       result   = dividend.mod(range_of_operand(src[1]));
+  // The upper bound of U64 and wider inputs exceeds the interval lattice,
+  // but their declared sign still bounds the remainder from below.
+  if (dividend.is_unbounded() && !result.is_unbounded() && result.min < 0 && runner_st != nullptr) {
+    const auto base = ssa_base_name(src[0].name);
+    if ((lm->unit_lnast()->io_meta().find(base) || typed_names_.contains(base)) && !runner_st->unchecked_typed.contains(base)) {
+      const auto facts = upass::decl_facts::lookup(*runner_st, lm->unit_lnast().get(), base);
+      if (facts && facts->kind == upass::decl_facts::Num::unsigned_int) { result.min = 0; }
+    }
+  }
+  return stamp_carry(dst_name, dst, result, src);
 }
 
 upass::Vote uPass_bitwidth::process_shl(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
@@ -1269,7 +1291,23 @@ upass::Vote uPass_bitwidth::process_sra(std::string_view dst_name, Bundle& dst, 
   if (src.size() < 2) { return stamp_carry(dst_name, dst, Lnast_range::make_unbounded(), src); }
   const auto amt = range_of_operand(src[1]);
   check_shift_amount(amt.is_unbounded() ? envelope_of_operand(src[1]) : amt);
-  return stamp_carry(dst_name, dst, range_of_operand(src[0]).sra(count_pattern(amt, src[1])), src);
+  const auto counts = count_pattern(amt, src[1]);
+  auto       result = range_of_operand(src[0]).sra(counts);
+  // A wide input can produce a narrow quotient. Shift its declared endpoints
+  // before converting them to the range lattice (e.g. U64 >> 12 fits U52).
+  const auto base = ssa_base_name(src[0].name);
+  if (result.is_unbounded() && !counts.is_unbounded() && counts.min >= 0 && runner_st != nullptr
+      && (lm->unit_lnast()->io_meta().find(base) || typed_names_.contains(base)) && !runner_st->unchecked_typed.contains(base)) {
+    const auto facts = upass::decl_facts::lookup(*runner_st, lm->unit_lnast().get(), base);
+    if (facts && facts->bits && (facts->kind == upass::decl_facts::Num::signed_int || facts->kind == upass::decl_facts::Num::unsigned_int)) {
+      const bool sign = facts->kind == upass::decl_facts::Num::signed_int;
+      const auto lo = facts->range_min ? *facts->range_min : upass::min_from_bits(facts->bits, sign);
+      const auto hi = facts->range_max ? *facts->range_max : upass::max_from_bits(facts->bits, sign);
+      result = range_from_entry(*hi.sra_op(Dlop::create_integer(hi.is_negative() ? counts.max : counts.min)),
+                                *lo.sra_op(Dlop::create_integer(lo.is_negative() ? counts.min : counts.max)));
+    }
+  }
+  return stamp_carry(dst_name, dst, result, src);
 }
 
 // Bitwise ops — conservative: join of operand ranges (not tight).
@@ -1707,6 +1745,16 @@ void uPass_bitwidth::process_declare() {
   }
   const std::string var{current_text()};
   const bool        typed = move_to_sibling() && !Lnast_ntype::is_prim_type_none(get_raw_ntype());
+  // The runner bakes integer bounds before this callback. A remaining bound
+  // reference in a template is resolved when its generic is specialized.
+  // Until then the initializer's range is a value fact, not a declared bound.
+  bool pending_bound = false;
+  if (typed && Lnast_ntype::is_prim_type_int(get_raw_ntype()) && move_to_child()) {
+    do {
+      pending_bound |= Lnast_ntype::is_ref(get_raw_ntype());
+    } while (move_to_sibling());
+    move_to_parent();
+  }
   if (typed && Lnast_ntype::is_comp_type_array(get_raw_ntype())) {
     note_inferred_declare(var);
   }
@@ -1729,9 +1777,15 @@ void uPass_bitwidth::process_declare() {
     }
   }
   move_to_parent();
-  if (typed && !var.empty()) {
+  if (pending_bound) {
+    typed_names_.erase(var);
+  } else if (typed && !var.empty()) {
     typed_names_.insert(var);
     check_reg_init_fit(var);
+    if (const auto env = is_array_name(var) ? std::nullopt : declared_type_of(var);
+        env && env->is_constant() && runner_st != nullptr && !runner_st->unchecked_typed.contains(var)) {
+      upass::set_singleton_range(*lm->get_lnast(), var, env->min);
+    }
   }
   if (field_env) {
     declared_field_envs_.insert_or_assign(var, *field_env);
