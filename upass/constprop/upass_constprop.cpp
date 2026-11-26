@@ -4156,7 +4156,10 @@ void uPass_constprop::process_import_call(const std::string& dst) {
       st(),
       function_registry,
       ambiguous_units_,
-      [this](const std::string& text) { pending_imports_.push_back({std::string(lm->get_top_module_name()), text}); },
+      [this](const std::string& text) {
+        st().import_pending = true;
+        pending_imports_.push_back({std::string(lm->get_top_module_name()), text});
+      },
       [this](std::string_view name, const Dlop& v) { store_trivial(name, v); },
       dst);
 }

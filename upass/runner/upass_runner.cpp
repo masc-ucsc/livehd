@@ -8222,6 +8222,13 @@ bool uPass_runner::try_inline_func_call() {
     lm->restore_cursor(saved);
     return false;  // not a known comb body → typecast / cell-op / marker path
   }
+  // An imported record (or one of its fields) may still be empty in this
+  // walk. Specializing now would bind its temporary as a type name. The
+  // whole-file retry will check this call with the published generic values.
+  if (callee->is_template() && symbol_table_.import_pending) {
+    lm->restore_cursor(saved);
+    return false;
+  }
 
   // A tuple field is a namespace lookup, independent of external names. A
   // self-less field call drops the namespace; a self method binds the receiver.

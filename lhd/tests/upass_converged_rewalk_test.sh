@@ -99,4 +99,28 @@ diff "$W/ln_solo/victim.victim.lnast" "$W/ln_tree/victim.victim.lnast" > "$W/ln.
 $(cat "$W/ln.diff")"
 
 echo "PASS: a converged unit is not re-walked by a later import_defer round"
+
+# A profile that re-exports another package's record needs an additional
+# round. A caller may forward a field as the generic that sizes a child port.
+cat > "$W/widths.prp" <<'EOF'
+pub comb params(bits=8) -> (cfg) { cfg = (const width=bits, const enabled=true) }
+pub const small = params()
+EOF
+cat > "$W/profiles.prp" <<'EOF'
+const cfg = import("widths")
+pub const selected = (const tile=cfg.small)
+EOF
+cat > "$W/forward.prp" <<'EOF'
+const profiles = import("profiles")
+mod lane<C>(x:Unsigned(bits=C.width)) -> (y:U8@[0]) { y = x }
+mod tile<T>(x:U8) -> (y:U8@[0]) { y = lane<T.tile>(x=x) }
+pub mod forward(x:U8) -> (y:U8@[0]) { y = tile<profiles.selected>(x=x) }
+test forward.value {
+  mut d = forward
+  d.x = 0xab
+  step
+  assert(d.y == 0xab)
+}
+EOF
+"$LHD" sim "$W/forward.prp" --workdir "$W/w_forward" -q || fail "forwarding an imported record to a generic port"
 exit 0
