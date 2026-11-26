@@ -7,9 +7,16 @@ under a supplied stimulus. The oracle side of an RTL differential: the same
 traces are compared line by line.
 
     lean --run Futamura_Projection_Scripts/cert_trace.lean <cert> <cycles> <stim>
-         [edges:all|edges:third|edges:file:<path>] [init:reset|init:zero] [route:ir|route:vc]
-         [opt:off] [opt:stats] [inc:off|inc:scan] [mem:fun] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]
-         [compact:<cycles>]
+         [edges:all|edges:third|edges:file:<path>] [init:reset|init:zero] [route:ir|vc|ref|fp]
+         [opt:off] [opt:stats] [inc:off|inc:scan] [mem:fun] [share:off] [loop:full] [ir:raw]
+         [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>] [compact:<cycles>]
+
+The route runs as the engine `EngineSelector` builds from the route options (`HDLProof/Run/Engine`;
+route:ir is this driver's default), and the loop is `HDLProof/Run/Trace`'s `traceRun`, the one
+per-design TV and legacy drivers run too: the same stimulus table, edge schedules, start states,
+checkpoints and compaction for every route. `route:ref` runs `interpretDesign` itself;
+`route:fp` the Futamura projection's residual on its encoded state (`Run/FpEngine`; `share:off`
+without shared tails, `loop:full` its earlier step); `ir:raw` the unstaged direct step.
 
 `stim v1` is the dcert2_memroute format, restricted to what an RTL testbench
 can replay: `in <ordinal> <width> <value>` (every cycle) and
@@ -97,361 +104,62 @@ Both routes write the same bytes for the same state, and each resumes from the o
 
 Each cycle's inputs come from a table built once (`StimTab`), with `inputAt`'s rules.
 -/
+import HDLProof.Run.Trace
 import LeanSemanticPrimitives.Projection.CertLoadAny
-import LeanSemanticPrimitives.Compiler.DesignSemantics
-import LeanSemanticPrimitives.Compiler.DirectSemantics
-import LeanSemanticPrimitives.Compiler.DirectStaged
-import LeanSemanticPrimitives.Compiler.CompileDesignDefs
--- route:vc runs `denoteResidual`'s fast spelling (`@[csimp]`, equal by proof)
-import LeanSemanticPrimitives.Compiler.ResidualFast
--- route:vc runs the optimized program (`compileOpt_correct`)
-import LeanSemanticPrimitives.Compiler.ResidualOpt
--- checkpoints: lhdcert-ckpt v1
-import LeanSemanticPrimitives.Compiler.Ckpt
--- route:vc steps incrementally (`runIncOpt_correct`)
-import LeanSemanticPrimitives.Compiler.ResidualInc
--- route:vc's default incremental step is event-driven (`runEvOpt_correct`)
-import LeanSemanticPrimitives.Compiler.ResidualEv
--- ... with memories as tables (`runEvFlatOpt_correct`)
-import LeanSemanticPrimitives.Compiler.ResidualFlat
--- the event-driven pass with tables skips chunks with nothing pending (`@[csimp] evEnvF_eq_work`)
-import LeanSemanticPrimitives.Compiler.ResidualWork
-import Std.Data.HashMap
 
-open Compiler
+open Compiler HDLProof.Run
 
-structure Stim where
-  every : List (Nat × Nat × Int) := []
-  at_   : List (Nat × Nat × Nat × Int) := []
-
-def parseStim (txt : String) : Except String Stim := do
-  let body := ((txt.splitOn "\n").map (fun l => (l.splitOn "\r").headD "")).filter
-                (fun l => l != "" && !l.startsWith "#")
-  match body with
-  | [] => .error "empty stimulus file"
-  | hdr :: rest =>
-    if hdr != "stim v1" then .error s!"line 1: expected \"stim v1\", got {repr hdr}"
-    -- in file order, pushed to arrays (appending to a list copied it: quadratic)
-    let mut ats : Array (Nat × Nat × Nat × Int) := #[]
-    let mut evs : Array (Nat × Nat × Int) := #[]
-    for l in rest do
-      match (l.splitOn " ").filter (· != "") with
-      | ["at", c, "in", i, w, v] =>
-          match c.toNat?, i.toNat?, w.toNat?, v.toInt? with
-          | some c, some i, some w, some v => ats := ats.push (c, i, w, v)
-          | _, _, _, _ => throw s!"unparseable {repr l}"
-      | ["in", i, w, v] =>
-          match i.toNat?, w.toNat?, v.toInt? with
-          | some i, some w, some v => evs := evs.push (i, w, v)
-          | _, _, _ => throw s!"unparseable {repr l}"
-      | _ => throw s!"unrecognised {repr l}"
-    pure { every := evs.toList, at_ := ats.toList }
-
-/-- The declared width of input ordinal `i` (from its `SourceDesc.input`), or 1. -/
-def inputWidth (D : DesignCert) (i : Nat) : Nat :=
-  (D.sources.toList.findSome? fun
-    | .input idx w => if idx == i then some w else none
-    | _ => none).getD 1
-
-def maxInput (D : DesignCert) : Nat :=
-  D.sources.foldl (fun m s => match s with
-    | .input idx _ => max m (idx + 1)
-    | .flopQAsync _ _ ri _ _ => max m (ri + 1)
-    | _ => m) 0
-
-def inputAt (D : DesignCert) (st : Stim) (k : Nat) : RuntimeInput :=
-  (List.range (maxInput D)).toArray.map fun i =>
-    match st.at_.find? (fun t => t.1 == k && t.2.1 == i) with
-    | some (_, _, w, v) => mk_bv w v
-    | none =>
-      match st.every.find? (fun t => t.1 == i) with
-      | some (_, w, v) => mk_bv w v
-      | none           => mk_bv (inputWidth D i) 0
-
-/-- The stimulus as tables, built once per run: each input's value on a cycle no `at` line
-names it (its first `in` line, else 0 at its declared width), and the `at` lines grouped by
-cycle, in file order. `StimTab.inputAt` gives `inputAt`'s inputs (the same first-match rules)
-without scanning the stimulus and the design's sources on every cycle. Keep it in step with
-`HDLProof/Run/Stim.lean`'s copy, which `tests/stim_tab_check.lean` checks against `inputAt`. -/
-structure StimTab where
-  base : RuntimeInput
-  at_  : Std.HashMap Nat (Array (Nat × Nat × Int))
-
-def StimTab.of (D : DesignCert) (st : Stim) : StimTab := Id.run do
-  let n := maxInput D
-  -- each ordinal's width: its first `SourceDesc.input` (else 1)
-  let mut width : Array (Option Nat) := Array.replicate n none
-  for s in D.sources do
-    match s with
-    | .input idx w => if idx < n && width[idx]!.isNone then width := width.set! idx (some w)
-    | _ => pure ()
-  -- each ordinal's value when no `at` line names it: its first `in` line
-  let mut every : Array (Option (Nat × Int)) := Array.replicate n none
-  for (i, w, v) in st.every do
-    if i < n && every[i]!.isNone then every := every.set! i (some (w, v))
-  let base := (Array.range n).map fun i =>
-    match every[i]! with
-    | some (w, v) => mk_bv w v
-    | none => mk_bv (width[i]!.getD 1) 0
-  let mut at_ : Std.HashMap Nat (Array (Nat × Nat × Int)) := {}
-  for (c, i, w, v) in st.at_ do
-    at_ := at_.insert c ((at_.getD c #[]).push (i, w, v))
-  return { base, at_ }
-
-/-- Cycle `k`'s inputs: an input's first `at` line for cycle `k` wins, else its base value. -/
-def StimTab.inputAt (t : StimTab) (k : Nat) : RuntimeInput :=
-  match t.at_.get? k with
-  | none => t.base
-  | some ls => ls.foldr (fun (i, w, v) acc => if i < acc.size then acc.set! i (mk_bv w v) else acc) t.base
-
-/-- The period of automatic compaction, in cycles. Measured on the census designs: a
-compaction costs 14-70 ms, 3-15 cycles' worth, so every 256 cycles it adds 1.4-5% and keeps
-the time per cycle flat. -/
-def autoCompactK : Nat := 256
-
-/-- Why compaction is not covered by `compacted_outputs` on this certificate, or `none`: the
-theorem's hypotheses, checked (`checkDesign_sound` gives `DesignSemWF`). -/
-def compactBlocker (D : DesignCert) : Option String :=
-  match Compiler.Direct.checkDesign D with
-  | .error e => some s!"checkDesign: {e.render}"
-  | .ok _ => (MemAddr.addrError D).orElse fun _ =>
-      (Ckpt.imgRootError D).orElse fun _ => Ckpt.wordError D
-
-def zeroState (D : DesignCert) : RuntimeState :=
-  { flops := D.flops.map (fun f => mk_bv f.width 0)
-  , mems  := D.memories.map (fun m => fun _ => mk_bv m.dw 0) }
-
-/-- Every flop at its reset value, every memory at its power-on image (DCERT3
-`MemoryDesc.init`, 0 past its words): the default start. A flop with a Verilog
-power-on value and no reset carries that value as `resetValue`, so this is the
-start that matches the RTL; it is also the Futamura runner's (`initStateOf`).
-`init:zero` keeps the old all-zero start. -/
-def resetState (D : DesignCert) : RuntimeState :=
-  { flops := D.flops.map (fun f => mk_bv f.width f.resetValue)
-  , mems  := D.memories.map (fun m => m.powerOnImg) }
-
-/-- An `edges v1` schedule: `at <cycle> <b0> <b1> ...`, one bit per clock ordinal. -/
-def parseEdges (txt : String) : Except String (List (Nat × Array Bool)) := do
-  let body := ((txt.splitOn "\n").map (fun l => (l.splitOn "\r").headD "")).filter
-                (fun l => l != "" && !l.startsWith "#")
-  match body with
-  | [] => .error "empty edges file"
-  | hdr :: rest =>
-    if hdr != "edges v1" then .error s!"line 1: expected \"edges v1\", got {repr hdr}"
-    rest.mapM fun l =>
-      match (l.splitOn " ").filter (· != "") with
-      | "at" :: c :: bits =>
-          match c.toNat?, bits.mapM (fun b => match b with | "0" => some false | "1" => some true | _ => none) with
-          | some c, some bs => pure (c, bs.toArray)
-          | _, _ => throw s!"unparseable {repr l}"
-      | _ => throw s!"unrecognised {repr l}"
-
-def edgesAt (D : DesignCert) (third : Bool) (sched : Option (List (Nat × Array Bool))) (k : Nat) : ClockEdges :=
-  match sched with
-  | some rows =>
-    match rows.find? (fun r => r.1 == k) with
-    | some (_, bs) => (Array.range D.clocks.size).map (fun c => bs.getD c true)
-    | none => Array.replicate D.clocks.size true
-  | none =>
-    if third && k % 3 == 2 then Array.replicate D.clocks.size false
-    else Array.replicate D.clocks.size true
+def usage : String :=
+  "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third|edges:file:<path>] " ++
+  "[init:reset|init:zero] [route:ir|vc|ref|fp] [opt:off] [opt:stats] [inc:off|inc:scan] [mem:fun] " ++
+  "[share:off] [loop:full] [ir:raw] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>] " ++
+  "[compact:<cycles>]"
 
 def main (args : List String) : IO UInt32 := do
   match args with
   | cert :: cyc :: stimPath :: rest =>
-    let some cycles := cyc.toNat? | IO.eprintln s!"cycles {repr cyc} is not a number"; return 2
-    let mut third := false
-    let mut zeroInit := false
-    let mut vc := false
-    let mut optOn := true
+    let some _ := cyc.toNat? | IO.eprintln s!"cycles {repr cyc} is not a number"; return 2
+    -- the route options set the knobs (route:ir by default); `opt:stats` is this driver's; the
+    -- rest (edges, start, checkpoints, compaction) are the trace loop's
+    let mut knobs : Knobs := { route := .ir }
     let mut optStats := false
-    let mut incOn := true
-    let mut incScan := false
-    let mut memFun := false
-    let mut schedPath : Option String := none
-    let mut ckptIn : Option String := none
-    let mut ckptAt : Array (Nat × String) := #[]
-    let mut ckptOut : Option String := none
-    let mut compactK : Nat := 0
-    let mut compactAuto := true
+    let mut traceOpts : Array String := #[]
     for opt in rest do
-      if opt.startsWith "edges:file:" then
-        schedPath := some (opt.replace "edges:file:" "")
-      else if opt.startsWith "ckpt-in:" then
-        ckptIn := some (opt.replace "ckpt-in:" "")
-      else if opt.startsWith "ckpt-out:" then
-        ckptOut := some (opt.replace "ckpt-out:" "")
-      else if opt.startsWith "compact:" then
-        match (opt.replace "compact:" "").toNat? with
-        | some k => compactK := k; compactAuto := false
-        | none => do IO.eprintln s!"compact: {repr opt} is not a number of cycles"; return 2
-      else if opt.startsWith "ckpt-at:" then
-        match (opt.replace "ckpt-at:" "").splitOn ":" with
-        | k :: p@(_ :: _) =>
-          match k.toNat? with
-          | some k => ckptAt := ckptAt.push (k, ":".intercalate p)
-          | none => do IO.eprintln s!"ckpt-at: {repr k} is not a number"; return 2
-        | _ => do IO.eprintln s!"ckpt-at expects <cycle>:<file>, got {repr opt}"; return 2
+      if opt == "opt:stats" then optStats := true
+      else if opt.startsWith "compact:" then traceOpts := traceOpts.push opt
       else
-        match opt with
-        | "edges:all" => third := false
-        | "edges:third" => third := true
-        | "init:reset" => zeroInit := false
-        | "init:zero" => zeroInit := true
-        | "route:ir" => vc := false
-        | "route:vc" => vc := true
-        | "route:tv" => vc := true   -- the old name of route:vc
-        | "opt:off" => optOn := false
-        | "opt:stats" => optStats := true
-        | "inc:off" => incOn := false
-        | "inc:scan" => incScan := true
-        | "mem:fun" => memFun := true
-        | _ => do IO.eprintln s!"unknown option {opt}"; return 2
+        match knobs.apply? opt with
+        | some (.ok k) => knobs := k
+        | some (.error _) => do IO.eprintln s!"unknown option {opt}"; return 2
+        | none => traceOpts := traceOpts.push opt
     let (_, D) ← Projection.CertLoadAny.loadAny cert
-    let st ← match parseStim (← IO.FS.readFile stimPath) with
-      | .ok s => pure s
-      | .error e => do IO.eprintln s!"stimulus: {e}"; return 2
-    let sched ← match schedPath with
-      | none => pure none
-      | some path => match parseEdges (← IO.FS.readFile path) with
-        | .ok rows => pure (some rows)
-        | .error e => do IO.eprintln s!"edges: {e}"; return 2
-    let tab := StimTab.of D st
-    -- automatic compaction: on a run long enough to reach it, for a design with memories whose
-    -- certificate meets `compacted_outputs`' hypotheses
-    if compactAuto && cycles > autoCompactK && D.memories.size > 0 then
-      match compactBlocker D with
-      | none => compactK := autoCompactK
-      | some why => IO.eprintln s!"automatic compaction off: {why}"
-    let mut s := if zeroInit then zeroState D else resetState D
-    -- checkpoints: the design hash is computed only when one is read or written
-    let hash := if ckptIn.isSome || ckptOut.isSome || !ckptAt.isEmpty then Ckpt.designHash D else 0
-    let mut start := 0
-    if let some p := ckptIn then
-      match Ckpt.parse (← IO.FS.readBinFile p) with
-      | .error e => do IO.eprintln s!"{p}: {e}"; return 2
-      | .ok c =>
-        if let some e := Ckpt.validate D hash c then
-          IO.eprintln s!"{p}: {e}"; return 1
-        unless c.exts.isEmpty do
-          IO.eprintln s!"note: {p}: {c.exts.size} ext sections not read"
-        s := Ckpt.restore c
-        start := c.cycle
-    for (k, p) in ckptAt do
-      unless start ≤ k && k ≤ start + cycles do
-        IO.eprintln s!"ckpt-at:{k}:{p}: cycle {k} is outside this run ({start} .. {start + cycles})"
-        return 2
-    -- write every checkpoint due at cycle `k`, state `st`
-    let saveAt (k : Nat) (st : RuntimeState) : IO Unit := do
-      for (j, p) in ckptAt do
-        if j == k then IO.FS.writeBinFile p (Ckpt.render (Ckpt.save D hash k #[] st))
-      if k == start + cycles then
-        if let some p := ckptOut then IO.FS.writeBinFile p (Ckpt.render (Ckpt.save D hash k #[] st))
-    if vc then
-      match compileDesign D with
-      | .error e => do IO.eprintln s!"compileDesign refused: {repr e}"; return 1
-      | .ok R0 =>
-        let (R, accepted) := if optOn then ResidualOpt.optimizeWith R0 else (R0, false)
+    let targs := cyc :: stimPath :: traceOpts.toList
+    match EngineSelector D knobs with
+    | .ok sel =>
+      -- `opt:stats`: what was prepared (vc's optimizer and incremental step), on stderr
+      let atStart (_ _ : Nat) (_ : IO Unit) : IO (Option UInt32) := do
         if optStats then
-          let verdict := if !optOn then "off" else if accepted then "accepted" else "REFUSED (unoptimized)"
-          IO.eprintln s!"vc optimize: {verdict}; sources {R0.sources.size} -> {R.sources.size}, \
-            bindings {R0.bindings.size} -> {R.bindings.size}"
-        let inc := incOn && ResidualInc.wellOrdered R
-        if optStats then
-          IO.eprintln s!"vc incremental: {if inc then (if incScan then "on (scan)" else if memFun then "on (event-driven)" else "on (event-driven, memories as tables)") else if incOn then "off (not well-ordered)" else "off"}"
-        -- the steps of `ResidualInc.runEv` (or `runInc`, inc:scan): the first (also the first
-        -- after a checkpoint) full, the others from the last step's environment (`env`, updated
-        -- in place); the fanout table built once
-        let fan := if inc && !incScan then ResidualInc.fanout R else #[]
-        if inc && !incScan && !memFun then
-          -- memories as tables (`ResidualFlat.runEvF`): no closure chains, so automatic
-          -- compaction is skipped; an explicit compact:<K> still compacts
-          let depth := fun (k : Nat) => (D.memories[k]?.map (·.depth)).getD 0
-          let compactF := if compactAuto then 0 else compactK
-          let mut sF := ResidualFlat.ofState depth s
-          let mut envF : ResidualFlat.SlotEnvF := #[]
-          let mut compactions := 0
-          for k in List.range' start cycles do
-            if ckptAt.any (·.1 == k) then saveAt k (ResidualFlat.absS sF)
-            if compactF > 0 && k > start && (k - start) % compactF == 0 then
-              sF := ResidualFlat.ofState depth (Ckpt.restore (Ckpt.save D hash k #[] (ResidualFlat.absS sF)))
-              compactions := compactions + 1
-            let e := edgesAt D third sched k
-            let i := tab.inputAt k
-            envF := if k == start then ResidualFlat.fullEnvF R i sF else ResidualFlat.evEnvF R fan envF i sF
-            let r := ResidualFlat.stepOfEnvF R envF e sF
-            IO.println s!"STEP {k} {" ".intercalate (r.1.toList.map (fun o => toString (bv_uint o)))}"
-            sF := r.2
-          saveAt (start + cycles) (ResidualFlat.absS sF)
-          if compactF > 0 then
-            (← IO.getStdout).flush  -- after every STEP line, also when both go to one file
-            IO.eprintln s!"compactions {compactions} (every {compactF} cycles)"
-          return 0
-        let mut env : SlotEnv := #[]
-        let mut compactions := 0
-        for k in List.range' start cycles do
-          saveAt k s
-          if compactK > 0 && k > start && (k - start) % compactK == 0 then
-            s := Ckpt.restore (Ckpt.save D hash k #[] s)
-            compactions := compactions + 1
-          let e := edgesAt D third sched k
-          let i := tab.inputAt k
-          let r ← if !inc then pure (denoteResidual R e i s)
-            else if k == start then do
-              let env0 := ResidualInc.fullEnv R i s
-              env := env0
-              pure (ResidualInc.stepOfEnv R env0 e s)
-            else do
-              let p := if incScan then ResidualInc.incStep R env e i s
-                else ResidualInc.evStep R fan env e i s
-              env := p.2
-              pure p.1
-          IO.println s!"STEP {k} {" ".intercalate (r.outputs.toList.map (fun o => toString (bv_uint o)))}"
-          s := r.nextState
-        saveAt (start + cycles) s
-        if compactK > 0 then
-          (← IO.getStdout).flush  -- after every STEP line, also when both go to one file
-          IO.eprintln s!"compactions {compactions} (every {compactK} cycles{if compactAuto then ", automatic" else ""})"
-        return 0
-    -- `directStep` is proved equal to `interpretDesign` on every input it
-    -- accepts (`directStep_correct`; it refuses a certificate or runtime shape
-    -- outside the checked fragment instead of stepping it). Executing
-    -- `interpretDesign` itself is exponential in the number of steps on a
-    -- design with a memory: measured on a 16x4 register file, 7 s for 10
-    -- steps and about 2.3x per extra step, against 0.6 s for 200 steps here.
-    -- `directStep` checks the certificate (`checkDesign`) and then the step's
-    -- shapes; the certificate check reads only the certificate, so it runs once
-    -- here, and each step runs `directStepChecked`, which is `directStep` on
-    -- every step once the check has passed (`directStepChecked_eq`). A refused
-    -- certificate is reported at the first step, as `directStep` reports it.
-    -- Each step runs the STAGED form (`Compiler/DirectStaged`): the design is prepared once
-    -- (every node specialized, constants folded), and `Staged.stepChecked_eq` proves the staged
-    -- step equal to `directStepChecked` for a certificate `checkDesign` accepts.
-    match Compiler.Direct.checkDesign D with
+          for n in sel.notes do IO.eprintln n
+        return none
+      traceRun knobs.route.name D (TraceSim.ofEngine D sel.engine sel.autoCompact atStart) targs
     | .error e =>
-      if cycles > 0 then
-        IO.eprintln s!"step {start}: refused: {e.render}"
-        return 1
-      saveAt start s
-      return 0
-    | .ok _ =>
-      let P := Compiler.Staged.prepare D
-      let mut compactions := 0
-      for k in List.range' start cycles do
-        saveAt k s
-        if compactK > 0 && k > start && (k - start) % compactK == 0 then
-          s := Ckpt.restore (Ckpt.save D hash k #[] s)
-          compactions := compactions + 1
-        let r ← match Compiler.Staged.stepChecked P (edgesAt D third sched k) (tab.inputAt k) s with
-          | .ok r => pure r
-          | .error e => do IO.eprintln s!"step {k}: refused: {e.render}"; return 1
-        IO.println s!"STEP {k} {" ".intercalate (r.outputs.toList.map (fun o => toString (bv_uint o)))}"
-        s := r.nextState
-      saveAt (start + cycles) s
-      if compactK > 0 then
-        (← IO.getStdout).flush  -- after every STEP line, also when both go to one file
-        IO.eprintln s!"compactions {compactions} (every {compactK} cycles{if compactAuto then ", automatic" else ""})"
-      return 0
+      -- the route refuses the design: ir reports it at the first cycle (a run of 0 cycles still
+      -- writes the checkpoints due at its start), vc and the others at once
+      let atStart (cycles start : Nat) (saveStart : IO Unit) : IO (Option UInt32) := do
+        match e.route with
+        | .ir =>
+          if cycles > 0 then
+            IO.eprintln s!"step {start}: refused: {e.detail}"
+            return some 1
+          saveStart
+          return some 0
+        | .vc =>
+          IO.eprintln s!"compileDesign refused: {e.detail}"
+          return some 1
+        | _ =>
+          IO.eprintln e.message
+          return some 1
+      traceRun knobs.route.name D (TraceSim.ofEngine D (refEngine D) true atStart) targs
   | _ =>
-    IO.eprintln "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third] [init:reset|init:zero] [route:ir|route:vc] [opt:off] [opt:stats] [inc:off|inc:scan] [mem:fun] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>] [compact:<cycles>]"
+    IO.eprintln usage
     return 2

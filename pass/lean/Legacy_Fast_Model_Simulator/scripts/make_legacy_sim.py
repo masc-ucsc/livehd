@@ -51,8 +51,25 @@ every clock fires on every cycle. With --stim the driver takes an optional
 second argument, an `edges v1` schedule -- `at <cycle> <b0> <b1> ...`, one bit
 per clock ordinal, unlisted cycles fire every clock -- the file cert_trace reads
 with `edges:file:<path>`.
+
+--trace writes ONE file, <Top>_LegacyTrace.lean: the model, then a driver that takes
+cert_trace's arguments and checkpoints (pass/lean/tools/HDLProof/Run/Trace.lean, traceRun):
+
+    <exe> <cert.dcert> <cycles> <stim> [edges:all|edges:third|edges:file:<path>]
+          [init:reset|init:zero] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]
+
+The certificate is the one the model was emitted with: it gives the input widths cert_trace
+uses, the design hash and the ordinals of `lhdcert-ckpt v1` checkpoints. The model keeps its own
+state record; a checkpoint converts it by certificate ordinal (each flop `st_<name>` and memory
+`st_<name>` of the certificate's `_io.json`, --io, default `<Top>_io.json` beside the model).
+A name the record lacks, a width that differs, or a state field no certificate flop or memory
+names is refused: the checkpoint would not hold the whole state. A restored memory is a table
+of its words below its depth, built once, and its default past them. A model with one clock
+domain has no quiet cycle: a schedule in which its clock does not fire is refused. Its memories
+are closures, one layer per write, so the driver compacts as cert_trace does. Build it with
+build-opt.sh and EXTRA_MODULES=Translation/LegacyFast (--build ROOT does that).
 """
-import argparse, pathlib, re, sys
+import argparse, json, os, pathlib, re, subprocess, sys
 
 
 def bool_fields(text: str, struct: str) -> list[str]:
@@ -97,6 +114,14 @@ def main() -> int:
     ap.add_argument("--stim", action="store_true",
                     help="read a `stim v1` file named on the driver's command line and print "
                          "cert_trace's `STEP k <outputs>` lines")
+    ap.add_argument("--trace", action="store_true",
+                    help="one file, the model and a driver with cert_trace's arguments and "
+                         "lhdcert-ckpt v1 checkpoints (see the module docstring)")
+    ap.add_argument("--io", default=None,
+                    help="--trace: the certificate's _io.json (default <Top>_io.json beside the model)")
+    ap.add_argument("--build", default="",
+                    help="--trace: build the driver with build-opt.sh into this ROOT")
+    ap.add_argument("--opt", default="-O2")
     ap.add_argument("--module-prefix", default="",
                     help="lake library the design module sits in, e.g. LegacySims; "
                          "with it the driver imports <prefix>.<Top>_Lgraph so `lake build` "
@@ -126,6 +151,8 @@ def main() -> int:
     if not ins or not outs:
         print(f"{src}: could not parse {top}_in/{top}_out", file=sys.stderr)
         return 2
+    if a.trace:
+        return trace_driver(a, src, text, top, ins, outs, st is not None)
 
     dst = pathlib.Path(a.out) if a.out else src.parent
     dst.mkdir(parents=True, exist_ok=True)
@@ -307,6 +334,206 @@ def main (args : List String) : IO UInt32 := do
         print("        toolchain the proofs still stand but codegen fails.")
         print("        Very wide records may also need `set_option maxRecDepth` and")
         print("        `set_option maxHeartbeats 0`.")
+    return 0
+
+
+LEAN_RESERVED = {"at", "by", "do", "else", "end", "fun", "have", "if", "in", "let", "match", "namespace",
+                 "open", "section", "show", "then", "theorem", "def", "where", "with", "structure",
+                 "class", "instance", "deriving", "mut", "for", "return", "from", "import", "variable",
+                 "universe", "axiom", "example", "abbrev", "inductive", "macro", "syntax", "local",
+                 "private", "protected", "partial", "unsafe", "noncomputable", "calc", "suffices",
+                 "obtain", "this", "Type", "Prop", "Sort"}
+
+
+def sanitize_lean(name: str) -> str:
+    """The emitter's `sanitize_lean` (pass/lean/Exporter/Frontend/lean_format.cpp)."""
+    out = "".join(c if (c.isascii() and (c.isalnum() or c == "_")) else "".join(f"_x{b:02x}_" for b in c.encode())
+                  for c in name)
+    if not out:
+        out = "id"
+    if out[0].isdigit():
+        out = "id_" + out
+    if out in LEAN_RESERVED:
+        out = "id_" + out
+    return out
+
+
+def mem_fields(text: str, struct: str) -> dict:
+    """{field: (aw, dw)} for the memory fields `(BitVec aw -> BitVec dw)` of `<struct>`."""
+    m = re.search(r"^structure %s where$" % re.escape(struct), text, re.M)
+    out = {}
+    if not m:
+        return out
+    for line in text[m.end():].split("\n")[1:]:
+        if line.startswith("deriving") or (line and not line.startswith("  ")):
+            break
+        f = re.match(r"\s+(\w+)\s*:\s*\(BitVec\s+(\d+)\s*->\s*BitVec\s+(\d+)\)\s*$", line)
+        if f:
+            out[f.group(1)] = (int(f.group(2)), int(f.group(3)))
+    return out
+
+
+def trace_driver(a, src, text, top, ins, outs, stateful) -> int:
+    io_path = pathlib.Path(a.io) if a.io else src.parent / f"{top}_io.json"
+    try:
+        io = json.loads(io_path.read_text())
+    except (OSError, ValueError) as e:
+        print(f"{io_path}: {e}", file=sys.stderr)
+        return 2
+    cflops = sorted(io.get("flops", []), key=lambda f: f["ordinal"])
+    cmems = sorted(io.get("memories", []), key=lambda m: m["ordinal"])
+    sflops = dict(fields(text, f"{top}_state"))
+    smems = mem_fields(text, f"{top}_state")
+    errs, flop_map, mem_map = [], [], []
+    for f in cflops:
+        cands = [f"st_{sanitize_lean(f['name'])}", f"st_id_{sanitize_lean(f['name'])}"]
+        fld = next((c for c in cands if c in sflops), None)
+        if fld is None:
+            errs.append(f"flop {f['ordinal']} `{f['name']}`: no state field {cands[0]}")
+        elif sflops[fld] != f["width"]:
+            errs.append(f"flop {f['ordinal']} `{f['name']}`: field {fld} is {sflops[fld]} bits, the certificate's {f['width']}")
+        else:
+            flop_map.append((f["ordinal"], fld, f["width"]))
+    for m in cmems:
+        cands = [f"st_{sanitize_lean(m['name'])}", f"st_id_{sanitize_lean(m['name'])}"]
+        fld = next((c for c in cands if c in smems), None)
+        if fld is None:
+            errs.append(f"memory {m['ordinal']} `{m['name']}`: no state field {cands[0]}")
+        elif smems[fld] != (m["aw"], m["dw"]):
+            errs.append(f"memory {m['ordinal']} `{m['name']}`: field {fld} is {smems[fld]}, the certificate's ({m['aw']}, {m['dw']})")
+        else:
+            mem_map.append((m["ordinal"], fld, m["aw"], m["dw"]))
+    if [o for o, _, _ in flop_map] != list(range(len(flop_map))) or \
+       [o for o, _, _, _ in mem_map] != list(range(len(mem_map))):
+        errs.append("the certificate's flop or memory ordinals are not 0, 1, 2, ...")
+    used = {f for _, f, _ in flop_map} | {f for _, f, _, _ in mem_map}
+    for fld in list(sflops) + list(smems):
+        if fld not in used:
+            errs.append(f"state field {fld} holds no certificate flop or memory")
+    if errs:
+        print(f"{src}: --trace refused: the checkpoint would not hold the whole state", file=sys.stderr)
+        for e in errs:
+            print(f"  {e}", file=sys.stderr)
+        return 2
+    edges = bool_fields(text, f"{top}_edges")
+    # the model, its imports first; OpBridge (Mathlib) becomes SemanticPrimitives when unused
+    lines = text.split("\n")
+    model_imports = [l for l in lines if l.startswith("import ")]
+    body = "\n".join(l for l in lines if not l.startswith("import "))
+    if re.search(r"\bOpBridge\.", body) is None:
+        model_imports = ["import LeanSemanticPrimitives.SemanticPrimitives" if "OpBridge" in l else l
+                         for l in model_imports]
+        body = body.replace("\nopen OpBridge\n", "\n", 1)
+    if any("OpBridge" in l or "Mathlib" in l for l in model_imports):
+        print(f"{src}: --trace refused: the model uses OpBridge (Mathlib), which build-opt.sh does not build",
+              file=sys.stderr)
+        return 2
+    imports = list(dict.fromkeys(model_imports + ["import HDLProof.Run.Trace",
+                                                  "import LeanSemanticPrimitives.Compiler.CertIORoute"]))
+    state_ty = f"{top}_state" if stateful else "Unit"
+    init_reset = f"{top}_initState" if stateful else "()"
+    init_zero = f"(default : {top}_state)" if stateful else "()"
+    flops_v = ", ".join(f"mk_bv {w} ((s.{fld}).toNat : Int)" for _, fld, w in flop_map)
+    mems_v = ", ".join(f"memImage (D.memories[{k}]!) s.{fld}" for k, fld, _, _ in mem_map)
+    restore_fields = ",\n    ".join(
+        [f"{fld} := BitVec.ofNat {w} (c.flops[{k}]!).2" for k, fld, w in flop_map] +
+        [f"{fld} := tabRead (memTab {dw} c.mems[{k}]!) (BitVec.ofNat {dw} c.mems[{k}]!.dflt)" for k, fld, _, dw in mem_map])
+    restore_body = (f"{{ ({top}_initState) with\n    {restore_fields} }}" if stateful and restore_fields
+                    else init_reset)
+    in_v = ",\n    ".join(f"{n} := BitVec.ofNat {w} (bv_uint (i.getD {k} (mk_bv 0 0))).toNat" for k, (n, w) in enumerate(ins))
+    out_v = ", ".join(f"mk_bv {w} ((o.{n}).toNat : Int)" for n, w in outs)
+    if not stateful:
+        step_body = f"  .ok (outs ({top}_comb (mkIn i)), s)"
+    elif edges:
+        ev = ", ".join(f"{e} := e.getD {k} true" for k, e in enumerate(edges))
+        step_body = f"  let (s', o) := {top}_step {{ {ev} }} (mkIn i) s\n  .ok (outs o, s')"
+    else:
+        step_body = (f"  if e.all id then\n    let (s', o) := {top}_step (mkIn i) s\n    .ok (outs o, s')\n"
+                     f"  else .error \"this legacy model has one clock domain and no quiet cycle\"")
+    driver = f'''
+/-! ## The trace driver (make_legacy_sim.py --trace): cert_trace's arguments and checkpoints -/
+
+set_option maxRecDepth 100000
+set_option maxHeartbeats 0
+
+namespace {top}_LegacyTrace
+open {top}_Lgraph Compiler
+
+/-- A memory restored from a checkpoint: its words below its depth, a table built once, and the
+default past them. -/
+@[noinline] def tabRead {{aw dw : Nat}} (t : Array (BitVec dw)) (dflt : BitVec dw) (a : BitVec aw) :
+    BitVec dw :=
+  if h : a.toNat < t.size then t[a.toNat] else dflt
+
+def memTab (dw : Nat) (m : Ckpt.MemCk) : Array (BitVec dw) := (Ckpt.memTable m).map (BitVec.ofNat dw)
+
+/-- A model memory as a reference image: its word at every address the model has, the
+certificate's power-on image at any other (where every route keeps it). -/
+def memImage {{aw dw : Nat}} (md : MemoryDesc) (f : BitVec aw → BitVec dw) : Int → BV :=
+  fun a => if 0 ≤ a ∧ a < 2 ^ aw then mk_bv dw ((f (BitVec.ofNat aw a.toNat)).toNat : Int) else md.powerOnImg a
+
+/-- The state a checkpoint is taken of, by certificate ordinal. -/
+def view (D : DesignCert) (s : {state_ty}) : RuntimeState :=
+  {{ flops := #[{flops_v}], mems := #[{mems_v}] }}
+
+/-- A checkpoint `Ckpt.validate` accepted, as the model's state. -/
+def restore (c : Ckpt.Ckpt) : {state_ty} :=
+  {restore_body}
+
+def mkIn (i : RuntimeInput) : {top}_in := {{
+    {in_v} }}
+
+def outs (o : {top}_out) : Array BV := #[{out_v}]
+
+def step (e : ClockEdges) (i : RuntimeInput) (s : {state_ty}) : Except String (Array BV × {state_ty}) :=
+{step_body}
+
+end {top}_LegacyTrace
+
+open {top}_Lgraph in
+def main (args : List String) : IO UInt32 := do
+  match args with
+  | cert :: rest =>
+    let D ← match Compiler.CertIO.admitAny (← IO.FS.readBinFile cert) with
+      | .ok (_, D) => pure D
+      | .error e => do IO.eprintln s!"{{cert}}: {{e}}"; return 2
+    unless D.flops.size == {len(flop_map)} && D.memories.size == {len(mem_map)} &&
+        D.outputs.size == {len(outs)} do
+      IO.eprintln s!"{{cert}}: not the certificate this model was emitted with: {{D.flops.size}} flops, \
+{{D.memories.size}} memories, {{D.outputs.size}} outputs (the model: {len(flop_map)}, {len(mem_map)}, {len(outs)})"
+      return 2
+    HDLProof.Run.traceRun "legacy" D
+      {{ init := fun z => if z then {init_zero} else {init_reset}
+        step := {top}_LegacyTrace.step
+        view := {top}_LegacyTrace.view D
+        restore := {top}_LegacyTrace.restore
+        -- the model's memories are closures, one layer per write: compaction replaces the
+        -- state by its restored checkpoint (a table per memory), as cert_trace does
+        compact := some fun hash k s =>
+          {top}_LegacyTrace.restore (Compiler.Ckpt.save D hash k #[] ({top}_LegacyTrace.view D s)) }} rest
+  | [] =>
+    IO.eprintln "usage: <legacy trace> <cert.dcert> <cycles> <stim> [edges:all|edges:third|edges:file:<path>] \
+[init:reset|init:zero] [ckpt-in:<file>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]"
+    return 2
+'''
+    head = ("-- GENERATED by pass/lean/Legacy_Fast_Model_Simulator/scripts/make_legacy_sim.py --trace\n"
+            f"-- The legacy fast model {top}_Lgraph ({src.name}), then its trace driver.\n")
+    dst = pathlib.Path(a.out) if a.out else src.parent
+    dst.mkdir(parents=True, exist_ok=True)
+    p = dst / f"{top}_LegacyTrace.lean"
+    p.write_text(head + "\n".join(imports) + "\n" + body.rstrip() + "\n" + driver)
+    print(f"wrote {p}")
+    print(f"  top={top} flops={len(flop_map)} memories={len(mem_map)} inputs={len(ins)} outputs={len(outs)} "
+          f"clock_domains={max(1, len(edges))}")
+    if a.build:
+        build_opt = pathlib.Path(__file__).resolve().parents[4] / "formal/lean/Futamura_Projection_Scripts/build-opt.sh"
+        env = dict(os.environ, EXTRA_MODULES="Translation/LegacyFast", OPT=a.opt,
+                   ROOT=str(pathlib.Path(a.build).resolve()))
+        r = subprocess.run(["bash", str(build_opt), str(p.resolve())], cwd=build_opt.parent.parent, env=env)
+        if r.returncode != 0:
+            print("make_legacy_sim: build failed", file=sys.stderr)
+            return 1
+        print(f"built {pathlib.Path(a.build).resolve() / 'nat' / p.stem}")
     return 0
 
 

@@ -36,6 +36,11 @@ ROOTS=(
   LeanSemanticPrimitives.Compiler.VcEngine
   # the direct simulator's small examples
   LeanSemanticPrimitives.Compiler.DirectSim
+  # translation validation's reifier (a meta-program; the per-design TV drivers use it)
+  LeanSemanticPrimitives.Compiler.ReifyGen
+  # the legacy models' fast operators (the per-design legacy drivers import it; interpreted runs
+  # read it from .olean-dev)
+  LeanSemanticPrimitives.Translation.LegacyFast
   # fp: the memory route's variants, residual IO and the drivers' shared runner support
   LeanSemanticPrimitives.Projection.MemVariantSim
   LeanSemanticPrimitives.Projection.ResidualIO
@@ -63,6 +68,8 @@ ROOTS=(
   HDLProof.Run.Sound
   HDLProof.Run.Vcd
   HDLProof.Run.Engine
+  # cert_trace's open-loop trace for a step given as a function (per-design TV drivers)
+  HDLProof.Run.Trace
   # the tools' audit: fails the build on a non-standard axiom
   HDLProof.Check.Audit
 )

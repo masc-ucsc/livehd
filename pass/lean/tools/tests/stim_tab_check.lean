@@ -8,8 +8,8 @@ Tests for the stimulus readers' speed changes (`HDLProof/Run/Stim.lean`).
 Both are checked on pseudo-random stimuli over designs whose input ordinals have gaps, repeats
 with other widths (the first declaration wins), and a reset ordinal no `input` source declares
 (width 1); the stimuli repeat inputs within a cycle and across `in` lines (the first line
-wins), name ordinals past the last input, and use negative and wide values. cert_trace keeps a
-copy of both; keep them equal.
+wins), name ordinals past the last input, and use negative and wide values. Every trace driver
+(cert_trace, cert_run, the per-design TV and legacy drivers) reads stimuli through these.
 
 Prints `PASS stim_tab: <n> cases` or one `FAIL` line per case that went wrong.
 -/

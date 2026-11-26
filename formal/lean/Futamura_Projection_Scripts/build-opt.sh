@@ -8,6 +8,10 @@
 #    the simulation drivers: ../../pass/lean/tools/sim/cert_run.lean lhd_ckpt.lean)
 # OPT may carry several flags, e.g. OPT="-O2 -g -fno-omit-frame-pointer"
 # for a profiling build that keeps -O2 but can be unwound.
+# EXTRA_MODULES="Compiler/ReifyGen" builds further LeanSemanticPrimitives modules after the
+# list below and links them into THIS invocation's probes only (a per-design TV driver,
+# pass/lean/tools/scripts/make_tv_sim.py: ReifyGen imports Lean, whose front end such a
+# binary then carries). Unset, nothing changes.
 #
 # Incremental: a module is rebuilt only when its object is missing or older than
 # its source, its .olean or its .c (an interrupted build), or when a module it
@@ -61,9 +65,15 @@ ROOTS=(
   HDLProof.Run.Sound
   HDLProof.Run.Vcd
   HDLProof.Run.Engine
+  # cert_trace's open-loop trace for a step given as a function (per-design TV drivers)
+  HDLProof.Run.Trace
 )
 [ $# -ge 1 ] || { echo "usage: OPT=.. ROOT=.. build-opt.sh probe.lean [probe.lean ...]" >&2; exit 2; }
-GEN=$(python3 Futamura_Projection_Scripts/lean_modules.py "${ROOTS[@]}" "$@") \
+# EXTRA_MODULES (paths under LeanSemanticPrimitives/) are roots of this invocation only, so they
+# and whatever they import are built and linked into these probes
+EXTRA_ROOTS=()
+for m in ${EXTRA_MODULES:-}; do EXTRA_ROOTS+=("LeanSemanticPrimitives.${m//\//.}"); done
+GEN=$(python3 Futamura_Projection_Scripts/lean_modules.py "${ROOTS[@]}" "${EXTRA_ROOTS[@]}" "$@") \
   || { echo "the module list could not be made (above)" >&2; exit 1; }
 MODULES=(); TOOL_MODULES=()
 while IFS= read -r m; do

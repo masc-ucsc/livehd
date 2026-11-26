@@ -31,9 +31,18 @@ set -euo pipefail
 #                           end; a run resumed from each route's cycle-9 checkpoint on each
 #                           route prints the full run's lines from cycle 9 on and the same
 #                           final checkpoint; a refused checkpoint stops both drivers
+#   tv and legacy           the per-design routes (scripts/make_tv_sim.py; make_legacy_sim.py
+#                           --trace on the legacy model lhd emits from the same LGraph), on pw
+#                           and tc: the same trace and byte-identical checkpoints as IR; each
+#                           resumes every other route's cycle-9 checkpoint (TV: ir, vc, fp, tv)
+#                           to the same lines and final checkpoint, and IR resumes theirs; the
+#                           one-clock legacy model refuses a quiet cycle; legacy with compact:3
+#                           prints the same lines and final checkpoint (pw is compared with
+#                           IR under edges:all, which it runs; tc under the two-clock schedule)
 #
-# CK_NAT=<dir with native lhd_ckpt, cert_trace and dcert2_memroute> uses them; otherwise the
-# drivers run interpreted against formal/lean/.olean-dev (build it with
+# CK_NAT=<dir with native lhd_ckpt, cert_trace and dcert2_memroute> uses them, and the TV and
+# legacy drivers are built there with build-opt.sh (ROOT = CK_NAT's parent); otherwise every
+# driver runs interpreted against formal/lean/.olean-dev (build it with
 # formal/lean/.build-proj.sh). The Lean toolchain pin lives in formal/lean.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -293,6 +302,87 @@ for d in pw tc; do
     done
   done
 done
+# 5. the per-design routes: TV (make_tv_sim.py) and legacy (make_legacy_sim.py --trace)
+P=$OUT/perdesign; mkdir -p "$P"
+# pd <name> <generated .lean> <extra modules> args... -> RC, LOG: the per-design driver, native or interpreted
+pd() {
+  local name=$1 src=$2 extra=$3; shift 3
+  LOG="$OUT/run_$(( ++N )).log"
+  if [[ -n "$CK_NAT" ]]; then
+    "$CK_NAT/$name" "$@" > "$LOG" 2>&1 && RC=0 || RC=$?
+  else
+    (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$src" "$@") > "$LOG" 2>&1 && RC=0 || RC=$?
+  fi
+}
+pd_build() { # <generated .lean> <extra modules>
+  [[ -n "$CK_NAT" ]] || return 0
+  (cd "$ROOT/formal/lean" && EXTRA_MODULES="$2" OPT=-O2 ROOT="$(dirname "$CK_NAT")" \
+     bash Futamura_Projection_Scripts/build-opt.sh "$1") > "$P/$(basename "$1").build.log" 2>&1 \
+    || { tail -20 "$P/$(basename "$1").build.log"; echo "FAIL: build $1"; exit 1; }
+}
+for d in pw tc; do
+  cert="$OUT/${d}_lean/$d.dcert"
+  if [[ $d == pw ]]; then ctE="edges:third"; lgE="edges:all"; else ctE="edges:file:$R/tc.edges"; lgE="$ctE"; fi
+  # TV
+  python3 -I "$ROOT/pass/lean/tools/scripts/make_tv_sim.py" "$cert" --out "$P/tv_$d" > "$P/tv_$d.gen.log" 2>&1 \
+    || { cat "$P/tv_$d.gen.log"; echo "FAIL: make_tv_sim.py $d"; exit 1; }
+  TVS="$P/tv_$d/${d}TvSim.lean"; pd_build "$TVS" Compiler/ReifyGen
+  pd "${d}TvSim" "$TVS" "" $CYC "$R/$d.stim" $ctE ckpt-at:$K:"$R/$d.tv.$K.ckpt" ckpt-out:"$R/$d.tv.end.ckpt"
+  [[ $RC == 0 ]] || { cat "$LOG"; echo "FAIL: tv $d"; exit 1; }
+  steps "$LOG" "$R/$d.tv.txt"
+  cmp -s "$R/$d.ir.txt" "$R/$d.tv.txt" || { diff "$R/$d.ir.txt" "$R/$d.tv.txt" | head; echo "FAIL: $d: tv trace"; exit 1; }
+  for c in $K end; do
+    cmp -s "$R/$d.ir.$c.ckpt" "$R/$d.tv.$c.ckpt" || { echo "FAIL: $d: tv checkpoint at $c differs from ir's"; exit 1; }
+  done
+  for a in ir vc fp tv; do
+    pd "${d}TvSim" "$TVS" "" $((CYC - K)) "$R/$d.stim" $ctE ckpt-in:"$R/$d.$a.$K.ckpt" ckpt-out:"$R/$d.r.$a.tv.ckpt"
+    [[ $RC == 0 ]] || { cat "$LOG"; echo "FAIL: $d: resume $a on tv"; exit 1; }
+    steps "$LOG" "$R/$d.r.$a.tv.txt"
+    cmp -s "$R/$d.r.$a.tv.txt" "$R/$d.tail.txt" && cmp -s "$R/$d.r.$a.tv.ckpt" "$R/$d.ir.end.ckpt" \
+      || { echo "FAIL: $d: resume $a on tv"; exit 1; }
+  done
+  ct "$cert" $((CYC - K)) "$R/$d.stim" $ctE route:ir ckpt-in:"$R/$d.tv.$K.ckpt" ckpt-out:"$R/$d.r.tv.ir.ckpt"
+  steps "$LOG" "$R/$d.r.tv.ir.txt"
+  cmp -s "$R/$d.r.tv.ir.txt" "$R/$d.tail.txt" && cmp -s "$R/$d.r.tv.ir.ckpt" "$R/$d.ir.end.ckpt" \
+    || { echo "FAIL: $d: resume tv on ir"; exit 1; }
+  # legacy: the model lhd emits from the same LGraph, with the certificate's names
+  (cd "$OUT" && "$LHD" compile "lg:${d}_lg" --top "$d" --workdir "$P/${d}_legw" --emit-dir "lean:$P/${d}_leg" \
+     --set formal.lean.emit_cert=false > "$P/$d.legacy.log" 2>&1) || { tail -5 "$P/$d.legacy.log"; echo "FAIL: legacy model $d"; exit 1; }
+  python3 -I "$ROOT/pass/lean/Legacy_Fast_Model_Simulator/scripts/make_legacy_sim.py" "$P/${d}_leg/${d}_Lgraph.lean" \
+     --trace --io "$OUT/${d}_lean/${d}_io.json" --out "$P/lg_$d" > "$P/lg_$d.gen.log" 2>&1 \
+    || { cat "$P/lg_$d.gen.log"; echo "FAIL: make_legacy_sim.py --trace $d"; exit 1; }
+  LGS="$P/lg_$d/${d}_LegacyTrace.lean"; pd_build "$LGS" Translation/LegacyFast
+  # the IR reference under the legacy model's schedule (pw: every edge fires)
+  ct "$cert" $CYC "$R/$d.stim" $lgE route:ir ckpt-at:$K:"$R/$d.irl.$K.ckpt" ckpt-out:"$R/$d.irl.end.ckpt"
+  [[ $RC == 0 ]] || { cat "$LOG"; echo "FAIL: cert_trace $d $lgE"; exit 1; }
+  steps "$LOG" "$R/$d.irl.txt"
+  pd "${d}_LegacyTrace" "$LGS" "" "$cert" $CYC "$R/$d.stim" $lgE ckpt-at:$K:"$R/$d.lg.$K.ckpt" ckpt-out:"$R/$d.lg.end.ckpt"
+  [[ $RC == 0 ]] || { cat "$LOG"; echo "FAIL: legacy $d"; exit 1; }
+  steps "$LOG" "$R/$d.lg.txt"
+  cmp -s "$R/$d.irl.txt" "$R/$d.lg.txt" || { diff "$R/$d.irl.txt" "$R/$d.lg.txt" | head; echo "FAIL: $d: legacy trace"; exit 1; }
+  for c in $K end; do
+    cmp -s "$R/$d.irl.$c.ckpt" "$R/$d.lg.$c.ckpt" || { echo "FAIL: $d: legacy checkpoint at $c differs from ir's"; exit 1; }
+  done
+  # compaction (the model's memories are closures): the same lines and final checkpoint
+  pd "${d}_LegacyTrace" "$LGS" "" "$cert" $CYC "$R/$d.stim" $lgE compact:3 ckpt-out:"$R/$d.lgc.end.ckpt"
+  [[ $RC == 0 ]] && grep -q '^compactions [1-9][0-9]* (every 3 cycles)$' "$LOG" \
+    || { cat "$LOG"; echo "FAIL: legacy $d compact:3"; exit 1; }
+  steps "$LOG" "$R/$d.lgc.txt"
+  cmp -s "$R/$d.lgc.txt" "$R/$d.lg.txt" && cmp -s "$R/$d.lgc.end.ckpt" "$R/$d.lg.end.ckpt" \
+    || { echo "FAIL: $d: legacy compact:3 changed the trace or the final checkpoint"; exit 1; }
+  sed -n "$((K + 1)),\$p" "$R/$d.irl.txt" > "$R/$d.ltail.txt"
+  pd "${d}_LegacyTrace" "$LGS" "" "$cert" $((CYC - K)) "$R/$d.stim" $lgE ckpt-in:"$R/$d.irl.$K.ckpt" ckpt-out:"$R/$d.r.ir.lg.ckpt"
+  steps "$LOG" "$R/$d.r.ir.lg.txt"
+  cmp -s "$R/$d.r.ir.lg.txt" "$R/$d.ltail.txt" && cmp -s "$R/$d.r.ir.lg.ckpt" "$R/$d.irl.end.ckpt" \
+    || { cat "$LOG"; echo "FAIL: $d: resume ir on legacy"; exit 1; }
+  ct "$cert" $((CYC - K)) "$R/$d.stim" $lgE route:ir ckpt-in:"$R/$d.lg.$K.ckpt" ckpt-out:"$R/$d.r.lg.ir.ckpt"
+  steps "$LOG" "$R/$d.r.lg.ir.txt"
+  cmp -s "$R/$d.r.lg.ir.txt" "$R/$d.ltail.txt" && cmp -s "$R/$d.r.lg.ir.ckpt" "$R/$d.irl.end.ckpt" \
+    || { echo "FAIL: $d: resume legacy on ir"; exit 1; }
+done
+pd pw_LegacyTrace "$P/lg_pw/pw_LegacyTrace.lean" "" "$PW" 5 "$R/pw.stim" edges:third
+[[ $RC == 1 ]] && grep -q 'no quiet cycle' "$LOG" || { cat "$LOG"; echo "FAIL: the one-clock legacy model ran a quiet cycle"; exit 1; }
+
 # a refused checkpoint stops both drivers; a cycle outside the run is a usage error
 ct "$PW" 5 "$R/pw.stim" ckpt-in:"$C/r_flop_value_sealed.ckpt"
 [[ $RC == 1 ]] && grep -q 'does not fit in 8 bits' "$LOG" || { cat "$LOG"; echo "FAIL: cert_trace accepted a refused checkpoint"; exit 1; }

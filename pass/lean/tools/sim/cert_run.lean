@@ -8,7 +8,7 @@ cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<p
          [max:<cycles>] [stop:<output>=<value>]
          [trace:<dir>] [vcd:<file>] [lockstep:<route>]
          [ckpt-at:<cycle>:<file>] [ckpt-out:<file>] [compact:<cycles>]
-         [inc:off|inc:scan] [mem:fun] [share:off] [ir:raw]
+         [inc:off|inc:scan] [mem:fun] [share:off] [loop:full] [ir:raw]
 ```
 
 A run steps the design cycle by cycle on a proved simulator (`route:ir`, the default; `vc`;
@@ -51,7 +51,9 @@ documents every option; in short:
 * The route runs as an engine (`HDLProof/Run/Engine`'s `EngineSelector`, from `Knobs`): ir staged, vc
   optimized and event-driven with its memories as tables, fp with shared tails. `inc:off` runs
   vc's full step every cycle (this driver's earlier vc step), `inc:scan` and `mem:fun` its other
-  modes, `share:off` fp without shared tails, `ir:raw` the unstaged direct step. Each cycle uses
+  modes, `share:off` fp without shared tails, `loop:full` fp's earlier step (the whole state converted
+  every cycle; by default fp keeps its encoded state, `Run/FpEngine`), `ir:raw` the unstaged direct
+  step. Each cycle uses
   the engine's state once (`cycleStep`: vc peeks with the guess, then takes one step), and the
   loop is a recursive function, so vc's environment and tables are updated in place.
 
@@ -73,7 +75,7 @@ def usage : String :=
   "       [route:ir|vc|ref|fp] [opt:off] [init:reset|init:zero] [ckpt-in:<file>]\n" ++
   "       [load:<image>[@<addr>][:mem<k>]] [vaddr] [word:<bytes>] [max:<cycles>] [stop:<output>=<value>]\n" ++
   "       [trace:<dir>] [vcd:<file>] [lockstep:<route>] [ckpt-at:<cycle>:<file>] [ckpt-out:<file>]\n" ++
-  "       [compact:<cycles>] [inc:off|inc:scan] [mem:fun] [share:off] [ir:raw]"
+  "       [compact:<cycles>] [inc:off|inc:scan] [mem:fun] [share:off] [loop:full] [ir:raw]"
 
 structure Opts where
   bind     : Option String := none
@@ -96,7 +98,8 @@ structure Opts where
   compact  : Nat := 0
   /-- no `compact:` option: compact every `autoCompactK` cycles when the run and design allow -/
   compactAuto : Bool := true
-  /-- the route's other knobs (`inc:`, `mem:`, `share:`, `ir:raw`); route and `opt:off` are above -/
+  /-- the route's other knobs (`inc:`, `mem:`, `share:`, `loop:full`, `ir:raw`); route and `opt:off`
+  are above -/
   knobs    : Knobs := {}
 
 /-- The period of automatic compaction, in cycles. Measured on the census designs: a
@@ -155,7 +158,7 @@ def parseOpts (args : List String) : Except String Opts := do
       match (drop "compact:").toNat? with
       | some n => o := { o with compact := n, compactAuto := false }
       | none => throw s!"bad {a}"
-    else if ["inc:", "mem:", "share:", "ir:"].any (fun (p : String) => a.startsWith p) then
+    else if ["inc:", "mem:", "share:", "loop:", "ir:"].any (fun (p : String) => a.startsWith p) then
       match o.knobs.apply? a with
       | some (.ok k) => o := { o with knobs := k }
       | some (.error e) => throw e

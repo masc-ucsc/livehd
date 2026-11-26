@@ -13,7 +13,7 @@ cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<p
          [max:<cycles>] [stop:<output>=<value>]
          [trace:<dir>] [vcd:<file>] [lockstep:<route>]
          [ckpt-at:<cycle>:<file>] [ckpt-out:<file>] [compact:<cycles>]
-         [inc:off|inc:scan] [mem:fun] [share:off] [ir:raw]
+         [inc:off|inc:scan] [mem:fun] [share:off] [loop:full] [ir:raw]
 ```
 
 ## Options
@@ -33,17 +33,24 @@ cert_run <cert> [bind:<file>] [stim:<file>] [edges:all|edges:third|edges:file:<p
   `inc:off` runs `vc`'s full step every cycle (this driver's step before engines), `inc:scan` the
   incremental step that visits every binding, `mem:fun` the event-driven step with memories as
   functions; `ir:raw` runs the unstaged direct step; `share:off` runs `fp` without shared tails.
+  `fp`'s engine keeps the residual's own state between cycles (`Run/FpEngine`: encoded, checked
+  once, only the outputs decoded); `loop:full` runs its earlier step, which converts the whole state
+  to the residual's and back every cycle.
   Every combination gives the same trace (`tests/engine_check.lean`).
 - `route:fp` runs the Futamura projection's residual, the route `dcert2_memroute` runs (the
   fused memory interpreter, plain writes admitted, the step with its list tails shared,
   `Projection/ShareTails`; `opt:off` runs the residual as specialized). The residual is
-  specialized and checked once, at the budget `dcert2_memroute auto auto` uses. Each step
-  converts the state to the residual's (`Ckpt.save`, then `CkptStateM.toStateM`: each memory a
-  table below its depth), checks the runtime policy and runs the residual. Its outputs are
-  `interpretDesign`'s and its state agrees with `interpretDesign`'s on every flop and on every
-  memory word below its depth (`Run/Sound.lean`: `fpStep_agree`, `runCycles_agree`;
-  `Run/Engine.lean`: `EngineSelector_fp_agree`, `EngineSelector_runCycles_fp`), so its traces and checkpoints are the other routes' (the selftest compares
-  them). It refuses a certificate the direct check, the address, depth, image-root or word
+  specialized and checked once, at the budget `dcert2_memroute auto auto` uses. The start state is
+  converted to the residual's once (`Ckpt.save`, then `CkptStateM.toStateM`: each memory a table
+  below its depth) and stays in the residual's encoding from then on (`Run/FpEngine`): each step
+  runs the residual on it, checks the runtime policy's size half (the state half holds for every
+  step's result) and decodes only the outputs; the state is decoded only for a checkpoint,
+  compaction or lockstep. Its outputs are `interpretDesign`'s and its state agrees with
+  `interpretDesign`'s on every flop and on every memory word below its depth
+  (`Run/FpEngine.lean`: `fpEncEngine_agree`; `Run/Sound.lean`: `runCycles_agree`;
+  `Run/Engine.lean`: `EngineSelector_fp_agree`, `EngineSelector_runCycles_fp`), so its traces and
+  checkpoints are the other routes' (the selftest compares them). `loop:full` runs the earlier
+  step, which converts the whole state and checks the whole policy every cycle (`fpStep_agree`). It refuses a certificate the direct check, the address, depth, image-root or word
   checks refuse, or one the memory route does not admit.
 - `bind:` adds a host: reset, constants, buses, memory, console, exit, registers, stop
   conditions.
