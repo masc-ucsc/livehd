@@ -1088,9 +1088,17 @@ protected:
   absl::flat_hash_map<std::string, size_t>                               synth_memo_;
   uint32_t                                                               next_synth_base_ = 0;
   std::map<std::string, prp_type_alias::Template>                        type_templates_;        // this file: file scope + live local ones
-  std::set<std::string>                                                  local_type_templates_;  // dropped when their construct ends
+  // Names of the local `type T<..>` templates, innermost last: each is dropped when the
+  // body that declares it ends (Pyrope has no shadowing, so nothing is restored).
+  std::vector<std::string>                                               local_type_templates_;
+  void                               pop_local_templates(size_t mark);
   std::map<std::string, std::string>                                     ast_import_bindings_;   // `const x = import("u")` inside the construct
-  std::map<std::string, std::shared_ptr<prp_type_alias::Unit_templates>> unit_templates_cache_;  // by resolved source path
+  struct Resolved_import {
+    std::string path;                       // empty: not found
+    size_t      candidate_size{0};          // the candidate spelling that resolved
+  };
+  mutable std::map<std::string, Resolved_import> import_path_cache_;  // by import spelling
+  mutable std::map<std::string, std::shared_ptr<prp_type_alias::Unit_templates>> unit_templates_cache_;  // by resolved source path
   int                                                                    type_alias_depth_ = 0;
   // The expansions applied inside the construct being lowered. A streamed lambda's
   // wrapper marker carries only a fingerprint of its SOURCE text, so the expansion

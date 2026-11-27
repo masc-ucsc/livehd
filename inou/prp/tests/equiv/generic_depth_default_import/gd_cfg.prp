@@ -2,3 +2,5 @@
 // and is discovered first, so gd_sub blocks in the first import round.
 pub comptime const pick_lo = true
 pub comptime const pick_hi = false
+
+pub const byteLane = (const width=8, const count=4)

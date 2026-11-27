@@ -1,0 +1,3 @@
+pub type Pair = (x:U8, y:U8)
+pub const initialPair:Pair = (y=19, x=11)
+pub comb next(x:U8) -> (y:U8) { y = x }

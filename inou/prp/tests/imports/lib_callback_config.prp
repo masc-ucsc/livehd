@@ -1,0 +1,4 @@
+pub mod applyMask<C>(x:U8) -> (y:U8@[0]) { y = x ^ C.mask }
+pub comb configure(factory=applyMask, mask=31) -> (cfg) {
+  cfg = (const factory=factory, const mask=mask)
+}

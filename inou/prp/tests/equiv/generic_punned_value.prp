@@ -1,0 +1,17 @@
+/*
+:name: generic_punned_value
+:type: equiv
+:verilog_top: generic_punned_value
+:pyrope_top: generic_punned_value
+*/
+comb sum(a, b) -> (v) { v = a + b }
+comb twice(n) -> (v) { v = n + n }
+
+// Both the name match and a positional call must survive specialization.
+mod add<b=5>(x:U8) -> (y:U8@[0]) {
+  comptime const k = sum(a=2, b)
+  y = (x + k + twice(b))#[0..+8]
+}
+pub mod generic_punned_value(x:U8) -> (y:U8@[0]) {
+  y = add<b=7>(x)
+}

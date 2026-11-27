@@ -3786,6 +3786,35 @@ std::shared_ptr<Bundle> eval_lnast_record(const std::shared_ptr<Lnast>& ln, std:
         ++count;
       }
     }
+    // Declaration defaults retain their source spelling. A dotted record
+    // selects a subtree of the namespace bound in the declaring file.
+    if (count == 0) {
+      if (const auto dot = target.find('.'); dot != std::string_view::npos && dot > 0 && dot + 1 < target.size()) {
+        if (auto base = eval_lnast_record(ln, target.substr(0, dot), depth + 1, registry)) {
+          auto field = base->get_bundle(bundle_path::of_string(target.substr(dot + 1)));
+          if (field && is_comptime_record_bundle(*field)) {
+            return field;
+          }
+        }
+        // During cross-file elaboration a namespace can be registered before
+        // its public values are published. Literal public records can already
+        // be resolved from the exporter's declaration.
+        if (registry) {
+          const auto bindings = ln->top_level_import_bindings();
+          const auto alias = bindings.find(target.substr(0, dot));
+          if (alias != bindings.end()) {
+            const auto source = registry->function_registry.find(alias->second);
+            if (source != registry->function_registry.end()) {
+              const auto member = target.substr(dot + 1);
+              const auto& pubs = source->second->get_pub_list();
+              if (std::any_of(pubs.begin(), pubs.end(), [&](const auto& p) { return p.kind == "value" && p.name == member; })) {
+                return eval_lnast_record(source->second, member, depth + 1, registry);
+              }
+            }
+          }
+        }
+      }
+    }
     if (count != 1 || writer.is_invalid()) {
       return nullptr;
     }
@@ -8840,7 +8869,12 @@ bool uPass_runner::try_inline_func_call() {
       saved_func_bindings.emplace_back(fname,
                                        it == func_param_bindings_.end() ? std::nullopt : std::optional<std::string>(it->second));
       func_param_bindings_[fname] = frame_portable_func_name(param_func[i], callee->get_top_module_name());
-      continue;  // function value — no width/value binding
+      // The body can also return the callback in a configuration record.
+      // Bind its lexical identity as a constant for tuple construction.
+      if (const auto target = lookup_callee(param_func[i])) {
+        symbol_table_.set(fname, *Dlop::from_string(target->get_top_module_name()));
+      }
+      continue;
     }
     const auto pname = upass::Lnast_manager::make_inlined_name(tag, e.name);
     const auto gbit  = e.type_name.empty() ? gbinds.end() : gbinds.find(e.type_name);
@@ -8905,6 +8939,9 @@ bool uPass_runner::try_inline_func_call() {
           gname,
           func_param_bindings_.count(gname) != 0u ? std::optional<std::string>(func_param_bindings_[gname]) : std::nullopt);
       func_param_bindings_[gname] = frame_portable_func_name(gb.func_name, callee->get_top_module_name());
+      if (const auto target = lookup_callee(gb.func_name)) {
+        symbol_table_.set(gname, *Dlop::from_string(target->get_top_module_name()));
+      }
       continue;
     }
     if (gb.const_record) {
@@ -10076,6 +10113,44 @@ void uPass_runner::copy_subtree_into(const std::shared_ptr<Lnast>& src, const Ln
                                      const absl::flat_hash_map<std::string, Generic_bind>* type_subst) const {
   const auto type = src->get_type(src_nid);
   Lnast_nid  newn;
+  // A bare generic actual still participates in name-based argument binding
+  // after specialization. Keep a named local for it, so both punning and the
+  // positional fallback see the same argument as they would before cloning.
+  if (type_subst != nullptr && Lnast_ntype::is_func_call(type)) {
+    const auto result = src->get_first_child(src_nid);
+    const auto callee = result.is_invalid() ? result : src->get_sibling_next(result);
+    absl::flat_hash_map<std::string, std::string> locals;
+    for (auto arg = callee.is_invalid() ? callee : src->get_sibling_next(callee); !arg.is_invalid();
+         arg = src->get_sibling_next(arg)) {
+      if (!Lnast_ntype::is_ref(src->get_type(arg))) {
+        continue;
+      }
+      const auto name = src->get_name(arg);
+      const auto it   = type_subst->find(name);
+      if (it == type_subst->end() || it->second.const_text.empty() || locals.contains(name)) {
+        continue;
+      }
+      const auto st    = dst->add_child(dst_parent, Lnast_ntype::create_store());
+      const auto local = absl::StrCat("__generic_actual_", st.get_class_index().value);
+      dst->add_child(st, Lnast_node::create_ref(local));
+      dst->add_child(st, Lnast_node::create_const(it->second.const_text));
+      dst->note_ssa_demoted(local, std::string(name));
+      locals.emplace(name, local);
+    }
+    if (!locals.empty()) {
+      const auto call = src->copy_node(src_nid, *dst, dst_parent);
+      for (auto c : src->children(src_nid)) {
+        if (c != result && c != callee && Lnast_ntype::is_ref(src->get_type(c))) {
+          if (const auto it = locals.find(src->get_name(c)); it != locals.end()) {
+            dst->add_child(call, Lnast_node::create_ref(it->second));
+            continue;
+          }
+        }
+        copy_subtree_into(src, c, dst, call, type_subst);
+      }
+      return;
+    }
+  }
   // The source replay of a rolled loop captures constant tuple fields by
   // qualified name. A tuple_get spells that same read with two operands.
   if (type_subst != nullptr && Lnast_ntype::is_tuple_get(type)) {
@@ -15520,7 +15595,7 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
     // A ref to THIS frame's own function-valued param (`apply_g<F=f>` inside
     // `outer(f)`, `s` is the frame-tagged `inlN_f`) forwards the function it is
     // bound to, exactly as func_actual_name does for a value-param `g(f=f)`.
-    // It is registered only in func_param_bindings_ (never as a value), so
+    // Its identity in func_param_bindings_ takes priority over the scalar binding, so
     // without this it fell through to a TYPE bind and the body's `F(v)` became
     // a call to an undefined `inlM_inlN_f`.
     if (const auto fb = func_param_bindings_.find(s); fb != func_param_bindings_.end()) {
@@ -15643,7 +15718,7 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
   // symbol table), then re-classify scalar/type/lambda defaults like an explicit
   // `<…>` argument.
   const auto lookup_callee_default_record = [&](std::string_view def_name) -> std::shared_ptr<Bundle> {
-    if (auto rec = eval_lnast_record(callee, def_name, 0)) {
+    if (auto rec = eval_lnast_record(callee, def_name, 0, registry_)) {
       return rec;
     }
     if (registry_ == nullptr) {
@@ -16545,6 +16620,10 @@ bool uPass_runner::gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& 
       // An ordinary runtime scalar in the caller shadows a library function
       // of the same spelling. Bind the value so inline expansion emits the
       // formal's driver, including for a call inside a conditional.
+      if (lm->unit_lnast()->io_meta().find(lm->current_raw_text())
+          || declared_typed_.contains(std::string(lm->current_text()))) {
+        return {};
+      }
       if (const auto k = value_kind_of(lm->current_node()); k == upass::Kind::integer || k == upass::Kind::boolean) {
         return {};
       }
@@ -17545,7 +17624,8 @@ bool uPass_runner::try_init_construction() {
   // reference does not match the declared type. The old "the named `ref self`
   // mod IS the constructor" sugar is gone — construct with a `T(...)` call or
   // an `init` method inside the type instead.
-  if (v_is_ref && !v_raw.empty() && !lm->unit_lnast()->io_meta().find(v_raw) && lookup_callee(v_raw)) {
+  if (v_is_ref && !v_raw.empty() && !declared_typed_.contains(v_text) && !lm->unit_lnast()->io_meta().find(v_raw)
+      && lookup_callee(v_raw)) {
     if (tn.empty()) {
       return false;  // untyped binding — a plain function-value alias, allowed
     }
@@ -20167,6 +20247,29 @@ bool uPass_runner::try_detuple_store() {
       }
       return true;
     }
+    // Imported tuple literals have no tuple_add in this unit. Their resolved
+    // data fields live in the symbol table under the original SSA reference.
+    const auto name = rest[0].get_name();
+    if (const auto values = try_bundle_fields(name); values && values->size() == split.fields.size()) {
+      std::vector<Lnast_node> leaves;
+      for (const auto& field : split.fields) {
+        const auto value = std::ranges::find(*values, field.name, &std::pair<std::string, Dlop>::first);
+        if (value == values->end() || value->second.is_nil() || value->second.has_unknowns()) {
+          break;
+        }
+        leaves.emplace_back(Lnast_node::create_const(value->second.to_pyrope()));
+      }
+      if (leaves.size() == split.fields.size()) {
+        for (std::size_t i = 0; i < leaves.size(); ++i) {
+          const auto& field = split.fields[i];
+          const auto leaf = var + "." + field.name;
+          (void)detuple_validate_scalar_store(leaf, field.type, leaves[i]);
+          write_leaf(leaf, leaves[i]);
+        }
+        split_it->second.whole_bound = true;
+        return true;
+      }
+    }
   }
 
   // A SCALAR assigned to a typed tuple with ONE field (`type Tone = (mut
@@ -20174,6 +20277,7 @@ bool uPass_runner::try_detuple_store() {
   // exception of the call naming rules (06-functions.md "Argument naming")
   // binds it to that field. A function reference stays an error (below).
   const bool rhs_is_function = rest.size() == 1 && rest[0].is_ref()
+                               && !declared_typed_.contains(std::string(rest[0].get_name()))
                                && !lm->unit_lnast()->io_meta().find(rest[0].get_name()) && lookup_callee(rest[0].get_name());
   if (rest.size() == 1 && split.fields.size() == 1 && split.fields.front().name.find('.') == std::string::npos
       && (rest[0].is_const() || (rest[0].is_ref() && !rhs_is_function))) {

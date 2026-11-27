@@ -1,0 +1,15 @@
+/*
+:name: type_alias_local_shadow
+:type: error
+:error: type alias `T` is already declared
+:help: give the alias another name
+*/
+
+// Pyrope has no shadowing: a local type alias cannot reuse a visible one.
+type T<W> = Unsigned(bits=W)
+
+pub comb type_alias_local_shadow(a:U6) -> (y:U6) {
+  type T<W> = Unsigned(bits=W)   // locate_error_here
+  const x:T<6> = a
+  y = x
+}

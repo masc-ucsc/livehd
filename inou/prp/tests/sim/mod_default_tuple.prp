@@ -1,0 +1,24 @@
+/*
+:name: mod_default_tuple
+:type: simulation
+*/
+pub type Data = (x:U4, sub:(a:U4, b:U4))
+pub const idle:Data = (x=3, sub=(a=7, b=2))
+mod sum<N>(v:Data=idle, inc:U4) -> (total:U8@[]) {
+  total = v.x + v.sub.a + v.sub.b + N + inc
+}
+pub mod mod_default_tuple(x:U4) -> (a:U8@[], b:U8@[]) {
+  const d = sum<N=1>(inc=x)
+  const custom:Data = (x=1, sub=(a=4, b=3))
+  const e = sum<N=2>(inc=x, v=custom)
+  a = d.total
+  b = e.total
+}
+test mod_default_tuple.check {
+  mut d = mod_default_tuple
+  tick 16 {
+    d.x = clock#[0..+4]
+    step
+    assert(d.a == 13+clock and d.b == 10+clock)
+  }
+}

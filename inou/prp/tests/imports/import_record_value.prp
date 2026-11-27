@@ -1,0 +1,30 @@
+/*
+:name: import_record_value
+:type: simulation
+*/
+const shapes = import("lib_record_value")
+const initial = import("lib_record_value.initialPair")
+
+pub mod import_record_value(clock:Clock, x:U8, load:U1) -> (y:U8@[], z:U8@[]) {
+  reg held:shapes.Pair = nil
+  mut packet:shapes.Pair = shapes.initialPair
+  mut next:U8 = x
+  if load != 0 { next = x ^ 31 }
+  mut value:U8 = next
+  if load != 0 { packet.x = value }
+  held = packet
+  mut other:shapes.Pair = initial
+  y = held.x
+  z = held.y + other.x
+}
+
+test import_record_value.fields {
+  mut dut = import_record_value
+  tick 32 {
+    dut.x = clock
+    dut.load = clock%2
+    step
+    assert(dut.y == (if clock%2 == 0 { 11 } else { clock ^ 31 }))
+    assert(dut.z == 30)
+  }
+}

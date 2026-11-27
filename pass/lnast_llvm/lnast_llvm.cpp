@@ -48,6 +48,12 @@ struct Phase_timer {
   }
 };
 
+using Loop_site = std::pair<const Lnast*, hhds::Tree_class_index>;
+
+struct Expand_loop {
+  Loop_site site;
+};
+
 struct Unsupported {
   std::string why;
 };
@@ -830,6 +836,7 @@ private:
   absl::flat_hash_map<size_t, uint32_t> edges_;
 
 public:
+  absl::flat_hash_map<uint32_t, Loop_site> expandable_loops;
   absl::flat_hash_map<uint32_t, std::string> names;  // diagnostics: latch op -> the latch's name
 };
 
@@ -1078,7 +1085,9 @@ void recognize_lanes(Tape& t) {
 
 class Gen {
 public:
-  Gen(const Lnast& ln, const std::vector<std::shared_ptr<Lnast>>& lib, std::string_view fn) : ln_(&ln), top_ln_(&ln), fn_name_(fn) {
+  Gen(const Lnast& ln, const std::vector<std::shared_ptr<Lnast>>& lib, std::string_view fn,
+      const absl::flat_hash_set<Loop_site>& expanded)
+      : expanded_(expanded), ln_(&ln), top_ln_(&ln), fn_name_(fn) {
     for (const auto& l : lib) {
       lib_[std::string(l->get_top_module_name())] = l.get();
     }
@@ -1126,6 +1135,7 @@ private:
     absl::flat_hash_map<std::string, Type>   wires;
     absl::flat_hash_map<std::string, V>      wire_ops;
   };
+  const absl::flat_hash_set<Loop_site>& expanded_;
   const Lnast*     ln_;      // the LNAST of the frame being executed
   const Lnast*     top_ln_;
   std::string      fn_name_;
@@ -1773,6 +1783,9 @@ void Gen::exec_if(const std::vector<Lnast_nid>& c, size_t at, Env& env) {
   absl::flat_hash_map<std::string, V>   then_vals;
   std::vector<std::string>              order;
   for (size_t i = mark; i < log_.size(); ++i) {
+    if (!env.contains(log_[i].name)) {
+      continue;  // scoped away by a loop inside the arm (leave_body): nothing to merge
+    }
     if (!then_vals.contains(log_[i].name)) {
       order.push_back(log_[i].name);
     }
@@ -1796,6 +1809,9 @@ void Gen::exec_if(const std::vector<Lnast_nid>& c, size_t at, Env& env) {
   pop_path();
   absl::flat_hash_map<std::string, V> else_vals;
   for (size_t i = else_mark; i < log_.size(); ++i) {
+    if (!env.contains(log_[i].name)) {
+      continue;  // scoped away by a loop inside the arm (leave_body): nothing to merge
+    }
     if (!then_vals.contains(log_[i].name) && !else_vals.contains(log_[i].name)) {
       order.push_back(log_[i].name);
     }
@@ -1893,7 +1909,7 @@ void Gen::exec_for(const std::vector<Lnast_nid>& c, Env& env) {
   std::vector<std::string>         assigned;
   absl::flat_hash_set<std::string> seen;
   collect_assigned(c[2], assigned, seen);
-  std::vector<std::string> carried;
+  std::vector<std::string> carried, body_locals;
   std::vector<V>           init;
   for (const auto& n : assigned) {
     if (n == ivar) {
@@ -1905,16 +1921,27 @@ void Gen::exec_for(const std::vector<Lnast_nid>& c, Env& env) {
     if (auto it = env.find(n); it != env.end()) {
       carried.push_back(n);
       init.push_back(it->second);
+    } else {
+      body_locals.push_back(n);
     }
   }
+  // A value defined only in the body cannot seed a phi on the next visit.
+  // This also scopes an inner rolled loop inside a statically expanded loop.
+  const auto leave_body = [&] {
+    for (const auto& name : body_locals) {
+      env.erase(name);
+    }
+  };
   // Loops stay loops: unrolled code is that many times the footprint. Only an INNERMOST loop of
   // fewer than five trips is unrolled, in the native code only (the LNAST and the graph keep it
   // rolled). LHD_SIM_LNAST_UNROLL=N (debug, to see what unrolling would buy): unroll any loop of up
   // to N trips and 16,384 body statements in all; 0 never.
+  const Loop_site site{ln_, c[2].get_class_index()};
+  const uint64_t trips = static_cast<uint64_t>(hi - lo + 1);
+  const bool expandable = trips <= 16384 && count_statements(c[2]) <= 16384 / trips;
   {
-    const uint64_t trips  = static_cast<uint64_t>(hi - lo + 1);
     const auto     forced = unroll_limit();
-    const bool     unroll = forced ? trips <= *forced && trips * count_statements(c[2]) <= 16384 : trips < 5 && !has_loop(c[2]);
+    const bool unroll = (expanded_.contains(site) && expandable) || (forced ? trips <= *forced && expandable : trips < 5 && !has_loop(c[2]));
     if (unroll) {
       uint32_t width = 1;
       while (width < 63 && (uint64_t{1} << width) <= static_cast<uint64_t>(hi)) {
@@ -1923,6 +1950,7 @@ void Gen::exec_for(const std::vector<Lnast_nid>& c, Env& env) {
       for (int64_t trip = lo; trip <= hi; ++trip) {
         put(env, ivar, k_->constant(width, static_cast<uint64_t>(trip), true));
         exec_block(kids(c[2]), env);
+        leave_body();
       }
       return;
     }
@@ -1935,6 +1963,9 @@ void Gen::exec_for(const std::vector<Lnast_nid>& c, Env& env) {
   std::vector<V> phis;
   if (!k_->loop_begin(static_cast<uint64_t>(hi - lo + 1), lo, iw, init, index, phis)) {
     bail("native loop");
+  }
+  if (expandable && !expanded_.contains(site)) {
+    k_->expandable_loops.emplace(k_->ops.at(index.id).a.id, site);
   }
   for (size_t i = 0; i < carried.size(); ++i) {
     put(env, carried[i], phis[i]);
@@ -1952,6 +1983,7 @@ void Gen::exec_for(const std::vector<Lnast_nid>& c, Env& env) {
   for (size_t i = 0; i < carried.size(); ++i) {
     put(env, carried[i], fin[i]);
   }
+  leave_body();
 }
 
 void Gen::exec_block(const std::vector<Lnast_nid>& stmts, Env& env) {
@@ -2203,16 +2235,32 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
       finish(dst, acc);
       break;
     }
-    case NT::Lnast_ntype_mult:
+    case NT::Lnast_ntype_mult: {
+      if (c.size() < 2) {
+        bail("multiply needs at least one factor");
+      }
+      const auto dst     = dst_name();
+      const auto tn      = result_type(dst);
+      V          product = operand(c[1], env);
+      for (size_t factor = 2; factor < c.size(); ++factor) {
+        V          rhs        = operand(c[factor], env);
+        const bool unsign     = product.unsign && rhs.unsign;
+        const bool last_typed = tn && factor + 1 == c.size();
+        const auto width      = last_typed ? tn->bits : (unsign ? product.width + rhs.width : sw(product) + sw(rhs));
+        product               = k_->binary(Op::mul, product, rhs, width, last_typed ? !tn->sign : unsign);
+      }
+      finish(dst, product);
+      break;
+    }
     case NT::Lnast_ntype_div:
     case NT::Lnast_ntype_mod: {
       const auto dst = dst_name();
       if (c.size() != 3) {
-        bail("mult/div/mod arity");
+        bail("div/mod arity");
       }
-      V a = operand(c[1], env);
-      V b = operand(c[2], env);
-      auto tn = result_type(dst);
+      V        a  = operand(c[1], env);
+      V        b  = operand(c[2], env);
+      auto     tn = result_type(dst);
       uint32_t w;
       bool     sign;
       if (tn) {
@@ -2220,20 +2268,17 @@ void Gen::exec_stmt(const std::vector<Lnast_nid>& stmts, size_t& i, Env& env) {
         sign = tn->sign;
       } else {
         sign = !(a.unsign && b.unsign);
-        w    = t == NT::Lnast_ntype_mult ? (sign ? sw(a) + sw(b) : a.width + b.width) : std::max(sw(a), sw(b));
+        w    = std::max(sw(a), sw(b));
       }
-      const Op op = t == NT::Lnast_ntype_mult ? Op::mul : (t == NT::Lnast_ntype_div ? Op::div : Op::rem);
-      if (op == Op::div || op == Op::rem) {
-        // A zero divisor is X (Pyrope leaves it to the Verilog meaning): the native divide would trap on it,
-        // so divide by 1 instead and give 0, a value in range.
-        const V zero_b = k_->binary(Op::eq, b, k_->constant(std::max<uint32_t>(b.width, 1), 0, b.unsign), 1, true);
-        undefined_if(zero_b, op == Op::div ? "division by zero" : "remainder by zero", s);
-        const V safe_b = k_->mux(zero_b, b, k_->constant(std::max<uint32_t>(b.width, 1), 1, b.unsign), std::max<uint32_t>(b.width, 1), b.unsign);
-        const V quot   = k_->binary(op, a, safe_b, w, !sign);
-        finish(dst, k_->mux(zero_b, quot, k_->constant(std::max<uint32_t>(w, 1), 0, !sign), w, !sign));
-        break;
-      }
-      finish(dst, k_->binary(op, a, b, w, !sign));
+      const Op op     = t == NT::Lnast_ntype_div ? Op::div : Op::rem;
+      // A zero divisor is X (Pyrope leaves it to the Verilog meaning): the native divide would trap on it,
+      // so divide by 1 instead and give 0, a value in range.
+      const V  zero_b = k_->binary(Op::eq, b, k_->constant(std::max<uint32_t>(b.width, 1), 0, b.unsign), 1, true);
+      undefined_if(zero_b, op == Op::div ? "division by zero" : "remainder by zero", s);
+      const V safe_b
+          = k_->mux(zero_b, b, k_->constant(std::max<uint32_t>(b.width, 1), 1, b.unsign), std::max<uint32_t>(b.width, 1), b.unsign);
+      const V quot = k_->binary(op, a, safe_b, w, !sign);
+      finish(dst, k_->mux(zero_b, quot, k_->constant(std::max<uint32_t>(w, 1), 0, !sign), w, !sign));
       break;
     }
     case NT::Lnast_ntype_bit_and:
@@ -3714,6 +3759,11 @@ void order_view(const Tape& t, View& v) {
           for (size_t k = from > 0 ? from - 1 : 0; k < stack.size(); ++k) {
             ++ops_on_ring;
             const auto u = stack[k].u;
+            // A rolled loop schedules all its outputs together. Split it before
+            // diagnosing a cycle between otherwise independent output cones.
+            if (auto it = t.expandable_loops.find(u); it != t.expandable_loops.end()) {
+              throw Expand_loop{it->second};
+            }
             if (t.ops[u].kind == K::latch && shown < 8) {
               const auto name  = t.names.find(u);
               const auto en    = v.folded(t.ops[u].a.id);
@@ -4086,6 +4136,9 @@ void build_kernel(const Tape& t, const Kernel_job& job, const Activity& gate, si
     }
     // An aliased reference can view fewer bits than the mapped kernel input.
     // Materialize that width before it becomes an operand or a loop carry.
+    if (r.width == 0) {
+      return V{it->second.id, 0, r.unsign};  // a zero-width view, as before
+    }
     const auto value = k.resize(it->second, r.width, r.unsign);
     if (value.width == 0) {
       bail(std::format("internal: invalid reference to tape op {} ({}, mapped width {}, requested width {})",
@@ -5304,8 +5357,7 @@ std::string symbol_of(const Lnast& ln) {
 Result generate(const Lnast& ln, const std::vector<std::shared_ptr<Lnast>>& lib, const std::string& dir) {
   std::filesystem::create_directories(dir);
   const auto symbol = symbol_of(ln);
-  Gen        g(ln, lib, symbol);
-  return g.run(Sim_objects{symbol, dir + "/kernel.llvm.o", dir + "/kernel.json"});
+  return generate_sim(ln, lib, Sim_objects{symbol, dir + "/kernel.llvm.o", dir + "/kernel.json"});
 }
 
 Result generate_sim(const Lnast& ln, const std::vector<std::shared_ptr<Lnast>>& lib, const Sim_objects& out) {
@@ -5313,8 +5365,15 @@ Result generate_sim(const Lnast& ln, const std::vector<std::shared_ptr<Lnast>>& 
   if (o.symbol.empty()) {
     o.symbol = symbol_of(ln);
   }
-  Gen g(ln, lib, o.symbol);
-  return g.run(o);
+  absl::flat_hash_set<Loop_site> expanded;
+  for (;;) {
+    try {
+      Gen g(ln, lib, o.symbol, expanded);
+      return g.run(o);
+    } catch (const Expand_loop& loop) {
+      expanded.insert(loop.site);
+    }
+  }
 }
 
 }  // namespace livehd::lnast_llvm

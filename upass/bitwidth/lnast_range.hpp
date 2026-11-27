@@ -185,8 +185,9 @@ struct Lnast_range {
     return signed_cover(*this, b);
   }
 
-  // a | b: for non-negatives, max(min_a, min_b) <= a|b <= ones-cover of the
-  // wider operand's max (OR never sets a bit above either operand's top bit).
+  // a | b: for non-negatives, max(min_a, min_b) <= a|b <= min(ones-cover of the
+  // wider operand's max, max_a + max_b) (OR never sets a bit above either operand's
+  // top bit, and never exceeds the sum).
   Lnast_range bor(const Lnast_range& b) const noexcept {
     if (!unbounded && !b.unbounded && is_constant() && b.is_constant()) {
       return constant(min | b.min);  // single points fold exactly (any sign)
@@ -197,7 +198,14 @@ struct Lnast_range {
     if (min < 0 || b.min < 0) {
       return signed_cover(*this, b);
     }
-    return bounded(std::max(min, b.min), ones_cover(std::max(max, b.max)));
+    // For non-negatives a|b <= a+b as well, which keeps a bound that is not a power
+    // of two (`((r%6) << 1) | lane` stays within [0, 11], not [0, 15]).
+    int64_t hi = ones_cover(std::max(max, b.max));
+    int64_t sum;
+    if (!add_overflow(max, b.max, sum)) {
+      hi = std::min(hi, sum);
+    }
+    return bounded(std::max(min, b.min), hi);
   }
 
   // a ^ b: for non-negatives, 0 <= a^b <= ones-cover of the wider max.

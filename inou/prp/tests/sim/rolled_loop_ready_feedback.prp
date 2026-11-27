@@ -1,0 +1,32 @@
+/*
+:name: rolled_loop_ready_feedback
+:type: simulation
+*/
+// Dispatch depends only on availability, even when both outputs share a loop.
+pub mod reserve<n=12, w=8>(live:Unsigned(bits=n), dispatch:Unsigned(bits=w)) ->
+    (ready:Unsigned(bits=w)@[], slots:Unsigned(bits=w*n)@[]) {
+  mut vacant:Unsigned(bits=n) = ~live
+  ready = 0
+  slots = 0
+  for lane in 0..<w {
+    const first = vacant & -vacant
+    ready#[lane] = U1(vacant != 0)
+    if dispatch#[lane] != 0 { slots#[(lane*n)..+n] = first }
+    vacant = vacant ^ first
+  }
+}
+pub mod rolled_loop_ready_feedback(live:U12, req:U8) -> (accepted:U96@[]) {
+  wire fire:U8 = nil
+  const result = reserve(live, dispatch=fire)
+  fire = result.ready & req
+  accepted = result.slots
+}
+test rolled_loop_ready_feedback.feedback {
+  mut d = rolled_loop_ready_feedback
+  tick 64 {
+    d.live = 0xfff ^ (1 << (clock%12))
+    d.req = clock#[0..+8]
+    step
+    assert(d.accepted == (if clock%2 == 1 { 1 << (clock%12) } else { 0 }))
+  }
+}

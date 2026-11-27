@@ -1,0 +1,27 @@
+/*
+:name: import_callback_record
+:type: simulation
+*/
+const applyMask = import("lib_callback_config.applyMask")
+const config = import("lib_callback_config")
+comptime const settings = config.configure(factory=applyMask, mask=7)
+
+pub mod selected<C>(x:U8) -> (y:U8@[0]) {
+  const build = C.factory
+  const dut = build<C>(x)
+  y = dut.y
+}
+
+pub mod import_callback_record(x:U8) -> (y:U8@[0]) {
+  const instance = selected<C=settings>(x)
+  y = instance.y
+}
+
+test import_callback_record.same_name {
+  mut dut = import_callback_record
+  tick 32 {
+    dut.x = clock
+    step
+    assert(dut.y == (clock ^ 7))
+  }
+}

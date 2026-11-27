@@ -2031,10 +2031,7 @@ void Prp2lnast::process_description() {
     struct Construct_state_guard {
       Prp2lnast& p;
       ~Construct_state_guard() {
-        for (const auto& n : p.local_type_templates_) {
-          p.type_templates_.erase(n);
-        }
-        p.local_type_templates_.clear();
+        p.pop_local_templates(0);
         p.ast_import_bindings_.clear();
         p.pending_hoists_.clear();
         p.top_prelude_.clear();
@@ -8416,12 +8413,22 @@ void Prp2lnast::process_type_statement(TSNode n) {
 // Register `type Name<generics> = T` as a template. A file-scope one outlives its
 // construct (and is a pub entry when `pub`); a local one dies with the construct
 // that declares it.
+void Prp2lnast::pop_local_templates(size_t mark) {
+  while (local_type_templates_.size() > mark) {
+    type_templates_.erase(local_type_templates_.back());
+    local_type_templates_.pop_back();
+  }
+}
+
 void Prp2lnast::register_type_template(const prpparse::Ast* st, bool file_scope) {
   auto t = prp_type_alias::template_from_statement(prp_file, st);
   if (!t) {
     return;
   }
   const TSNode node{st, prp_buf.get()};
+  // Pyrope has no shadowing: a name already visible (file scope, or an enclosing
+  // body's local template) cannot be declared again. Sibling bodies may reuse a name,
+  // since a local template is dropped when its body ends.
   if (type_templates_.contains(t->name)) {
     report_error(node,
                  "duplicate-type-alias",
@@ -8441,7 +8448,7 @@ void Prp2lnast::register_type_template(const prpparse::Ast* st, bool file_scope)
                    "`pub` is only valid on file-scope declarations",
                    "move the type alias to the file's top level");
     }
-    local_type_templates_.insert(t->name);
+    local_type_templates_.push_back(t->name);
   }
   const auto name = t->name;
   type_templates_.emplace(name, std::move(*t));
@@ -8513,25 +8520,34 @@ std::optional<Prp2lnast::Template_ref> Prp2lnast::find_type_template(std::string
     return std::nullopt;
   }
   std::string entry(prefix.empty() ? std::string_view{} : last);
-  std::string path;
-  {
+  // Resolving an import touches the file system: do it once per import spelling.
+  auto resolved = import_path_cache_.find(*raw);
+  if (resolved == import_path_cache_.end()) {
+    Resolved_import found;
     livehd::prp_import::Resolver resolver;
     for (const auto& candidate : livehd::prp_import::candidates(*raw)) {
-      path = resolver.find(livehd::prp_import::dir_of(src_filename), candidate);
-      if (!path.empty()) {
-        if (prefix.empty() && candidate.size() < raw->size()) {
-          entry = raw->substr(candidate.size() + 1);  // `import("unit.Entry")`
-        } else if (prefix.empty()) {
-          return std::nullopt;  // a whole-unit binding used as a bare type name
-        }
+      found.path = resolver.find(livehd::prp_import::dir_of(src_filename), candidate);
+      if (!found.path.empty()) {
+        found.candidate_size = candidate.size();
         break;
       }
     }
+    if (found.path.empty()) {
+      return std::nullopt;  // not cached: the unit may become resolvable later
+    }
+    resolved = import_path_cache_.emplace(*raw, std::move(found)).first;
   }
+  const std::string& path = resolved->second.path;
   if (path.empty()) {
     return std::nullopt;
   }
-  auto& slot = const_cast<Prp2lnast*>(this)->unit_templates_cache_[path];
+  if (prefix.empty()) {
+    if (resolved->second.candidate_size >= raw->size()) {
+      return std::nullopt;  // a whole-unit binding used as a bare type name
+    }
+    entry = raw->substr(resolved->second.candidate_size + 1);  // `import("unit.Entry")`
+  }
+  auto& slot = unit_templates_cache_[path];
   if (!slot) {
     std::ifstream ifs(path, std::ios::binary);
     std::stringstream ss;
@@ -8699,6 +8715,12 @@ prpparse::Ast* Prp2lnast::hoist_type_alias(prpparse::Ast* node, const prpparse::
 // Replace every parametric alias application under `node` by its expansion, and
 // drop (registering them) the local `type T<…> = …` templates.
 void Prp2lnast::expand_type_applications(prpparse::Ast* node) {
+  // Local templates declared directly in this node's body end with it.
+  struct Scope_guard {
+    Prp2lnast& p;
+    size_t     mark;
+    ~Scope_guard() { p.pop_local_templates(mark); }
+  } scope_guard{*this, local_type_templates_.size()};
   for (size_t i = 0; i < node->kids.size(); ++i) {
     prpparse::Ast* k = node->kids[i];
     if (k->kind == prpparse::Kind::type_statement && prp_type_alias::template_from_statement(prp_file, k)) {

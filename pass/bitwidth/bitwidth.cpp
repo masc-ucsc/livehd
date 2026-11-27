@@ -1464,6 +1464,10 @@ void Bitwidth::process_bit_or(hhds::Node_class& node, Inp_pins& inp_edges) {
   int32_t max_bits     = 0;  // unsigned answer
   int32_t max_sbits    = 0;  // signed answer
   bool    any_negative = false;
+  // For nonnegative operands, bitwise OR cannot exceed their sum. This
+  // retains a non-power-of-two bound when lowering an indexed array access
+  // turns row*2 + lane into (row << 1) | lane.
+  uint64_t sum_bound = 0;
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.get_driver_pin().get_class_index());
     if (it == bwmap.end()) {
@@ -1472,6 +1476,9 @@ void Bitwidth::process_bit_or(hhds::Node_class& node, Inp_pins& inp_edges) {
       return;
     }
     if (it->second.is_always_positive()) {
+      const auto& maximum = it->second.get_max();
+      constexpr uint64_t limit = std::numeric_limits<int64_t>::max();
+      sum_bound = maximum.is_just_i64() ? std::min(limit, sum_bound + static_cast<uint64_t>(maximum.to_just_i64())) : limit;
       const int32_t ubits = it->second.get_ubits();
       max_bits            = std::max(max_bits, ubits);
       max_sbits           = std::max(max_sbits, ubits == 0 ? 0 : ubits + 1);
@@ -1503,6 +1510,8 @@ void Bitwidth::process_bit_or(hhds::Node_class& node, Inp_pins& inp_edges) {
     // the result's sign bit when it actually is, so `a | b` is perfectly
     // capable of being positive and pinning max at 0 said otherwise.
     bw.set_sbits_range(max_sbits);
+  } else if (max_bits < 63 && sum_bound < (uint64_t{1} << max_bits) - 1) {
+    bw.set_range(*Dlop::create_integer(0), *Dlop::create_integer(static_cast<int64_t>(sum_bound)));
   } else {
     bw.set_range(*Dlop::create_integer(0), *Dlop::get_mask_value(max_bits));
   }

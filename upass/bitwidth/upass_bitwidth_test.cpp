@@ -92,6 +92,24 @@ TEST(LnastRangeLattice, DivNonNegativeByDivisorIncludingZero) {
   EXPECT_EQ(q.max, a.max);
 }
 
+// a|b <= a+b for non-negatives: `((r%6) << 1) | lane` is within [0, 11], so it
+// indexes a 12-entry array; the all-ones cover alone would say [0, 15].
+TEST(LnastRangeLattice, OrKeepsSumBound) {
+  Lnast_range a;
+  a.unbounded = false;
+  a.min       = 0;
+  a.max       = 10;
+  const auto r = a.bor(Lnast_range::unsigned_bit());
+  EXPECT_FALSE(r.unbounded);
+  EXPECT_EQ(r.min, 0);
+  EXPECT_EQ(r.max, 11);
+  Lnast_range p;
+  p.unbounded = false;
+  p.min       = 0;
+  p.max       = 4;
+  EXPECT_EQ(p.bor(p).max, 7);  // the cover (7) is tighter than the sum (8), so it stays
+}
+
 TEST(LnastRangeLattice, MulConstants) {
   auto r = Lnast_range::constant(3).mul(Lnast_range::constant(4));
   EXPECT_TRUE(r.is_constant());

@@ -20,6 +20,7 @@ cc_library(
         "//upass/core:ssa_demote_hdr",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/container:flat_hash_set",
+        "@abseil-cpp//absl/strings",
     ],
 )
 

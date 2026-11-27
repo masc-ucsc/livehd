@@ -18,6 +18,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/strings/str_split.h"
 #include "array_dim.hpp"
 #include "debug_env.hpp"
 #include "diag.hpp"
@@ -740,6 +741,22 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
     }
     return any;
   };
+  // The frontend evaluates an aggregate default once, in the parameter prologue.
+  // After flattening, each omitted port needs its own projection of that value.
+  absl::flat_hash_map<std::string, std::vector<std::string>> default_fields;
+  auto inherit_default = [&](const std::string& prefix, Lnast_nid slot, std::vector<Flat_field>& fields, size_t first) {
+    if (slot.is_invalid() || !Lnast_ntype::is_const(lnast->get_type(slot)) || lnast->get_name(slot) != "__default") {
+      return;
+    }
+    auto& paths = default_fields[Lnast_io_entry::default_value_name(prefix)];
+    for (size_t i = first; i < fields.size(); ++i) {
+      fields[i].has_default = true;
+      input_slots.insert_or_assign(fields[i].name, slot);
+      if (fields[i].name.size() > prefix.size() + 1) {  // a leaf that is the prefix itself has no field path
+        paths.push_back(fields[i].name.substr(prefix.size() + 1));
+      }
+    }
+  };
   flatten_assign = [&](Lnast_nid                assign_nid,
                        const std::string&       prefix,
                        bool                     collect_is_ref,
@@ -812,9 +829,11 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
                                                            .hint     = "declare the tuple as a named type and use `self:Name`"});
         throw std::runtime_error(msg);
       }
+      const auto first = out.size();
       for (auto inner : lnast->children(type_nid)) {
         flatten_assign(inner, full, collect_is_ref, out, smin, smax);
       }
+      inherit_default(full, rhs_nid, out, first);
       return;
     }
 
@@ -861,6 +880,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
       std::string why;
       if (expand_named_type(lnast, type_name, full, !keep_whole, out, smin, smax, ti, 0, why) && ti.kind == Io_kind::none
           && out.size() != before) {
+        inherit_default(full, rhs_nid, out, before);
         return;  // the tuple's leaves replace the port
       }
       if (!why.empty()) {
@@ -1492,7 +1512,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
   // bundle; reg/wire names deliberately retain one stable identity; compiler
   // temporaries are already unique.  The scan is conservative across control
   // scopes: a false positive only selects the established rebuilding path.
-  bool                             requires_ssa_rebuild = has_stale_ssa || needs_tuple_port_rewrite;
+  bool                             requires_ssa_rebuild = has_stale_ssa || needs_tuple_port_rewrite || !default_fields.empty();
   bool                             use_stream_ssa       = false;
   absl::flat_hash_set<std::string> stream_ssa_names;
   absl::flat_hash_set<std::string> output_names;
@@ -2450,7 +2470,29 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
   }
 
   for (auto child : lnast->children(stmts_nid)) {
-    process_child(child);
+    const auto dst = lnast->get_first_child(child);
+    const auto group = default_fields.empty() || dst.is_invalid() || !Lnast_ntype::is_store(lnast->get_type(child))
+                         ? default_fields.end()
+                         : default_fields.find(lnast->get_name(dst));
+    if (group == default_fields.end()) {
+      process_child(child);
+      continue;
+    }
+    const auto value = lnast->get_sibling_next(dst);
+    I(value.is_valid() && lnast->is_last_child(value));
+    const auto root_name = group->first;
+    for (const auto& path : group->second) {
+      const auto tmp = absl::StrCat("%ws_", whole_store_tmp++);
+      auto       get = staging->add_child(new_stmts, Lnast_ntype::create_tuple_get());
+      staging->add_child(get, Lnast_node::create_ref(tmp));
+      copy_with_rename(lnast, value, staging, get, rename_map);
+      for (const auto field : absl::StrSplit(path, '.')) {
+        staging->add_child(get, Lnast_node::create_const(field));
+      }
+      auto store = staging->add_child(new_stmts, Lnast_ntype::create_store());
+      staging->add_child(store, Lnast_node::create_ref(absl::StrCat(root_name, ".", path)));
+      staging->add_child(store, Lnast_node::create_ref(tmp));
+    }
   }
 
   // Final-version write-back for io outputs: a top-level reassignment was

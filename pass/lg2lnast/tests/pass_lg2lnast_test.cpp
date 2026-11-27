@@ -41,3 +41,34 @@ TEST(GraphToLnast, BooleanConstantUsedAsConcatWidth) {
   }
   FAIL() << "missing concat in lowered graph";
 }
+
+TEST(GraphToLnast, MultiplyThreeFactors) {
+  namespace gu = livehd::graph_util;
+  hhds::GraphLibrary library;
+  const auto         io = library.create_io("product");
+  io->add_input("a", 0);
+  io->add_input("b", 1);
+  io->add_input("c", 2);
+  io->add_output("p", 3);
+  for (auto name : {"a", "b", "c"}) {
+    io->set_bits(name, 4);
+  }
+  io->set_bits("p", 12);
+  const auto graph   = io->create_graph();
+  const auto product = gu::create_typed_node(*graph, Ntype_op::Mult, 12);
+  int        i       = 0;
+  for (auto name : {"a", "b", "c"}) {
+    graph->get_input_pin(name).connect_sink(product.create_sink_pin(i++));
+  }
+  product.create_driver_pin(0).connect_sink(graph->get_output_pin("p"));
+  std::vector<std::shared_ptr<Lnast>> units;
+  ASSERT_TRUE(Pass_lg2lnast::lower({graph}, "", units));
+  ASSERT_EQ(units.size(), 1u);
+  int multiplies = 0;
+  for (const auto node : units.front()->depth_preorder()) {
+    if (units.front()->get_type(node) == Lnast_ntype::Lnast_ntype_mult) {
+      ++multiplies;
+    }
+  }
+  EXPECT_EQ(multiplies, 2);
+}

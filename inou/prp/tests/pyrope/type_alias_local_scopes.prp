@@ -1,0 +1,24 @@
+/*
+:name: type_alias_local_scopes
+:type: compile
+*/
+
+// A local `type T<W>` lives in the body that declares it: sibling bodies may reuse
+// the name (no shadowing is involved: neither encloses the other).
+type T<W> = Unsigned(bits=W)
+
+comb narrow(a:U4) -> (y:U4) {
+  type R<W> = Unsigned(bits=W)
+  const x:R<4> = a
+  y = x
+}
+
+comb wide(a:U8) -> (y:U8) {
+  type R<W> = Unsigned(bits=W)
+  const x:R<8> = a
+  y = x
+}
+
+pub comb type_alias_local_scopes(a:T<5>) -> (y:T<5>) {
+  y = a
+}

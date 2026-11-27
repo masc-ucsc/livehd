@@ -427,19 +427,32 @@ bool Lowering::lower_node(const hhds::Node_class& node) {
                  dpin);
       break;
     }
-    case Ntype_op::Mult:
+    case Ntype_op::Mult: {
+      auto factors = all_inputs();
+      if (!factors || factors->empty()) {
+        why = "multiply needs at least one factor";
+        return false;
+      }
+      // The graph optimizer merges chains of multiplies into one node. Keep
+      // intermediate products unbounded until the graph result is assigned.
+      std::string product = factors->front();
+      for (size_t i = 1; i < factors->size(); ++i) {
+        product = emit(Lnast_ntype::create_mult(), {product, (*factors)[i]}, dpin, false);
+      }
+      out = factors->size() == 1 ? emit(Lnast_ntype::create_mult(), {product, "1"}, dpin) : product;
+      if (factors->size() > 1) {
+        type_spec(out, dpin);
+      }
+      break;
+    }
     case Ntype_op::Div:
     case Ntype_op::Rem: {
       auto v = all_inputs();
       if (!v || v->size() != 2) {
-        why = "mult/div/rem arity";
+        why = "div/rem arity";
         return false;
       }
-      out = emit(op == Ntype_op::Mult ? Lnast_ntype::create_mult()
-                 : op == Ntype_op::Div ? Lnast_ntype::create_div()
-                                       : Lnast_ntype::create_mod(),
-                 *v,
-                 dpin);
+      out = emit(op == Ntype_op::Div ? Lnast_ntype::create_div() : Lnast_ntype::create_mod(), *v, dpin);
       break;
     }
     case Ntype_op::Not: {

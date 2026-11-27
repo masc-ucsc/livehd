@@ -3659,6 +3659,7 @@ Lnast_prp_writer::Clock_port_plan Lnast_prp_writer::clock_data_ports(const std::
     if (stmts.is_invalid()) {
       continue;
     }
+    absl::flat_hash_map<std::string, Lnast*> instances;
     for (const auto& n : u->depth_preorder(stmts)) {
       const auto t   = u->get_type(n);
       const auto dst = u->get_first_child(n);
@@ -3678,6 +3679,7 @@ Lnast_prp_writer::Clock_port_plan Lnast_prp_writer::clock_data_ports(const std::
           continue;
         }
         auto* child = cit->second;
+        instances.emplace(std::string(u->get_name(dst)), child);
         if (child->io_meta().outputs.size() == 1) {
           connections.push_back({u, std::string(u->get_name(dst)), child, child->io_meta().outputs.front().name});
         }
@@ -3691,6 +3693,23 @@ Lnast_prp_writer::Clock_port_plan Lnast_prp_writer::clock_data_ports(const std::
             connections.push_back({u, std::string(u->get_name(v)), child, std::string(u->get_name(f))});
           }
         }
+      }
+    }
+    // A multi-output call returns a tuple. Propagate demand on each extracted
+    // field into the corresponding child port, independent of statement order.
+    for (const auto& n : u->depth_preorder(stmts)) {
+      if (u->get_type(n) != Lnast_ntype::Lnast_ntype_tuple_get) {
+        continue;
+      }
+      const auto dst      = u->get_first_child(n);
+      const auto instance = u->get_sibling_next(dst);
+      const auto field    = u->get_sibling_next(instance);
+      if (field.is_invalid() || !u->is_last_child(field) || !Lnast_ntype::is_const(u->get_type(field))) {
+        continue;
+      }
+      const auto it = instances.find(std::string(u->get_name(instance)));
+      if (it != instances.end() && it->second->io_meta().find(u->get_name(field)) != nullptr) {
+        connections.push_back({u, std::string(u->get_name(dst)), it->second, std::string(u->get_name(field))});
       }
     }
   }

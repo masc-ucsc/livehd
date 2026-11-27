@@ -1,0 +1,21 @@
+/*
+:name: nonbinary_memory_index
+:type: simulation
+*/
+pub mod nonbinary_memory_index(clock:Clock, row:U3, lane:U1, read:U4, data:U8) -> (q:U8@[]) {
+  reg cells:[12]U8:[ordering="old"] = nil
+  const index = ((row%6) << 1) | lane
+  cells[index] = data
+  q = cells[read%12]
+}
+test nonbinary_memory_index.readback {
+  mut d = nonbinary_memory_index
+  tick 36 {
+    d.row = ((clock%12) >> 1)#[0..+3]
+    d.lane = clock#[0]
+    d.data = (clock+1)#[0..+8]
+    d.read = ((clock+11)%12)#[0..+4]
+    step
+    if clock > 0 { assert(d.q == clock) }
+  }
+}

@@ -3,7 +3,10 @@
 const sub_lo = import("gd_sub.sub_lo")
 const sub_hi = import("gd_sub.sub_hi")
 
-pub mod mid<N=4>(a:U32) -> (lo:U8@[], hi:U8@[]) {
-  lo = sub_lo<N=4, W=8>(a=a)
-  hi = sub_hi<N=4, W=8>(a=a)
+const cfg = import("gd_cfg")
+
+pub mod mid<N=4, lane=cfg.byteLane>(a:Unsigned(bits=N*lane.width))
+    -> (lo:Unsigned(bits=lane.width)@[], hi:Unsigned(bits=lane.width)@[]) {
+  lo = sub_lo<N=lane.count, W=lane.width>(a=a)
+  hi = sub_hi<N=lane.count, W=lane.width>(a=a)
 }
