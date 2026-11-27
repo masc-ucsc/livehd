@@ -406,7 +406,7 @@ def conjMain (cert specPath : String) (rest : List String) : IO UInt32 := do
     | none => do pure ((← IO.appDir) / "cadical").toString
   let work := System.FilePath.mk ((opt "work").getD "sym_work")
   IO.FS.createDirAll work
-  let (_, D) ← Projection.CertLoadAny.loadAny cert
+  let (_, D) ← Projection.CertLoadAny.admitFile cert
   let lines ← match parseSpec (← IO.FS.readFile specPath) with
     | .ok l => pure l
     | .error e => do IO.eprintln s!"{specPath}: {e}"; return 2
@@ -666,7 +666,7 @@ def main (args : List String) : IO UInt32 := do
           pure (sys / "cadical").toString
     let work := System.FilePath.mk ((opt "work").getD "sym_work")
     IO.FS.createDirAll work
-    let (_, D) ← Projection.CertLoadAny.loadAny cert
+    let (_, D) ← Projection.CertLoadAny.admitFile cert
     let propOfTok (tok : String) : IO (Option PropSpec) := do
       let (nz, name) := if tok.startsWith "!" then (false, (tok.drop 1).toString) else (true, tok)
       return (← resolvePort cert "outputs" name).map fun n => { out := n, nz }

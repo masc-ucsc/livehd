@@ -50,6 +50,17 @@ def loadAny (p : System.FilePath) : IO (CertIO.Format × DesignCert) := do
   | none =>
       throw (IO.userError s!"{p}: unrecognised certificate: expected DCERT4, DCERT3 or DCERT1")
 
+/-- **Read a certificate file and admit it under its format's policy** (`CertIO.admitAny`): DCERT4
+and DCERT3 through `readCertChecked` (parse, then `certWfError`: shapes, memory depths,
+addresses), DCERT1 through `admitV1`, which also refuses a file whose async reset it cannot
+carry (`V1.asyncOK`: such a file describes another design). Every simulation driver and proof
+tool loads its certificates through this; a refusal is an `IO.userError` naming the file, as
+`loadAny`'s. `loadAny` skips the DCERT1 check and is kept for the old probes only. -/
+def admitFile (p : System.FilePath) : IO (CertIO.Format × DesignCert) := do
+  match CertIO.admitAny (← IO.FS.readBinFile p) with
+  | .ok r => pure r
+  | .error e => throw (IO.userError s!"{p}: {e}")
+
 /-- Drop-in for `CertIO.V1.loadCert` in the probes.  On a DCERT1 file it is
 exactly that function (same parse, same error text); on DCERT3 it admits
 through `readCertChecked`. -/

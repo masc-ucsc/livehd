@@ -776,7 +776,7 @@ def refmapMain (path : String) (rest : List String) (facts : Bool) : IO UInt32 :
   let some specCert := pathOf "spec" | IO.eprintln "no spec <certificate>"; return 2
   let implCert := (pathOf "impl").getD ""
   if !facts && implCert.isEmpty then IO.eprintln "no impl <certificate>"; return 2
-  let (_, DS) ← Projection.CertLoadAny.loadAny specCert
+  let (_, DS) ← Projection.CertLoadAny.admitFile specCert
   say s!"spec {specCert}: flops {DS.flops.size} outputs {DS.outputs.size} memories {DS.memories.size}"
   unless HwMem.admitsWB DS do say "  RESULT: REFUSED (the memory route does not admit the spec)"; return 4
   let t0 ← IO.monoMsNow
@@ -791,7 +791,7 @@ def refmapMain (path : String) (rest : List String) (facts : Bool) : IO UInt32 :
     | .error e => do say s!"  RESULT: REFUSED (spec: {e})"; return 4
   say s!"  spec route sim:{simS}{simWhy gS fpOnly}: {nameS}"
   let (DI, RI, fuelI) ← if facts then pure (DS, RS, fuelS) else do
-    let (_, DI) ← Projection.CertLoadAny.loadAny implCert
+    let (_, DI) ← Projection.CertLoadAny.admitFile implCert
     say s!"impl {implCert}: flops {DI.flops.size} outputs {DI.outputs.size} memories {DI.memories.size}"
     unless HwMem.admitsWB DI do say "  RESULT: REFUSED (the memory route does not admit the implementation)"; return 4
     let (RI, fuelI, nameI) ← match ← symRouteOf simI DI sf wf with
@@ -1825,8 +1825,8 @@ def judgeMain (path : String) (rest : List String) : IO UInt32 := do
       if p.startsWith "/" then p else (dir / p).toString
   let some specCert := pathOf "spec" | IO.eprintln "no spec <certificate>"; return 2
   let some implCert := pathOf "impl" | IO.eprintln "no impl <certificate>"; return 2
-  let (_, DS) ← Projection.CertLoadAny.loadAny specCert
-  let (_, DI) ← Projection.CertLoadAny.loadAny implCert
+  let (_, DS) ← Projection.CertLoadAny.admitFile specCert
+  let (_, DI) ← Projection.CertLoadAny.admitFile implCert
   say s!"judge {path}"
   say s!"  spec {specCert}: flops {DS.flops.size} outputs {DS.outputs.size} memories {DS.memories.size}"
   say s!"  impl {implCert}: flops {DI.flops.size} outputs {DI.outputs.size} memories {DI.memories.size}"
