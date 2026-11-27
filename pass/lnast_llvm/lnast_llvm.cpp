@@ -2803,10 +2803,15 @@ std::vector<V> Gen::clock_enables(V clock, const std::string& what, bool* invert
           while (k_->ops[lat_id].kind == Tape::K::resize && k_->ops[lat_id].a.id != Tape::none) {
             lat_id = k_->ops[lat_id].a.id;
           }
-          while (k_->ops[in_id].kind == Tape::K::resize && k_->ops[in_id].a.id != Tape::none) {
+          while ((k_->ops[in_id].kind == K::resize || k_->ops[in_id].kind == K::wire) && k_->ops[in_id].a.id != Tape::none) {
             in_id = k_->ops[in_id].a.id;
           }
-          if (k_->ops[lat_id].kind != K::latch || (k_->ops[in_id].kind != K::clock && !promote_clock_input(in_id))) {
+          // A child may forward the parent clock back to a sibling ICG. Its
+          // input wire closes after this register is visited. Follow the wire
+          // below so finish_late_gates validates its source once it is bound.
+          const auto kind = k_->ops[in_id].kind;
+          if (k_->ops[lat_id].kind != K::latch
+              || (kind != K::clock && kind != K::wire && !gates_.contains(in_id) && !promote_clock_input(in_id))) {
             continue;
           }
           gates_[id] = Gate{

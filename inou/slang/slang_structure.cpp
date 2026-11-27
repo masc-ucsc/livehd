@@ -209,6 +209,14 @@ struct Write_collector : public slang::ast::ASTVisitor<Write_collector, slang::a
   // Left EMPTY by the other consumers, which keep the see-everything behavior.
   std::function<std::optional<bool>(const slang::ast::ConditionalStatement&)> decided;
 
+  std::vector<const slang::ast::ImmediateAssertionStatement*>* assertions = nullptr;
+  void handle(const slang::ast::ImmediateAssertionStatement& stmt) {
+    if (assertions && !stmt.isDeferred && stmt.assertionKind == slang::ast::AssertionKind::Assert) {
+      assertions->push_back(&stmt);
+    }
+    visitDefault(stmt);
+  }
+
   bool skip_loop_controls = false;
   void handle(const slang::ast::ForLoopStatement& s) {
     if (skip_loop_controls) {
@@ -7967,6 +7975,10 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
 
   Write_collector wc;
   wc.skip_loop_controls = true;
+  std::vector<const slang::ast::ImmediateAssertionStatement*> assertions;
+  if (!options_.ignore_assertions) {
+    wc.assertions = &assertions;
+  }
   body.visit(wc);
 
   // Every symbol this process writes, either style. Built once: the bit-clock
@@ -8078,6 +8090,37 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
     blocking_values_.emplace(sym, value);
   }
 
+  // A design assert has continuous semantics in Pyrope. Sample the
+  // guarded SV failure on its actual edge, before nonblocking writes
+  // commit. A zero power-on value means no check has fired yet.
+  std::vector<std::pair<std::string, std::string>> sampled_asserts;
+  for (const auto* assertion : assertions) {
+    const auto failure = fresh_local("assert_failed");
+    const auto sampled = fresh_local("assert_sample");
+    builder_.create_declare_stmts(failure, "mut", "1", "0");
+    builder_.create_assign_stmts(failure, "0");
+    builder_.create_declare_stmts(sampled, "reg", "1", "0");
+    const auto attr = [&](std::string_view name, const Lnast_node& value) {
+      auto n = builder_.add_child(Lnast_ntype::create_attr_set());
+      builder_.add_child(n, Lnast_node::create_ref(sampled));
+      builder_.add_child(n, Lnast_node::create_const(name));
+      builder_.add_child(n, value);
+    };
+    attr("initial", Lnast_node::create_const("0"));
+    attr("reset_pin", Lnast_node::create_const("false"));
+    attr("clock_pin", Lnast_node::create_ref(clock_ref));
+    if (negedge) {
+      attr("posclk", Lnast_node::create_const("false"));
+    }
+    set_pending_loc(assertion->sourceRange);
+    const auto passed = booleanize(builder_.create_bit_not_stmts(sampled, 1));
+    const auto check = builder_.add_child(Lnast_ntype::create_cassert());
+    builder_.add_value_child_pub(check, passed);
+    clear_pending_loc();
+    edge_assert_fail_.emplace(assertion, failure);
+    sampled_asserts.emplace_back(sampled, failure);
+  }
+
   for (const auto* stmt : prologue) {
     lower_statement(*stmt);
   }
@@ -8100,6 +8143,10 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
       builder_.create_assign_stmts(reg_net_of(*sym), it->second);
     }
   }
+  for (const auto& [sample, failure] : sampled_asserts) {
+    builder_.create_assign_stmts(sample, failure);
+  }
+  edge_assert_fail_.clear();
   blocking_values_.clear();
   // Only bits actually written by THIS process get its clock. Sorting keeps
   // the emitted LNAST independent of hash iteration order.

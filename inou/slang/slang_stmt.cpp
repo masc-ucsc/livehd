@@ -373,6 +373,12 @@ void Slang_context::lower_immediate_assertion(const slang::ast::ImmediateAsserti
   // `booleanize`: pyrope keeps bool and int apart and a cassert condition is a
   // bool, but `assert(flag)` over a 1-bit net lowers to an integer.
   auto cond = booleanize(lower_rvalue(stmt.cond));
+  if (const auto it = edge_assert_fail_.find(&stmt); it != edge_assert_fail_.end()) {
+    const auto failure = builder_.create_bit_not_stmts(to_int_value(cond), 1);
+    builder_.create_assign_stmts(it->second, builder_.create_bit_or_stmts({it->second, failure}));
+    clear_pending_loc();
+    return;
+  }
   auto idx  = builder_.add_child(Lnast_ntype::create_cassert());
   builder_.add_value_child_pub(idx, cond);
   if (stmt.assertionKind == AssertionKind::Assume) {

@@ -197,6 +197,9 @@ struct Slang_module_state {
   // ── per-process state ──────────────────────────────────────────────────────
   enum class Proc_kind : uint8_t { none, comb, seq };
   Proc_kind                                            proc_kind_ = Proc_kind::none;
+  // Immediate assertions in the current edge-triggered block accumulate
+  // failures here, under their original procedural guards.
+  absl::flat_hash_map<const slang::ast::ImmediateAssertionStatement*, std::string> edge_assert_fail_;
   // First assignment style seen for a var in the CURRENT process (true =
   // nonblocking). The mixing diagnostic points at the OFFENDING write's own
   // location, so the first write's location is not kept.
