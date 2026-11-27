@@ -1,0 +1,20 @@
+/*
+:name: imported_enum_port
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// `pub enum` at file scope: the producer file shares a port type and its named
+// values with the consumer. `commands.MemCmd` is a 5-bit port (`enum E:U5`) and
+// `commands.MemCmd.load` / `.store` fold to 0 / 1.
+const commands = import("imported_enum_port/commands")
+
+pub comb isStore(cmd:commands.MemCmd) -> (yes:Bool) {
+  yes = cmd == commands.MemCmd.store
+}
+
+pub mod top(cmd:commands.MemCmd) -> (st:Bool@[], ld:Bool@[]) {
+  st = isStore(cmd)
+  ld = cmd == commands.MemCmd.load
+}

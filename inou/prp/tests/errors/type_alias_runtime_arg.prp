@@ -1,0 +1,14 @@
+/*
+:name: type_alias_runtime_arg
+:type: error
+:error: runtime value
+:help: compile-time
+*/
+
+// An argument is substituted into the alias body, so a width that is a runtime
+// value is the usual `Unsigned(bits=...)` error, never a silent narrowing.
+type Req<W=32> = (addr:Unsigned(bits=W), valid:Bool)
+
+pub mod type_alias_runtime_arg(n:U8, r:Req<n>) -> (o:U8@[0]) {   // locate_error_here
+  o = r.addr
+}

@@ -1,0 +1,3 @@
+// Imported helper for ../imported_enum_port.prp: a PUBLIC enum used by the
+// importer as a port type and for its named values.
+pub enum MemCmd:U5 = (load = 0, store = 1)

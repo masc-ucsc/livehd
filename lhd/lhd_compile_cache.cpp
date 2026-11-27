@@ -45,6 +45,7 @@
 #include "node_util.hpp"
 #include "prp2lnast.hpp"
 #include "prp_import.hpp"
+#include "prp_type_alias.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -501,6 +502,7 @@ std::vector<Source_unit> capture_closure(const std::vector<std::string>& seeds, 
   }
   livehd::prp_import::Resolver resolver;
   std::vector<Source_unit> out;
+  std::set<std::string> had_templates;  // units whose PRIOR snapshot declared type templates
   while (!pending.empty()) {
     std::map<std::string, std::string> next;
     for (const auto& path : pending) {
@@ -518,8 +520,17 @@ std::vector<Source_unit> capture_closure(const std::vector<std::string>& seeds, 
           if (comparison == File_compare::equal) {
             unit.exact_snapshot_match = true;
             unit.imports              = old->second.imports;
-          } else if (comparison == File_compare::unavailable) {
-            unit.snapshot_unavailable = true;
+          } else {
+            if (comparison == File_compare::unavailable) {
+              unit.snapshot_unavailable = true;
+            }
+            // An edit that deletes or renames the last template leaves bytes that
+            // no longer look templated, yet importers expanded the old text.
+            std::error_code old_ec;
+            const auto  old_snapshot = scope + "/pyrope/" + old->second.snapshot_file;
+            if (fs::is_regular_file(old_snapshot, old_ec) && !old_ec && prp_type_alias::might_have_templates(slurp(old_snapshot))) {
+              had_templates.insert(unit.name);
+            }
           }
         }
       }
@@ -582,6 +593,39 @@ std::vector<Source_unit> capture_closure(const std::vector<std::string>& seeds, 
     pending.clear();
     for (auto& [name, path] : next) {
       pending.push_back(std::move(path));
+    }
+  }
+  // A parameterized type alias is expanded in the IMPORTER, from the exporter's
+  // source text (prp_type_alias.hpp), so an importer's cached LNAST is stale
+  // whenever such an exporter changed, directly or through another importer
+  // that re-exports its aliases: lower every dependent again.
+  {
+    std::map<std::string, Source_unit*> by_name;
+    for (auto& unit : out) {
+      by_name.emplace(unit.name, &unit);
+    }
+    std::set<std::string>    dirty;
+    std::vector<std::string> work;
+    for (const auto& unit : out) {
+      if (!unit.exact_snapshot_match && (had_templates.contains(unit.name) || prp_type_alias::might_have_templates(unit.bytes)) && dirty.insert(unit.name).second) {
+        work.push_back(unit.name);
+      }
+    }
+    while (!work.empty()) {
+      const auto cur = std::move(work.back());
+      work.pop_back();
+      const auto it = importers.find(cur);
+      if (it == importers.end()) {
+        continue;
+      }
+      for (const auto& importer : it->second) {
+        if (const auto u = by_name.find(importer); u != by_name.end()) {
+          u->second->exact_snapshot_match = false;
+        }
+        if (dirty.insert(importer).second) {
+          work.push_back(importer);
+        }
+      }
     }
   }
   // Keep snapshot numbering independent of visitation order.

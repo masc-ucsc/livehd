@@ -1,0 +1,21 @@
+/*
+:name: clock_var_gated_child_unbound
+:type: error
+:tolg: 1
+:error: 2 .Clock. variables .*no implicit clock
+:help: pass the clock by name
+*/
+
+// A gated `Clock(...)` is a second Clock variable: the child call that omits its
+// `Clock` input used to be auto-wired to `clk` silently. Bind it by name.
+mod leaf(clk:Clock, rst:Reset, d:U8) -> (q:U8@[]) {
+  reg r:U8:[clock_pin=clk] = 0
+  r = d
+  q = r
+}
+
+pub mod clock_var_gated_child_unbound(clk:Clock, rst:Reset, en:Bool, d:U8) -> (q:U8@[]) {
+  const gclk = Clock(clock_pin=clk, enable=en)
+  const l = leaf(d=d)   // locate_error_here
+  q = l.q
+}

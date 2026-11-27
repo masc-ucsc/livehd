@@ -1,0 +1,13 @@
+/*
+:name: type_alias_missing_generic
+:type: error
+:error: needs a value for generic .W.
+:help: give the generic a default
+*/
+
+// A generic with no default must be bound: a bare `Row` is not an application.
+type Row<W> = Unsigned(bits=W)
+
+pub mod type_alias_missing_generic(r:Row) -> (o:U8@[0]) {   // locate_error_here
+  o = r
+}

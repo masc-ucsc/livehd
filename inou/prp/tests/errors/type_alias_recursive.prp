@@ -1,0 +1,13 @@
+/*
+:name: type_alias_recursive
+:type: error
+:error: expands without end
+:help: may not use itself
+*/
+
+// An alias that applies itself never finishes expanding.
+type Loop<W> = (x:Unsigned(bits=W), rest:Loop<W>)
+
+pub mod type_alias_recursive(r:Loop<4>) -> (o:U4@[0]) {   // locate_error_here
+  o = r.x
+}

@@ -44,6 +44,7 @@ http_archive(
         "//packages:llvm23-scheduler-dead-defs.patch",
         "//packages:llvm23-bt-narrow-count.patch",
         "//packages:llvm23-known-bits-shifts.patch",
+        "//packages:llvm23-odd-count-xor.patch",
     ],
     sha256 = "819ecf7351f1a66f76b2d701d8942faaf5faeb324cb90c9d5b090de142434bb2",
     strip_prefix = "llvm-project-23.1.4.src",
@@ -230,9 +231,9 @@ http_archive(
 http_archive(
     name = "prpparse",
     build_file = "//packages:prpparse.BUILD",
-    integrity = "sha256-m+9iLe3HanfzQoLIk1Ja92ro5ZyMrtfb8vBwxCOM3CI=",
-    strip_prefix = "tree-sitter-pyrope-26f5df978d9139257ea84a3c8df67d2d80c8a34d/prpparse",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/26f5df978d9139257ea84a3c8df67d2d80c8a34d.zip"],
+    integrity = "sha256-L6CQumhb+eetJ2P4gIJbquspwf5eS8KEAW9VkmLXYSM=",
+    strip_prefix = "tree-sitter-pyrope-a87bb9307b8cc0ca42a82f1c771fe84e31a8f46d/prpparse",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/a87bb9307b8cc0ca42a82f1c771fe84e31a8f46d.zip"],
 )
 
 # Local co-development swap (replace the archive above):
@@ -272,9 +273,9 @@ http_archive(
 http_archive(
     name = "tree_sitter_pyrope",
     build_file = "//packages:prpfmt.BUILD",
-    integrity = "sha256-m+9iLe3HanfzQoLIk1Ja92ro5ZyMrtfb8vBwxCOM3CI=",
-    strip_prefix = "tree-sitter-pyrope-26f5df978d9139257ea84a3c8df67d2d80c8a34d",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/26f5df978d9139257ea84a3c8df67d2d80c8a34d.zip"],
+    integrity = "sha256-L6CQumhb+eetJ2P4gIJbquspwf5eS8KEAW9VkmLXYSM=",
+    strip_prefix = "tree-sitter-pyrope-a87bb9307b8cc0ca42a82f1c771fe84e31a8f46d",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/a87bb9307b8cc0ca42a82f1c771fe84e31a8f46d.zip"],
 )
 
 # Local co-development swap (replace the archive above):

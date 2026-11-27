@@ -1,0 +1,28 @@
+/*
+:name: sibling_local_state
+:type: simulation
+*/
+pub mod sibling_local_state(clock:Clock, left:U1, right:U1, data:U8) -> (a:U8@[], b:U8@[]) {
+  a = 0
+  b = 0
+  if left != 0 {
+    reg previous:U8:[clock_pin=clock]
+    previous = data
+    a = previous
+  }
+  if right != 0 {
+    reg previous:U8:[clock_pin=clock]
+    previous = ~data
+    b = previous
+  }
+}
+test sibling_local_state.independent {
+  mut d = sibling_local_state
+  tick 4 {
+    d.left = 1
+    d.right = 1
+    d.data = 42
+    step
+    assert(d.a == 42 and d.b == 213)
+  }
+}

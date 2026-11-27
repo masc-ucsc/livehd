@@ -3940,6 +3940,23 @@ void Lnast_prp_writer::plan_clock_reset_ports(Lnast_nid stmts_nid, bool is_mod) 
   for (const auto& n : nets) {
     clock_copy_nets_.insert(strip_prefix(n));
   }
+  // Clock nets that are a plain copy of a port (`assign clock = clk_i`).
+  absl::flat_hash_set<std::string> port_alias;
+  {
+    std::function<void(Lnast_nid)> find_alias = [&](Lnast_nid n) {
+      if (Lnast_ntype::is_store(lnast->get_type(n)) && is_clock_copy(*lnast, n, nets)) {
+        const auto tgt = lnast->get_first_child(n);
+        const auto val = lnast->get_sibling_next(tgt);
+        if (port_names.contains(lnast->get_name(val))) {
+          port_alias.insert(std::string(lnast->get_name(tgt)));
+        }
+      }
+      for (auto c = lnast->get_first_child(n); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+        find_alias(c);
+      }
+    };
+    find_alias(stmts_nid);
+  }
   const bool                                     verilog = lnast->is_verilog_origin();
   absl::flat_hash_map<int64_t, std::string_view> gate_and;  // a gate's `bit_and` -> its clock
   absl::flat_hash_set<std::string_view>          gated;     // Clock inputs a gate uses
@@ -4063,7 +4080,16 @@ void Lnast_prp_writer::plan_clock_reset_ports(Lnast_nid stmts_nid, bool is_mod) 
         // Several printed Clocks leave the Pyrope unit no implicit clock, while
         // imported Verilog binds its unnamed registers to the conventional
         // clk/clock (a port typed Clock by its use is always named): name it.
-        if (!verilog || sig != Io_sig::clock || of.size() < 2 || !upass::io_port::verilog_clock_name(e->name)) {
+        // The module introduces a clock of its own (a gate, a `wire x:Clock`): the
+        // input is no longer THE implicit clock (docs 04b counts Clock variables),
+        // so every register that names no pin spells `clock_pin=<input>`.
+        // A net that only mirrors a port (`assign clock = clk_i`) is the port
+        // itself, not a second Clock variable.
+        const bool local_net = std::any_of(nets.begin(), nets.end(), [&](const auto& n) {
+          return !port_names.contains(n) && !port_alias.contains(n);
+        });
+        const bool introduces_clock = sig == Io_sig::clock && of.size() == 1 && (local_net || !clock_gate_store_.empty());
+        if (!introduces_clock && (!verilog || sig != Io_sig::clock || of.size() < 2 || !upass::io_port::verilog_clock_name(e->name))) {
           continue;
         }
       } else {

@@ -456,7 +456,7 @@ protected:
   // has field identity but deliberately no field ORDER.
   [[nodiscard]] bool                         named_bundle_without_bit_order(std::string_view name) const;
   void                                       check_concat_dest(std::string_view dest_name, std::string_view value_name);
-  [[nodiscard]] uint32_t                     concat_lane_declared_bits(std::string_view lane_name) const;
+  [[nodiscard]] uint32_t concat_lane_declared_bits(std::string_view lane_name, std::string_view raw_name = {}) const;
   [[nodiscard]] std::vector<std::string>     resolve_concat_widths(std::string& dst_name);
   // `x:u48 = 0sb?` -> the `0ub` + 48 `?` literal the wildcard stands for at this
   // destination, or "" to leave the store as written. See the definition.

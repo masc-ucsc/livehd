@@ -1,0 +1,21 @@
+/*
+:name: clock_var_gated_plain_reg
+:type: error
+:tolg: 1
+:error: 2 .Clock. variables .*no implicit clock
+:help: :\[clock_pin=
+*/
+
+// docs 04b "Implicit clock and reset" (owner ruling 2026-11-26): the implicit clock
+// counts the module's `Clock` VARIABLES -- its inputs plus every clock it
+// introduces. `gclk` is a second one, so `plain` (no `clock_pin`) used to be
+// silently clocked by `clk`; it is now a `clock-ambiguous` error.
+pub mod clock_var_gated_plain_reg(clk:Clock, rst:Reset, en:Bool, d:U8) -> (q:U8@[], q2:U8@[]) {
+  const gclk = Clock(clock_pin=clk, enable=en)
+  reg gated:U8:[clock_pin=gclk] = 0
+  reg plain:U8 = 0   // locate_error_here
+  gated = d
+  plain = d
+  q = gated
+  q2 = plain
+}

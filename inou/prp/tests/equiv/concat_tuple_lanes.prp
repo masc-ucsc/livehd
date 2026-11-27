@@ -11,7 +11,25 @@
 // layout by selecting fields as separate lanes. These two outputs prove that
 // dotted field lanes retain their DECLARED widths and that changing their
 // explicit order changes the packed layout.
-pub comb top(p:(hi:U4, lo:S3), c:U2) -> (zt:U9, zd:U9) {
+// The lane declarations acquire their widths when the caller binds w.
+comb pair<w>(a:Unsigned(bits=w), b:Unsigned(bits=w)) -> (z:Unsigned(bits=w*2)) {
+  z = (a,b)#[..]
+}
+
+type Tagged<W> = (tag:Unsigned(bits=W), event:U2)
+comb tagged<W>(entry:Tagged<W>) -> (direct:Unsigned(bits=W+2), copied:Unsigned(bits=W+2)) {
+  const tag:Unsigned(bits=W) = entry.tag
+  direct = (entry.event, entry.tag)#[..]
+  copied = (entry.event, tag)#[..]
+}
+
+pub comb top(p:(hi:U4, lo:S3), c:U2) -> (zt:U9, zd:U9, pairs:U12, direct:U8, copied:U8) {
+  const fields = tagged<W=6>(entry=(event=c, tag=p.hi))
+  direct = fields.direct
+  copied = fields.copied
+  const narrow:U4 = pair<w=2>(a=c, b=p.hi#[0..+2])
+  const wide:U8 = pair<w=4>(a=p.hi, b=c)
+  pairs = (narrow,wide)#[..]
   zt = (c, p.hi, p.lo)#[..]   // lo in [8:6], hi in [5:2]
   zd = (c, p.lo, p.hi)#[..]   // hi in [8:5], lo in [4:2]
 }

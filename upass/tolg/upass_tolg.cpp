@@ -9673,37 +9673,156 @@ private:
     pending_checks_.push_back({it->second, name, a_min, a_max});
   }
 
+  // The `Clock` variables the body introduces besides the module's inputs (docs
+  // 04b "Implicit clock and reset"), one entry per variable, in source order:
+  //  - a local declared `:Clock` (`wire pclk:Clock`, `const c:Clock = ...`);
+  //  - the result of `Clock(clock_pin=..., enable=...)`;
+  //  - a `Clock` output of a child instance.
+  // Variables are counted, not nets, so a `:Clock` wire the comptime config
+  // happens to drive from the input still counts. Read from the (post-upass)
+  // LNAST, so a branch comptime folding removed does not count (an unused
+  // variable still does: the rule counts what the source declares).
+  const std::vector<std::string>& introduced_clock_names() const {
+    if (introduced_clocks_.has_value()) {
+      return *introduced_clocks_;
+    }
+    const auto base_of = [](std::string_view n) { return std::string(n.substr(0, n.find("___ssa_"))); };
+
+    // `store(var, %tmp)`: the variable a call result lands in (names it).
+    absl::flat_hash_map<std::string, std::string> stored_in;
+    std::function<void(const Lnast_nid&)>         find_stores = [&](const Lnast_nid& nid) {
+      if (Lnast_ntype::is_store(lnast_->get_type(nid))) {
+        const auto lhs = lnast_->get_first_child(nid);
+        const auto rhs = lhs.is_invalid() ? lhs : lnast_->get_sibling_next(lhs);
+        if (!rhs.is_invalid() && Lnast_ntype::is_ref(lnast_->get_type(lhs)) && Lnast_ntype::is_ref(lnast_->get_type(rhs))
+            && !Lnast::is_tmp(lnast_->get_name(lhs)) && Lnast::is_tmp(lnast_->get_name(rhs))) {
+          stored_in.try_emplace(std::string(lnast_->get_name(rhs)), base_of(lnast_->get_name(lhs)));
+        }
+      }
+      for (auto c = lnast_->get_first_child(nid); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
+        find_stores(c);
+      }
+    };
+    find_stores(lnast_->get_root());
+
+    std::vector<std::string>         names;
+    absl::flat_hash_set<std::string> seen;
+    const auto                       add = [&](std::string name) {
+      if (seen.insert(name).second) {
+        names.push_back(std::move(name));
+      }
+    };
+    const auto var_of = [&](std::string_view tmp, std::string_view fallback) {
+      const auto it = stored_in.find(std::string(tmp));
+      return it != stored_in.end() ? it->second : std::string(fallback);
+    };
+    std::function<void(const Lnast_nid&)> walk = [&](const Lnast_nid& nid) {
+      const auto t = lnast_->get_type(nid);
+      if (Lnast_ntype::is_declare(t)) {
+        const auto name = lnast_->get_first_child(nid);
+        const auto type = name.is_invalid() ? name : lnast_->get_sibling_next(name);
+        if (!type.is_invalid() && Lnast_ntype::is_prim_type_clock(lnast_->get_type(type))) {
+          add(base_of(lnast_->get_name(name)));
+        }
+      } else if (Lnast_ntype::is_func_call(t)) {
+        const auto dst    = lnast_->get_first_child(nid);
+        const auto callee = dst.is_invalid() ? dst : lnast_->get_sibling_next(dst);
+        if (!callee.is_invalid() && (Lnast_ntype::is_ref(lnast_->get_type(callee)) || Lnast_ntype::is_const(lnast_->get_type(callee)))) {
+          std::string cname(lnast_->get_name(callee));
+          if (cname.size() >= 2 && cname.front() == '\'' && cname.back() == '\'') {
+            cname = cname.substr(1, cname.size() - 2);
+          }
+          const auto var = var_of(lnast_->get_name(dst), "");
+          if (cname == "Clock" && Lnast_ntype::is_ref(lnast_->get_type(callee))) {
+            add(var.empty() ? std::string("Clock(...)") : var);
+          } else if (registry_ != nullptr) {
+            if (const auto child = resolve_callee_lnast(cname, *registry_, lnast_->get_top_module_name());
+                child && !child->is_verilog_origin()) {
+              const auto inst = var.empty() ? cname.substr(cname.rfind('.') == std::string::npos ? 0 : cname.rfind('.') + 1) : var;
+              for (const auto& o : child->io_meta().outputs) {
+                if (o.sig == Io_sig::clock) {
+                  add(absl::StrCat(inst, ".", o.name));
+                }
+              }
+            }
+          }
+        }
+      }
+      for (auto c = lnast_->get_first_child(nid); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
+        walk(c);
+      }
+    };
+    walk(lnast_->get_root());
+    introduced_clocks_ = std::move(names);
+    return *introduced_clocks_;
+  }
+
   // The clock graph-input pin. A minted implicit clock gets stamped 1-bit
   // unsigned on first use; a reused declared clk/clock input keeps the
   // width/sign the io loop already stamped.
   [[nodiscard]] Pin clock_pin() {
     if (!clock_pin_valid_) {
-      // docs 04b "Implicit clock and reset": the implicit clock is the ONE
-      // `Clock` input. With two or more, whatever relies on it (a reg or
-      // memory with no `clock_pin`, a stage, a child's omitted Clock) is a
-      // compile error -- the twin of reset_pin()'s. Anchored at the current
-      // statement: the first such reg/stage/call.
-      std::vector<std::string_view> candidates;
+      // docs 04b "Implicit clock and reset": count the module's `Clock`
+      // VARIABLES -- its `Clock` inputs plus every clock the module
+      // introduces (a gated `Clock(...)`, a local declared `:Clock`, a child's
+      // `Clock` output). Exactly one is the implicit clock; with two or more,
+      // whatever relies on it (a reg or memory with no `clock_pin`, a stage, a
+      // child's omitted Clock) is a compile error -- the twin of reset_pin()'s.
+      // Anchored at the current statement: the first such reg/stage/call.
+      std::vector<std::string> candidates;
       for (const auto& e : lnast_->io_meta().inputs) {
         if (is_clock_candidate(e)) {
-          candidates.push_back(e.name);
+          candidates.emplace_back(e.name);
         }
       }
       // Imported Verilog names every clock but its conventional one
       // (clock_name_), so a second Clock-typed port (typed by its use) is no
       // ambiguity there.
-      if (candidates.size() > 1 && !lnast_->is_verilog_origin()) {
-        const auto top = lnast_->get_top_module_name();
-        error_hint_at(Lnast_nid{},
-                      {"clock-ambiguous", "time"},
-                      std::format("'{}' has {} `Clock` inputs (`{}`), so it has no implicit clock — every register, "
-                                  "memory and stage needs `clock_pin=…`, and every child `Clock` input must be bound",
-                                  top.substr(top.rfind('.') + 1),
-                                  candidates.size(),
-                                  absl::StrJoin(candidates, "`, `")),
-                      std::format("bind this one with `:[clock_pin={}]` (a reg, stage or memory), or pass the clock by "
-                                  "name at a call",
-                                  candidates.front()));
+      if (!lnast_->is_verilog_origin()) {
+        const auto n_inputs = candidates.size();
+        // A minted `clock` is itself a Clock variable of the module (the
+        // implicit one); it can not be named, so it can not be pinned.
+        if (clock_minted_) {
+          candidates.emplace_back(clock_name_);
+        }
+        const auto  n_before = candidates.size();
+        const auto& locals   = introduced_clock_names();
+        candidates.insert(candidates.end(), locals.begin(), locals.end());
+        if (candidates.size() > 1) {
+          const auto top      = lnast_->get_top_module_name();
+          const auto top_name = top.substr(top.rfind('.') + 1);
+          if (n_before == candidates.size() && n_inputs == candidates.size()) {
+            error_hint_at(Lnast_nid{},
+                          {"clock-ambiguous", "time"},
+                          std::format("'{}' has {} `Clock` inputs (`{}`), so it has no implicit clock — every register, "
+                                      "memory and stage needs `clock_pin=…`, and every child `Clock` input must be bound",
+                                      top_name,
+                                      candidates.size(),
+                                      absl::StrJoin(candidates, "`, `")),
+                          std::format("bind this one with `:[clock_pin={}]` (a reg, stage or memory), or pass the clock by "
+                                      "name at a call",
+                                      candidates.front()));
+          } else {
+            error_hint_at(Lnast_nid{},
+                          {"clock-ambiguous", "time"},
+                          std::format("'{}' has {} `Clock` variables (`{}`: {} input{}{}, {} introduced in its body), so it has "
+                                      "no implicit clock — every register, memory and stage needs `clock_pin=…`, and every child "
+                                      "`Clock` input must be bound",
+                                      top_name,
+                                      candidates.size(),
+                                      absl::StrJoin(candidates, "`, `"),
+                                      n_inputs,
+                                      n_inputs == 1 ? "" : "s",
+                                      clock_minted_ ? " + the implicit `clock`" : "",
+                                      locals.size()),
+                          clock_minted_ && n_inputs == 0
+                              ? std::string("the implicit `clock` can not be named: declare `clock:Clock` as an input to pin "
+                                            "registers to it")
+                              : std::format("bind this one with `:[clock_pin={}]` (a reg, stage or memory), or pass the clock by "
+                                            "name at a call",
+                                            candidates.front()));
+          }
+        }
       }
       auto p = g_->get_input_pin(clock_name_);
       if (clock_minted_) {
@@ -13261,6 +13380,7 @@ private:
   bool                                                                            clock_minted_ = false;
   Pin                                                                             clock_pin_;
   bool                                                                            clock_pin_valid_ = false;
+  mutable std::optional<std::vector<std::string>>                                 introduced_clocks_;  // introduced_clock_names() cache
   std::string                                                                     reset_name_;
   bool                                                                            reset_minted_        = false;
   bool                                                                            reset_neg_           = false;

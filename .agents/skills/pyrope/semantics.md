@@ -61,6 +61,17 @@ is the final judge. Check each edit with `lhd` using the [CLI reference](../live
   (`type Row = Unsigned(bits=N)`) and generic arguments. A type word can head
   a suffix chain: `U8.[max] == 255`, `U8(x)#[0]`; a type has no fields
   (`U8.x` is an error).
+* A bundle type whose widths depend on a generic is ONE parameterized alias:
+  `pub type Req<W=32> = (addr:Unsigned(bits=W), valid:Bool)`, used as
+  `r:Req<16>`, `Req<W=8>`, `Req<(W*2)>`, a bare `Req` (all generics default),
+  `pkg.Req<W>` after `const pkg = import("file")`. It is expanded where written
+  (structural: `Req<32> equals (addr:U32, valid:Bool)`), so it goes in ports,
+  locals, `reg`, tuple fields, `[N]Req<W>`, generic arguments and other aliases.
+  The `<` touches the name; `a:Req<W>=0` and `Queue<T=Req<W>>` parse. Errors:
+  `type-alias-arity`, `unknown-generic-name`, `missing-generic-argument`,
+  runtime argument (`type-bound-not-comptime`). An alias imported from a file
+  reads that file's other names through the binding, so they must be `pub`;
+  it needs the exporter's `.prp` source (not an `ln:`/`lg:` unit).
 * Read a declaration's width/range with attributes: `x.[bits]`, `x.[max]`,
   `x.[min]` (a typed value reports its declared type; works on inputs and
   outputs: `for i in 0..<gray.[bits]`). An untyped `const` alias of a typed
@@ -236,7 +247,8 @@ mut arr = [1, 2, 3]                    // [] = array: all entries same type
   `cassert(x does T)`; convert with constructor calls: `U8(x)`, `Signed(s)`,
   `String(n)`. Type-shape operands write the bare type (`x does U8`). A tuple
   of types is a value like any tuple: `(a=U8, b=S20)`.
-* Enums: `enum State = (Idle, Run, Done)` — one-hot encoding by default; any
+* Enums: `enum State = (Idle, Run, Done)` (`pub enum` at file scope exports it:
+  `pkg.State` is the port type, `pkg.State.Idle` the value) — one-hot encoding by default; any
   explicit value (or an integer type) switches to sequential. **Always compare
   against names** (`st == State.Idle`), never raw integers. Casts:
   `String(E.a)`, `E("a")`, `E.a#[..]` for the bits; `Signed(E.a)` and
@@ -361,13 +373,21 @@ const old = past[2](counter)  // pipelined: inserts 2 flops, shifts landing cycl
   `Clock` is a clock and one typed `Reset` is a reset, whatever the name
   (`core_clk:Clock`, `rst_n:Reset`); an input named `clk`/`clock`/`rst`/`reset`
   typed `Bool`/`U1` is plain DATA. Implicit clock = the module's single
-  `Clock` input; implicit reset = its single `Reset` input. Two or more
-  `Clock` (`Reset`) inputs leave no implicit one: every register, memory and
-  stage names it (`clock_pin=clk_a`, `reset_pin=r2`), and relying on it is a
-  compile error (`clock-ambiguous`). With none, a `clock:Clock` /
-  `reset:Reset` input is minted (a non-`Clock` input already named `clock`, or
-  non-`Reset` named `reset`, is then a compile error) and every caller wires
-  its own implicit clock/reset to it.
+  `Clock` VARIABLE: its `Clock` inputs (a tuple-port field included) PLUS every
+  clock the body introduces (`Clock(clock_pin=…, enable=…)`, a local `wire x:Clock`,
+  a child's `Clock` output; variables are counted, not nets, and an
+  `if en { child(...) }` conditional call counts nothing). Implicit reset = its
+  single `Reset` input. Two or more `Clock` (`Reset`) variables leave no implicit
+  one: every register, memory and stage names it (`clock_pin=clk_a`,
+  `reset_pin=r2`), every child `Clock` input is bound by name, and relying on
+  it is a compile error (`clock-ambiguous`). So a module that gates a clock
+  writes `clock_pin=clk` on its ungated registers too; to keep registers
+  implicit, put the gated logic in a child with one `Clock` input (a `stage[N]`
+  cannot be pinned: use a `reg` there). With none, a
+  `clock:Clock` / `reset:Reset` input is minted (a non-`Clock` input already
+  named `clock`, or non-`Reset` named `reset`, is then a compile error; the
+  body cannot name the minted `clock`, declare it as an input to read it) and
+  every caller wires its own implicit clock/reset to it.
 * A `Clock` is not data: no arithmetic, no `if clk`, no `U1(clk)`/`Bool(clk)`
   (`clock-as-data`); it only drives clock pins or another `Clock` port. Its
   numeric view (a cycle counter) is readable only in debug contexts (`test`
@@ -668,7 +688,8 @@ formal cnt.bounded {
 ## Files, visibility, instantiation
 
 * A file's top scope is setup code, run once. Only `pub` top-scope lambdas,
-  types, and constants can be imported: `const lib = import("file")` /
+  types (`pub type`, parameterized aliases too), enums (`pub enum`) and constants
+  can be imported: `const lib = import("file")` /
   `import("file.pub_name")` / `import("proj/file")`. No glob patterns.
   `pub mut`, `pub reg` and `pub wire` are compile errors; the SYNTHESIZABLE
   cross-hierarchy register attach (`regref` by string path, zero-or-many

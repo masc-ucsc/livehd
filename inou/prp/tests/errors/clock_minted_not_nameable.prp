@@ -1,0 +1,16 @@
+/*
+:name: clock_minted_not_nameable
+:type: error
+:error: undefined variable .clock.
+:help: declare .clock:Clock. as an input to name it
+*/
+
+// docs 04b: a module with no `Clock` input gets an implicit `clock` that can only be
+// relied on, never read: the body can not name it to gate it. Declaring
+// `clock:Clock` as an input makes it nameable.
+pub mod clock_minted_not_nameable(rst:Reset, en:Bool, d:U8) -> (q:U8@[]) {
+  const gclk = Clock(clock_pin=clock, enable=en)   // locate_error_here
+  reg r:U8:[clock_pin=gclk] = 0
+  r = d
+  q = r
+}

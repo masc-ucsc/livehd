@@ -1,0 +1,5 @@
+// Imported helper for ../imported_alias_generic.prp: PARAMETERIZED public type
+// aliases. The importer applies them with a generic argument, by name, with the
+// default, and through a single-entry import.
+pub type Row<W=8> = Unsigned(bits=W)
+pub type Wide<W> = (lo:Row<W>, hi:Row<(W*2)>)

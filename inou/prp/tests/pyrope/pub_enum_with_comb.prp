@@ -1,0 +1,15 @@
+/*
+:name: pub_enum_with_comb
+:type: compile
+*/
+// A `pub enum` in the same file as a comb that reads it: the capture replay of
+// the enum inside the comb body must not re-export it nor trip the file-scope check.
+pub enum State = (Idle, Run)
+
+pub comb pub_enum_with_comb(a:Bool) -> (o:Bool) {
+  mut s:State = State.Idle
+  if a {
+    s = State.Run
+  }
+  o = s == State.Run
+}

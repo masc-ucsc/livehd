@@ -1,0 +1,11 @@
+const expand = import("ops.lowPair")
+pub comb unpack<width>(x:Unsigned(bits=4*width)) -> (y:Unsigned(bits=4*width)) {
+  y = 0
+  for bank in 0..<(width/2) {
+    for lane in 0..<2 {
+      const i = bank*2 + lane
+      const out = expand(x=x#[(4*i)..+4])
+      y#[(4*i)..+4] = out
+    }
+  }
+}

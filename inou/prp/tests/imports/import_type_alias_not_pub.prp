@@ -1,0 +1,13 @@
+/*
+:name: import_type_alias_not_pub
+:type: error
+:files: inou/prp/tests/imports/lib_type_alias_private.prp inou/prp/tests/imports/import_type_alias_not_pub.prp
+:error: is not .pub.
+:help: pub type
+*/
+// An importer applies only the `pub` parameterized aliases of a unit.
+const lib = import("lib_type_alias_private")
+pub comb ok(a:lib.Shown<4>) -> (y:U4) { y = a }
+pub comb bad(a:lib.Hidden<4>) -> (y:U4) {   // locate_error_here
+  y = a
+}

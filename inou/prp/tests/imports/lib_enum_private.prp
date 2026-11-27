@@ -1,0 +1,3 @@
+// A plain `enum` stays file-local: it is not exported.
+enum Mode:U2 = (idle = 0, busy = 1)
+pub const keep = 1

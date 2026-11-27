@@ -1,0 +1,21 @@
+/*
+:name: clock_vars_conditional_call_not_counted
+:type: compile
+*/
+// A conditional stateful call (`if en { child(...) }`, ruling 2026-11-25) gates
+// the child's clock inside the caller but names no Clock variable, so the
+// caller keeps a single implicit clock and the child's `Clock` input is auto-wired.
+mod leaf(clk:Clock, rst:Reset, d:U8) -> (q:U8@[1]) {
+  reg r:U8 = 0
+  r = d
+  q = r
+}
+
+pub mod clock_vars_conditional_call_not_counted(clk:Clock, rst:Reset, en:Bool, d:U8) -> (q:U8@[1]) {
+  reg hold:U8 = 0
+  if en {
+    const l = leaf(d=d)
+    hold = l.q
+  }
+  q = hold
+}

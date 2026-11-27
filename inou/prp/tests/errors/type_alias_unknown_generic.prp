@@ -1,0 +1,13 @@
+/*
+:name: type_alias_unknown_generic
+:type: error
+:error: has no generic named .K.
+:help: bind one of its generics by name
+*/
+
+// A named binding must name a generic of the alias.
+type Req<W=32> = (addr:Unsigned(bits=W), valid:Bool)
+
+pub mod type_alias_unknown_generic(r:Req<K=8>) -> (o:U8@[0]) {   // locate_error_here
+  o = r.addr
+}

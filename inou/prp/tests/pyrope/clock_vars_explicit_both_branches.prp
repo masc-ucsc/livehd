@@ -1,0 +1,28 @@
+/*
+:name: clock_vars_explicit_both_branches
+:type: compile
+*/
+// The module names a pipeline clock variable in every configuration: the gate
+// is a Clock(...) when `gate` is true and `clk` itself otherwise, and every
+// register spells its clock, so both comptime branches compile.
+mod pipe_stage<gate=true>(clk:Clock, rst:Reset, en:Bool, d:U8) -> (q:U8@[1], p:U8@[1]) {
+  wire pclk:Clock
+  if gate {
+    pclk = Clock(clock_pin=clk, enable=en)
+  } else {
+    pclk = clk
+  }
+  reg a:U8:[clock_pin=pclk] = 0
+  reg keep:U8:[clock_pin=clk] = 0
+  a = d
+  keep = d
+  q = a
+  p = keep
+}
+
+pub mod clock_vars_explicit_both_branches(clk:Clock, rst:Reset, en:Bool, d:U8) -> (q:U8@[1], q2:U8@[1]) {
+  const g = pipe_stage<gate=true>(clk=clk, rst=rst, en=en, d=d)
+  const f = pipe_stage<gate=false>(clk=clk, rst=rst, en=en, d=d)
+  q = g.q
+  q2 = f.p
+}

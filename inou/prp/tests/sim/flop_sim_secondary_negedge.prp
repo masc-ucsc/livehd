@@ -38,7 +38,7 @@
 //     qn :  0  28  28  62  62     (fall: takes the post-rise a)
 pub mod secneg(clk:Clock, en_b:Bool, d:U8) -> (qa:U8@[1], qp:U8@[2], qn:U8@[2]) {
   const clkb = Clock(clock_pin=clk, enable=en_b)
-  reg a:U8 = 0
+  reg a:U8:[clock_pin=clk] = 0
   reg bp:U8:[clock_pin=clkb] = 0
   reg bn:U8:[clock_pin=clkb, posclk=false] = 0
   qa = a

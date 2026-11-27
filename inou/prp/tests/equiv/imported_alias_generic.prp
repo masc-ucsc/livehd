@@ -1,0 +1,23 @@
+/*
+:name: imported_alias_generic
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// fixprp 1: `pkg.Alias<args>` applies an imported parameterized type alias
+// (expanded where it is written, from the exporter's source), as a port type of
+// a generic mod: by generic (`Row<W>`), by operator expression (`Row<(W*2)>`),
+// by default (`pk.Row`), by name (`Row<W=3>`) and through a single-entry
+// import (`Nib<4>`, `Nib`). A width that is wrong shows as a LEC refutation.
+const pk = import("imported_alias_generic/types")
+const Nib = import("imported_alias_generic/types.Row")
+
+pub mod top<W=8>(a:pk.Row<W>, b:pk.Row<(W*2)>, c:pk.Row, n:Nib<4>, m:pk.Row<W=3>, k:Nib)
+  -> (y:pk.Row<(W*2)>@[], z:Nib<4>@[], q:pk.Row@[], r:pk.Row<W=3>@[], s:Nib@[]) {
+  y = b ^ a
+  z = n
+  q = c
+  r = m
+  s = k
+}

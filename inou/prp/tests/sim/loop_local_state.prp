@@ -1,0 +1,40 @@
+/*
+:name: loop_local_state
+:type: simulation
+:set: compile.unroll=true
+*/
+// Each lane retains its own previous input. The inner loop reads the outer
+// lane's register, and each of its two inner registers has independent state.
+pub mod loop_local_state(en:U2, data:U4) -> (held:U2@[], delayed:U4@[]) {
+  held = 0
+  delayed = 0
+  for lane in 0..<2 {
+    reg outer:U1 = 0
+    held#[lane] = outer
+    for bit in 0..<2 {
+      reg inner:U1 = 0
+      delayed#[(2*lane)+bit] = inner
+      if en#[lane] != 0 { inner = outer ^ data#[(2*lane)+bit] }
+    }
+    if en#[lane] != 0 { outer = data#[2*lane] }
+  }
+}
+
+test loop_local_state.capture {
+  mut d = loop_local_state
+  mut heads:U2 = 0
+  mut tails:U4 = 0
+  tick 64 {
+    d.reset = clock == 0
+    d.data = (clock * 7) & 15
+    d.en = (clock >> 1) & 3
+    if clock != 0 {
+      const mask = (if d.en#[0] != 0 { 3 } else { 0 }) | (if d.en#[1] != 0 { 12 } else { 0 })
+      const prior = (if heads#[0] != 0 { 3 } else { 0 }) | (if heads#[1] != 0 { 12 } else { 0 })
+      tails = (tails & (15 ^ mask)) | ((d.data ^ prior) & mask)
+      heads = (heads & (3 ^ d.en)) | ((d.data#[0] | (d.data#[2] << 1)) & d.en)
+    }
+    step
+    assert(d.held == heads and d.delayed == tails, "nested loop registers hold their own lane state")
+  }
+}

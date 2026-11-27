@@ -23,6 +23,7 @@
 #include "lnast_ntype.hpp"
 #include "prp_ast_facade.hpp"
 #include "prp_string.hpp"
+#include "prp_type_alias.hpp"
 
 namespace prpparse {
 class Parser;
@@ -1065,6 +1066,71 @@ protected:
   // same `prp_buf` bytes (which outlive the parse). Small: only const string /
   // tuple rvalues that an `enum(...)` spread might reference.
   prpparse::Ast_arena                      retained_arena_;
+
+  // ── Parametric type aliases (see prp_type_alias.hpp) ─────────────────────────
+  // `type Req<W=32> = (…)` registers a template (nothing is lowered for it); each
+  // application `Req<16>` / `pkg.Req<W>` / bare `Req` is replaced, before its
+  // construct is lowered, by the alias body with the generics substituted. The
+  // expanded text is parsed in a padded SYNTHETIC segment of the virtual source
+  // space: its bytes sit past the end of `prp_file`, in a range of their own, so
+  // byte-keyed maps never collide and get_text() can read them. A diagnostic
+  // inside one is reported at the application that produced it.
+  struct Synth_segment {
+    uint32_t                                 base = 0;
+    uint32_t                                 end  = 0;
+    uint32_t                                 use_start = 0;
+    uint32_t                                 use_end   = 0;
+    std::unique_ptr<prpparse::Source_buffer> buf;
+    std::unique_ptr<prpparse::Parser>        parser;
+    prpparse::Ast*                           root = nullptr;
+  };
+  std::deque<Synth_segment>                                              synth_segments_;
+  absl::flat_hash_map<std::string, size_t>                               synth_memo_;
+  uint32_t                                                               next_synth_base_ = 0;
+  std::map<std::string, prp_type_alias::Template>                        type_templates_;        // this file: file scope + live local ones
+  std::set<std::string>                                                  local_type_templates_;  // dropped when their construct ends
+  std::map<std::string, std::string>                                     ast_import_bindings_;   // `const x = import("u")` inside the construct
+  std::map<std::string, std::shared_ptr<prp_type_alias::Unit_templates>> unit_templates_cache_;  // by resolved source path
+  int                                                                    type_alias_depth_ = 0;
+  // The expansions applied inside the construct being lowered. A streamed lambda's
+  // wrapper marker carries only a fingerprint of its SOURCE text, so the expansion
+  // text joins it: an exporter edit that changes what an application expands to
+  // must change the importer's semantic hash too (the compile cache keys on it).
+  std::string                                                            construct_expansions_;
+
+  [[nodiscard]] const Synth_segment* synth_segment_of(uint32_t byte) const;
+  [[nodiscard]] std::string_view     source_bytes(uint32_t start, uint32_t end) const;
+  void                               register_type_template(const prpparse::Ast* statement, bool file_scope);
+  void                               expand_type_applications(prpparse::Ast* node);
+  [[nodiscard]] prpparse::Ast*       expand_type_application(prpparse::Ast* use, std::string_view name_text,
+                                                             const std::vector<prp_type_alias::Arg>& args, std::string* expanded_text = nullptr);
+  // Parse expanded text (a type, or a whole statement) in a synthetic segment and
+  // return a fresh copy of the root node.
+  [[nodiscard]] prpparse::Ast*       parse_synth(const std::string& text, const prpparse::Ast* use, bool as_statement);
+  [[nodiscard]] prpparse::Ast*       parse_synth_type(const std::string& text, const prpparse::Ast* use) { return parse_synth(text, use, false); }
+  // A type alias application in a call-site generic argument (`f<T=Req<W>>(…)`)
+  // that expands to a tuple type: a generic argument takes a type NAME, so the
+  // expansion becomes a hidden local `type __tya_N = …` declared right before the
+  // statement that holds the call, and the argument names it.
+  struct Hoist {
+    prpparse::Ast* list   = nullptr;  // the statement list that gets the alias (null: the top-level construct itself)
+    prpparse::Ast* before = nullptr;  // the statement the alias precedes
+    prpparse::Ast* stmt   = nullptr;
+  };
+  std::vector<Hoist>                 pending_hoists_;
+  std::vector<prpparse::Ast*>        top_prelude_;  // hoisted aliases of the top-level construct, lowered before it
+  int                                hoisted_alias_counter_ = 0;
+  [[nodiscard]] prpparse::Ast*       hoist_type_alias(prpparse::Ast* node, const prpparse::Ast* use, const std::string& expanded_text);
+  void                               note_import_binding(const prpparse::Ast* assignment);
+  struct Template_ref {
+    const prp_type_alias::Template*                 tmpl = nullptr;
+    std::string                                     qualifier;
+    const std::set<std::string>*                    unit_names = nullptr;
+    std::shared_ptr<prp_type_alias::Unit_templates> keep;
+    std::string                                     unit;  // the declaring unit's name, for messages
+  };
+  [[nodiscard]] std::optional<Template_ref> find_type_template(std::string_view name_text) const;
+  [[nodiscard]] std::optional<std::string>  import_raw_of(std::string_view binding) const;
 
   // Functions (comb/mod/pipe) declared with a `ref` parameter (e.g. `ref self`).
   // Such a call mutates the caller, so using its RESULT in a right-hand-side

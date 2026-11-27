@@ -1,0 +1,20 @@
+/*
+:name: clock_var_wire_clock
+:type: error
+:tolg: 1
+:error: 2 .Clock. variables .*no implicit clock
+:help: :\[clock_pin=
+*/
+
+// The Rocket pattern: `wire pclk:Clock` driven by a gate. `pclk` is a second
+// Clock variable, so the bare `reg b` must name its clock.
+pub mod clock_var_wire_clock(clk:Clock, rst:Reset, en:Bool, d:U8) -> (q:U8@[], q2:U8@[]) {
+  wire pclk:Clock
+  pclk = Clock(clock_pin=clk, enable=en)
+  reg a:U8:[clock_pin=pclk] = 0
+  reg b:U8 = 0   // locate_error_here
+  a = d
+  b = d
+  q = a
+  q2 = b
+}

@@ -26,6 +26,7 @@
 #include "pass.hpp"
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
 #include "prp_builtins.hpp"
+#include "prp_import.hpp"
 #include "prpparse/lexer.hpp"
 #include "prpparse/parser.hpp"
 #include "prpparse/prp_diag.hpp"
@@ -228,6 +229,7 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, st
   src_filename = std::string(filename);
   src_relpath  = livehd::srcloc::workspace_relative(filename);
   prp_file     = std::string(source);
+  next_synth_base_ = static_cast<uint32_t>(prp_file.size()) + 1;
 
   // Whole-file ingestion: the locator derives the content hash + line-offset
   // table (1-based line:col at diagnostic-emission time) and keeps the bytes
@@ -304,9 +306,7 @@ Prp2lnast::~Prp2lnast() = default;
 std::string_view Prp2lnast::get_text(const TSNode& node) const {
   auto start  = ts_node_start_byte(node);
   auto end    = ts_node_end_byte(node);
-  auto length = end - start;
-
-  I(end <= prp_file.size());
+  const std::string_view bytes = source_bytes(start, end);
   // `foo` and foo are the SAME identifier whenever the escaped text is plain
   // identifier characters (`foo[bar]` stays a distinct, escaped name). Every
   // name the front end reads from source -- builtin callee (`assume`), type-call
@@ -315,7 +315,7 @@ std::string_view Prp2lnast::get_text(const TSNode& node) const {
   // spelling comparison and lookup honor the rule. Only a node whose WHOLE
   // text is one escaped plain identifier changes (the inner text may not hold
   // a backtick, space or operator), so a larger node's text is untouched.
-  const auto txt = str_tools::canonical_escaped_ident(std::string_view(prp_file).substr(start, length));
+  const auto txt = str_tools::canonical_escaped_ident(bytes);
   // A backtick name reads the STRING escapes (docs 02-basics "Identifiers";
   // `` `d\\e` `` is the identifier `d\e`, a Verilog escaped id). Decode a whole
   // single backtick token once, keeping the quotes, so the LNAST name is the
@@ -337,13 +337,49 @@ std::string_view Prp2lnast::text_between(uint32_t start, uint32_t end) const {
   if (start > end) {
     return {};
   }
+  return source_bytes(start, end);
+}
+
+// The bytes [start, end) of the virtual source space: the file itself, or a
+// synthetic segment holding an expanded type alias (see Synth_segment).
+std::string_view Prp2lnast::source_bytes(uint32_t start, uint32_t end) const {
+  if (end > prp_file.size()) {
+    if (const auto* seg = synth_segment_of(start)) {
+      return seg->buf->view().substr(start - seg->base, end - start);
+    }
+  }
   I(end <= prp_file.size());
   return std::string_view(prp_file).substr(start, end - start);
 }
 
+const Prp2lnast::Synth_segment* Prp2lnast::synth_segment_of(uint32_t byte) const {
+  if (byte < prp_file.size()) {
+    return nullptr;
+  }
+  // Segments are appended with increasing bases: find the last one starting at
+  // or before `byte`.
+  auto it = std::upper_bound(synth_segments_.begin(), synth_segments_.end(), byte,
+                             [](uint32_t b, const Synth_segment& seg) { return b < seg.base; });
+  if (it == synth_segments_.begin()) {
+    return nullptr;
+  }
+  --it;
+  return byte < it->end ? &*it : nullptr;
+}
+
 livehd::diag::Span Prp2lnast::span_of_node(const TSNode& node) const {
   livehd::diag::Span span;
-  span.file       = src_filename;
+  span.file = src_filename;
+  if (const auto* seg = synth_segment_of(ts_node_start_byte(node))) {
+    // Inside an expanded type alias: point at the application that made it.
+    span.start_byte = seg->use_start;
+    span.end_byte   = seg->use_end;
+    span.start_line = prp_buf->line_of(seg->use_start);
+    span.start_col  = prp_buf->col_of(seg->use_start);
+    span.end_line   = prp_buf->line_of(seg->use_end);
+    span.end_col    = prp_buf->col_of(seg->use_end);
+    return span;
+  }
   span.start_byte = ts_node_start_byte(node);
   span.end_byte   = ts_node_end_byte(node);
   auto sp         = ts_node_start_point(node);
@@ -386,6 +422,15 @@ void Prp2lnast::report_error_at(uint32_t start_byte, uint32_t end_byte, uint32_t
   span.start_col  = start_col;
   span.end_line   = end_line;
   span.end_col    = end_col;
+  if (const auto* seg = synth_segment_of(start_byte)) {
+    // Inside an expanded type alias: point at the application that made it.
+    span.start_byte = seg->use_start;
+    span.end_byte   = seg->use_end;
+    span.start_line = prp_buf->line_of(seg->use_start);
+    span.start_col  = prp_buf->col_of(seg->use_start);
+    span.end_line   = prp_buf->line_of(seg->use_end);
+    span.end_col    = prp_buf->col_of(seg->use_end);
+  }
   stage_error(std::move(span), code, category, std::move(message), hint);
 }
 
@@ -428,6 +473,10 @@ bool Prp2lnast::expr_has_side_effects(TSNode n) const {
 hhds::SourceId Prp2lnast::mint_src(const TSNode& node) const {
   if (ts_node_is_null(node) || src_relpath.empty()) {
     return hhds::SourceId_invalid;
+  }
+  if (const auto* seg = synth_segment_of(ts_node_start_byte(node))) {
+    // Inside an expanded type alias: the application that made it.
+    return lnast->source_locator().mint(src_relpath, seg->use_start, seg->use_end, prp_buf->line_of(seg->use_start));
   }
   const auto sp = ts_node_start_point(node);
   return lnast->source_locator().mint(src_relpath, ts_node_start_byte(node), ts_node_end_byte(node), sp.row + 1);
@@ -1032,6 +1081,15 @@ std::string prp_undefined_read_message(std::string_view name) {
 }
 constexpr std::string_view prp_undefined_read_hint
     = "declare it with `mut`/`const`/`reg` before use — a variable is visible from its declaration to the end of its scope";
+// The implicit `clock`/`reset` a module without a `Clock`/`Reset` input gets minted is not a
+// name the body can read: say how to name it.
+std::string_view prp_undefined_read_hint_for(std::string_view name) {
+  static constexpr std::string_view clock_hint
+      = "the implicit clock minted for a module with no `Clock` input cannot be named: declare `clock:Clock` as an input to name it";
+  static constexpr std::string_view reset_hint
+      = "the implicit reset minted for a module with no `Reset` input cannot be named: declare `reset:Reset` as an input to name it";
+  return name == "clock" ? clock_hint : name == "reset" ? reset_hint : prp_undefined_read_hint;
+}
 }  // namespace
 
 void Prp2lnast::check_undefined_reads() const {
@@ -1072,8 +1130,12 @@ void Prp2lnast::check_undefined_reads() const {
   }
 
   for (const auto& rs : read_sites_) {
+    // A type named in a lambda SIGNATURE (no stmts frame) is read before the body
+    // exists: a type the body declares is not in scope there, only the enclosing
+    // scopes' (streamed_scope_names_) and the lambda's own generics are.
+    const bool signature_type = rs.is_type && rs.scope.is_invalid();
     if (rs.name.empty() || rs.name == "self" || prp_name_is_tmp(rs.name) || prp_name_is_placeholder_arg(rs.name)
-        || hoisted.contains(rs.name) || streamed_function_names_.contains(rs.name)) {
+        || (hoisted.contains(rs.name) && !signature_type) || streamed_function_names_.contains(rs.name)) {
       continue;
     }
     if (read_is_visible(rs)) {
@@ -1208,7 +1270,7 @@ void Prp2lnast::check_undefined_reads() const {
                       "undefined-read",
                       "name",
                       prp_undefined_read_message(rs.name),
-                      prp_undefined_read_hint);
+                      prp_undefined_read_hint_for(rs.name));
     }
   }
 }
@@ -1939,7 +2001,12 @@ void Prp2lnast::lower_streamed_top_level(TSNode c, std::string_view& pending_ove
   process_statement(c);
   pending_overflow_kind = {};
   pending_overflow      = {};
-  prev_end              = ts_node_end_byte(c);
+  // A hoisted type-alias statement lives in a synthetic segment past the end of
+  // the file: it must not move the gap cursor, or the `wrap`/`sat` prefix of
+  // the statement that follows it is scanned in an empty gap and lost.
+  if (synth_segment_of(ts_node_start_byte(c)) == nullptr) {
+    prev_end = ts_node_end_byte(c);
+  }
 }
 
 void Prp2lnast::process_description() {
@@ -1952,6 +2019,46 @@ void Prp2lnast::process_description() {
   std::string_view pending_overflow;
   uint32_t         prev_end = 0;  // start of buffer (matches lower_children_range's from==0)
   while (prpparse::Ast* c_ast = prp_parser->parse_next()) {
+    // A parametric type alias (`type Req<W> = …`) lowers to nothing: it is a
+    // template, expanded at each application (prp_type_alias.hpp).
+    if (c_ast->kind == prpparse::Kind::type_statement && prp_type_alias::template_from_statement(prp_file, c_ast)) {
+      register_type_template(c_ast, /*file_scope=*/true);
+      prev_end = c_ast->end_byte;
+      continue;
+    }
+    // Per-construct alias state is dropped when the construct ends, normally or
+    // by a diagnostic exception, so nothing leaks into a later construct.
+    struct Construct_state_guard {
+      Prp2lnast& p;
+      ~Construct_state_guard() {
+        for (const auto& n : p.local_type_templates_) {
+          p.type_templates_.erase(n);
+        }
+        p.local_type_templates_.clear();
+        p.ast_import_bindings_.clear();
+        p.pending_hoists_.clear();
+        p.top_prelude_.clear();
+        p.type_alias_depth_ = 0;
+      }
+    } construct_state_guard{*this};
+    construct_expansions_.clear();
+    expand_type_applications(c_ast);
+    for (const auto& h : pending_hoists_) {
+      if (h.list == nullptr) {
+        top_prelude_.push_back(h.stmt);
+        continue;
+      }
+      auto pos = std::find(h.list->kids.begin(), h.list->kids.end(), h.before);
+      h.list->kids.insert(pos, h.stmt);
+      h.stmt->parent = h.list;
+    }
+    pending_hoists_.clear();
+    prpparse::link_parents(c_ast);
+    for (prpparse::Ast* pre : top_prelude_) {
+      prpparse::link_parents(pre);
+      lower_streamed_top_level(TSNode{pre, prp_buf.get()}, pending_overflow, prev_end);
+    }
+    top_prelude_.clear();
     lower_streamed_top_level(TSNode{c_ast, prp_buf.get()}, pending_overflow, prev_end);
   }
   finalize_current_lnast();
@@ -2134,11 +2241,42 @@ Lnast_nid prp_child_nid(const Lnast& src, const Lnast_nid& nid, int n) {
   }
   return Lnast_nid{};
 }
+// Sibling blocks may declare independent state with the same spelling. Both
+// simulation and graph lowering key registers by module-local identity.
+void rename_local_state(Lnast& ln, const Lnast_nid& nid, std::string_view from, std::string_view to) {
+  const auto type = ln.get_type(nid);
+  if (Lnast_ntype::is_ref(type)) {
+    if (ln.get_name(nid) == from) {
+      ln.set_name(nid, to);
+    }
+    return;
+  }
+  if (Lnast_ntype::is_func_def(type)) {
+    return;  // A nested lambda cannot capture a runtime register.
+  }
+  for (auto child : ln.children(nid)) {
+    // Named arguments and tuple literal keys keep the spelling of the formal
+    // or field. Likewise, a declaration's type may contain field labels.
+    if (Lnast_ntype::is_declare(type) && child == prp_child_nid(ln, nid, 1)) {
+      continue;
+    }
+    if (Lnast_ntype::is_store(type) && child == ln.get_first_child(nid)) {
+      const auto parent = ln.get_type(ln.get_parent(nid));
+      if (Lnast_ntype::is_tuple_add(parent) || Lnast_ntype::is_tuple_concat(parent) || Lnast_ntype::is_func_call(parent)) {
+        continue;
+      }
+    }
+    rename_local_state(ln, child, from, to);
+  }
+}
 }  // namespace
 
 void Prp2lnast::rewrite_decls_to_declare() {
   auto staging = std::make_shared<Lnast>(lnast->forest()->create_tree_temp("decl-merge"), lnast->get_top_module_name());
   absl::flat_hash_set<Lnast_nid> copied_shape_seeds;
+  absl::flat_hash_set<std::string> declared_names;
+  absl::flat_hash_set<std::string> state_names;
+  std::vector<std::pair<Lnast_nid, std::string>> sibling_state;
 
   // Recursive copy; at each `stmts` block, fold the declaration cluster
   // (attr_set(t,"type",K) [+ attr_set(t,"comptime")] [+ type_spec(t,TYPE)])
@@ -2194,6 +2332,10 @@ void Prp2lnast::rewrite_decls_to_declare() {
       // Cluster head: attr_set(t, "type", KIND).
       std::string target(prp_child_name(*lnast, k, 0));
       std::string kind(prp_child_name(*lnast, k, 2));
+      declared_names.insert(target);
+      if ((kind == "reg" || kind == "stage") && !state_names.insert(target).second) {
+        sibling_state.emplace_back(nn, target);
+      }
       bool        comptime  = false;
       Lnast_nid   type_node = {};
       size_t      j         = i + 1;
@@ -2262,6 +2404,14 @@ void Prp2lnast::rewrite_decls_to_declare() {
   staging->set_srcid(dst_root, lnast->get_srcid(src_root));
   for (auto c : lnast->children(src_root)) {
     copy_merge(c, dst_root);
+  }
+  unsigned suffix = 0;
+  for (const auto& [scope, name] : sibling_state) {
+    std::string fresh;
+    do {
+      fresh = std::format("{}__scope_{}", name, ++suffix);
+    } while (!declared_names.insert(fresh).second);
+    rename_local_state(*staging, scope, name, fresh);
   }
   lnast->replace_body(staging);  // adopts staging's name pool with the body
   decl_shape_seed_stores_ = std::move(copied_shape_seeds);
@@ -2544,7 +2694,9 @@ void Prp2lnast::lower_children_range(TSNode parent, uint32_t from) {
     process_statement(c);
     pending_overflow_kind = {};
     pending_overflow      = {};
-    prev_end              = ts_node_end_byte(c);
+    if (synth_segment_of(ts_node_start_byte(c)) == nullptr) {  // a hoisted alias must not move the gap cursor
+      prev_end = ts_node_end_byte(c);
+    }
   }
 }
 
@@ -6517,7 +6669,11 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
       // wrapper's fingerprint already covers the complete nested source text.
       // Comment/whitespace-insensitive on purpose: a comment edit inside a
       // body must stay a comment-only warm hit (see stable_source_fingerprint).
-      lnast->add_child(marker, Lnast_node::create_const(std::to_string(stable_source_fingerprint(get_text(n)))));
+      uint64_t fingerprint = stable_source_fingerprint(get_text(n));
+      for (const unsigned char ch : construct_expansions_) {  // FNV-1a: what its type aliases expanded to
+        fingerprint = (fingerprint ^ ch) * 1099511628211ULL;
+      }
+      lnast->add_child(marker, Lnast_node::create_const(std::to_string(fingerprint)));
       attach_loc(marker, n);
     }
 
@@ -8033,6 +8189,20 @@ void Prp2lnast::process_enum_assignment(TSNode n) {
     return;
   }
   reject_std_declaration(name, "enum");
+  // `pub enum E = …`: exported like a `pub type` (file scope only) so an
+  // importer can name `pkg.E` as a port type and read `pkg.E.member`. A capture
+  // replay re-lowers the retained declaration inside a lambda body; the export
+  // was already recorded at the original declaration.
+  if (!replaying_capture_enum_ && !ts_node_is_null(child_by_field(n, "pub"))) {
+    if (!builder.at_top_stmts() || !lambda_kind_stack_.empty() || conditional_depth_ > 0) {
+      report_error(n,
+                   "pub-not-file-scope",
+                   "syntax",
+                   "`pub` is only valid on file-scope declarations",
+                   "move the enum to the file's top level");
+    }
+    lnast->add_pub(canonical_escaped_ident(trim(get_text(name))), "value", mint_src(name));
+  }
   capture_frames_.back().types.insert(std::string(canonical_escaped_ident(trim(get_text(name)))));
   if (!replaying_capture_enum_) {
     // parse_next recycles the current construct's CST arena.  A later lambda
@@ -8139,6 +8309,9 @@ void Prp2lnast::process_type_statement(TSNode n) {
   if (ts_node_is_null(name)) {
     return;
   }
+  if (!ts_node_is_null(child_by_field(n, "generic")) && !ts_node_is_null(child_by_field(n, "alias"))) {
+    return;  // a parametric alias is a template (register_type_template), not a declaration
+  }
   reject_std_declaration(name, "type");
   // `pub type X = …`: an exportable type alias — registered as a pub of kind
   // "type" so an importer's `x:pkg.X` can bind it (the alias's scalar range
@@ -8235,6 +8408,370 @@ void Prp2lnast::process_type_statement(TSNode n) {
     auto sidx    = builder.add_child(Lnast_ntype::create_store());
     lnast->add_child(sidx, Lnast_node::create_ref(get_text(name)));
     lnast->add_child(sidx, rhs_val);
+  }
+}
+
+// ── Parametric type aliases ─────────────────────────────────────────────────
+
+// Register `type Name<generics> = T` as a template. A file-scope one outlives its
+// construct (and is a pub entry when `pub`); a local one dies with the construct
+// that declares it.
+void Prp2lnast::register_type_template(const prpparse::Ast* st, bool file_scope) {
+  auto t = prp_type_alias::template_from_statement(prp_file, st);
+  if (!t) {
+    return;
+  }
+  const TSNode node{st, prp_buf.get()};
+  if (type_templates_.contains(t->name)) {
+    report_error(node,
+                 "duplicate-type-alias",
+                 "name",
+                 std::format("type alias `{}` is already declared", t->name),
+                 "give the alias another name");
+  }
+  if (file_scope) {
+    if (t->is_pub) {
+      lnast->add_pub(canonical_escaped_ident(t->name), "type", mint_src(child_by_field(node, "name")));
+    }
+  } else {
+    if (t->is_pub) {
+      report_error(node,
+                   "pub-not-file-scope",
+                   "syntax",
+                   "`pub` is only valid on file-scope declarations",
+                   "move the type alias to the file's top level");
+    }
+    local_type_templates_.insert(t->name);
+  }
+  const auto name = t->name;
+  type_templates_.emplace(name, std::move(*t));
+}
+
+// `const x = import("unit")` seen while walking a construct (a binding declared
+// inside a body is not in capture_import_bindings_ yet).
+void Prp2lnast::note_import_binding(const prpparse::Ast* assignment) {
+  const TSNode node{assignment, prp_buf.get()};
+  const TSNode lv = child_by_field(node, "lvalue");
+  const TSNode rv = child_by_field(node, "rvalue");
+  if (ts_node_is_null(lv) || ts_node_is_null(rv) || std::string_view(ts_node_type(rv)) != "function_call_expression") {
+    return;
+  }
+  const auto call = trim(get_text(rv));
+  if (!call.starts_with("import(")) {
+    return;
+  }
+  const auto q = call.find_first_of("\"'", 7);
+  if (q == std::string_view::npos) {
+    return;
+  }
+  const auto e = call.find(call[q], q + 1);
+  if (e == std::string_view::npos) {
+    return;
+  }
+  ast_import_bindings_[std::string(canonical_escaped_ident(trim(get_text(lv))))] = std::string(call.substr(q + 1, e - q - 1));
+}
+
+// The unit text an import binding names (`const types = import("RocketTypes")`
+// -> "RocketTypes"), or nullopt when `binding` is no import binding.
+std::optional<std::string> Prp2lnast::import_raw_of(std::string_view binding) const {
+  if (const auto it = ast_import_bindings_.find(std::string(binding)); it != ast_import_bindings_.end()) {
+    return it->second;
+  }
+  if (const auto it = capture_import_bindings_.find(std::string(binding)); it != capture_import_bindings_.end()) {
+    std::string raw = it->second;
+    if (raw.size() >= 2 && raw.front() == '\'' && raw.back() == '\'') {
+      raw = raw.substr(1, raw.size() - 2);
+    }
+    // Captures use the library-relative unit key. Resolve type source from
+    // the importing file using its original spelling, just as scan does.
+    for (const auto& [spelling, unit] : import_bindings_) {
+      if (unit == raw) {
+        return spelling;
+      }
+    }
+    return raw;
+  }
+  return std::nullopt;
+}
+
+// Find the template a (dotted) type name denotes: a template of this file, or one
+// of an imported unit (`types.Req` with `const types = import("RocketTypes")`, or a
+// bare `Req` bound by `const Req = import("RocketTypes.Req")`).
+std::optional<Prp2lnast::Template_ref> Prp2lnast::find_type_template(std::string_view name_text) const {
+  const auto dot    = name_text.rfind('.');
+  const auto prefix = dot == std::string_view::npos ? std::string_view{} : name_text.substr(0, dot);
+  const auto last   = dot == std::string_view::npos ? name_text : name_text.substr(dot + 1);
+  if (prefix.empty()) {
+    if (const auto it = type_templates_.find(std::string(last)); it != type_templates_.end()) {
+      return Template_ref{.tmpl = &it->second};
+    }
+  }
+  // An import binding names the unit (`prefix`) or one of its entries (the bare name).
+  const auto binding = prefix.empty() ? last : prefix;
+  const auto raw     = import_raw_of(binding);
+  if (!raw || raw->starts_with("lg:") || raw->starts_with("ln:")) {
+    return std::nullopt;
+  }
+  std::string entry(prefix.empty() ? std::string_view{} : last);
+  std::string path;
+  {
+    livehd::prp_import::Resolver resolver;
+    for (const auto& candidate : livehd::prp_import::candidates(*raw)) {
+      path = resolver.find(livehd::prp_import::dir_of(src_filename), candidate);
+      if (!path.empty()) {
+        if (prefix.empty() && candidate.size() < raw->size()) {
+          entry = raw->substr(candidate.size() + 1);  // `import("unit.Entry")`
+        } else if (prefix.empty()) {
+          return std::nullopt;  // a whole-unit binding used as a bare type name
+        }
+        break;
+      }
+    }
+  }
+  if (path.empty()) {
+    return std::nullopt;
+  }
+  auto& slot = const_cast<Prp2lnast*>(this)->unit_templates_cache_[path];
+  if (!slot) {
+    std::ifstream ifs(path, std::ios::binary);
+    std::stringstream ss;
+    ss << ifs.rdbuf();
+    const std::string bytes = ss.str();
+    slot = std::make_shared<prp_type_alias::Unit_templates>(
+        prp_type_alias::might_have_templates(bytes) ? prp_type_alias::scan_unit(path, bytes) : prp_type_alias::Unit_templates{});
+  }
+  const auto it = slot->by_name.find(entry);
+  if (it == slot->by_name.end()) {
+    return std::nullopt;
+  }
+  Template_ref r;
+  r.tmpl       = &it->second;
+  r.qualifier  = prefix.empty() ? std::string{} : std::string(prefix);
+  r.unit_names = &slot->top_names;
+  r.keep       = slot;
+  r.unit       = *raw;
+  return r;
+}
+
+// Parse the expanded text as a type in a synthetic segment and return a fresh
+// copy of it (the same text is parsed once; every application gets its own
+// nodes, since the lowering links them to their parents).
+prpparse::Ast* Prp2lnast::parse_synth(const std::string& text, const prpparse::Ast* use, bool as_statement) {
+  size_t   idx;
+  uint32_t use_start = use->start_byte;
+  uint32_t use_end   = use->end_byte;
+  if (const auto* outer = synth_segment_of(use->start_byte)) {  // an application inside an expansion
+    use_start = outer->use_start;
+    use_end   = outer->use_end;
+  }
+  // A segment records the application that produced it (diagnostics and source
+  // ids point there), so two applications with identical text each get their own.
+  const std::string memo_key = absl::StrCat(as_statement ? "S" : "T", use_start, ":", use_end, ":", text);
+  if (const auto it = synth_memo_.find(memo_key); it != synth_memo_.end()) {
+    idx = it->second;
+  } else {
+    Synth_segment seg;
+    seg.base      = next_synth_base_;
+    seg.end       = seg.base + static_cast<uint32_t>(text.size());
+    seg.use_start = use_start;
+    seg.use_end   = use_end;
+    // The buffer holds just the text; the parsed nodes are shifted by `base`
+    // below, so their byte ranges live in the segment's own slot of the virtual
+    // source space without padding the buffer.
+    seg.buf    = std::make_unique<prpparse::Source_buffer>(src_relpath.empty() ? src_filename : src_relpath, std::string(text));
+    try {
+      seg.parser = std::make_unique<prpparse::Parser>(*seg.buf);
+      prpparse::Ast* top = nullptr;
+      if (as_statement) {
+        top      = seg.parser->parse_ast();
+        seg.root = (top == nullptr || top->kids.empty()) ? nullptr : top->kids.front();
+      } else {
+        top      = seg.parser->parse_type_snippet();
+        seg.root = top;
+      }
+      if (seg.root == nullptr) {
+        report_error(TSNode{use, prp_buf.get()},
+                     "type-alias-expansion",
+                     "type",
+                     "the expansion of this type alias is empty",
+                     "check the generic arguments; each one replaces its generic in the alias body as written");
+      }
+      std::function<void(prpparse::Ast*)> shift = [&](prpparse::Ast* a) {
+        a->start_byte += seg.base;
+        a->end_byte += seg.base;
+        for (auto* k : a->kids) {
+          shift(k);
+        }
+      };
+      if (top) {
+        shift(top);
+      }
+    } catch (const prpparse::Parse_error& pe) {
+      report_error(TSNode{use, prp_buf.get()},
+                   "type-alias-expansion",
+                   "type",
+                   std::format("the expansion of this type alias is not a type: {}", pe.diag.message),
+                   "check the generic arguments; each one replaces its generic in the alias body as written");
+    }
+    next_synth_base_ = seg.end + 1;
+    synth_segments_.push_back(std::move(seg));
+    idx = synth_segments_.size() - 1;
+    synth_memo_.emplace(memo_key, idx);
+  }
+  prpparse::Ast* copy = clone_prp_subtree(retained_arena_, synth_segments_[idx].root);
+  prpparse::link_parents(copy);
+  return copy;
+}
+
+prpparse::Ast* Prp2lnast::expand_type_application(prpparse::Ast* use, std::string_view name_text,
+                                                  const std::vector<prp_type_alias::Arg>& args, std::string* expanded_text) {
+  const TSNode use_node{use, prp_buf.get()};
+  const auto   ref = find_type_template(name_text);
+  if (!ref) {
+    report_error(use_node,
+                 "unknown-type-alias",
+                 "name",
+                 std::format("`{}` is not a parametric type alias", name_text),
+                 "declare it as `type Name<W=…> = …` in this file, or import the file that does and write `unit.Name<…>`");
+  }
+  if (!ref->unit.empty() && !ref->tmpl->is_pub) {
+    report_error(use_node,
+                 "type-alias-not-pub",
+                 "name",
+                 std::format("type alias `{}` of unit `{}` is not `pub`", ref->tmpl->name, ref->unit),
+                 std::format("declare it `pub type {}<…> = …` in that file", ref->tmpl->name));
+  }
+  static const std::set<std::string> no_names;
+  const auto exp = prp_type_alias::expand(*ref->tmpl, args, ref->qualifier, ref->unit_names != nullptr ? *ref->unit_names : no_names);
+  if (exp.text.empty()) {
+    report_error(use_node, exp.error_code, "type", exp.error_message, exp.error_hint);
+  }
+  if (++type_alias_depth_ > 32) {
+    report_error(use_node,
+                 "type-alias-recursion",
+                 "type",
+                 std::format("type alias `{}` expands without end", ref->tmpl->name),
+                 "a type alias may not use itself, directly or through another alias");
+  }
+  if (expanded_text != nullptr) {
+    *expanded_text = exp.text;
+  }
+  construct_expansions_ += exp.text;
+  construct_expansions_.push_back('\0');
+  prpparse::Ast* out = parse_synth_type(exp.text, use);
+  // Nested applications inside the expansion (`type A<W> = (x:B<W>)`).
+  prpparse::Ast holder;
+  holder.kids.push_back(out);
+  expand_type_applications(&holder);
+  --type_alias_depth_;
+  return holder.kids.front();
+}
+
+namespace {
+// `node` holds a call-site generic argument: `f<…>(…)` (a named bind `T=…` sits in an
+// arg_assignment, a positional one directly in the list).
+bool in_call_generic_position(const prpparse::Ast* node) {
+  if (node->kind == prpparse::Kind::arg_assignment) {
+    node = node->parent;
+  }
+  return node != nullptr && node->kind == prpparse::Kind::generic_type_list && node->parent != nullptr
+         && node->parent->kind == prpparse::Kind::function_call_expression;
+}
+}  // namespace
+
+prpparse::Ast* Prp2lnast::hoist_type_alias(prpparse::Ast* node, const prpparse::Ast* use, const std::string& expanded_text) {
+  const std::string name = std::format("__tya_{}", hoisted_alias_counter_++);
+  const auto        is_container = [](prpparse::Kind k) {
+    return k == prpparse::Kind::scope_statement || k == prpparse::Kind::description || k == prpparse::Kind::stmt_list;
+  };
+  prpparse::Ast* statement = node;
+  while (statement->parent != nullptr && !is_container(statement->parent->kind)) {
+    statement = statement->parent;
+  }
+  prpparse::Ast* stmt = parse_synth("type " + name + " = " + expanded_text, use, /*as_statement=*/true);
+  if (stmt == nullptr) {
+    report_error(TSNode{use, prp_buf.get()}, "type-alias-expansion", "type", "cannot hoist the type alias expansion", "");
+  }
+  pending_hoists_.push_back(Hoist{.list = statement->parent, .before = statement, .stmt = stmt});
+  return parse_synth_type(name, use);
+}
+
+// Replace every parametric alias application under `node` by its expansion, and
+// drop (registering them) the local `type T<…> = …` templates.
+void Prp2lnast::expand_type_applications(prpparse::Ast* node) {
+  for (size_t i = 0; i < node->kids.size(); ++i) {
+    prpparse::Ast* k = node->kids[i];
+    if (k->kind == prpparse::Kind::type_statement && prp_type_alias::template_from_statement(prp_file, k)) {
+      register_type_template(k, /*file_scope=*/false);
+      node->kids.erase(node->kids.begin() + static_cast<std::ptrdiff_t>(i));
+      --i;
+      continue;
+    }
+    if (k->kind == prpparse::Kind::assignment) {
+      note_import_binding(k);
+    }
+    if (k->kind == prpparse::Kind::generic_type) {
+      std::string_view name_text;
+      std::vector<prp_type_alias::Arg> args;
+      for (const prpparse::Ast* c : k->kids) {
+        if (c->field == prpparse::Field::f_name) {
+          name_text = trim(source_bytes(c->start_byte, c->end_byte));
+        } else if (c->field == prpparse::Field::f_generic) {
+          for (const prpparse::Ast* a : c->kids) {
+            if (a->kind == prpparse::Kind::comment) {
+              continue;
+            }
+            prp_type_alias::Arg arg;
+            if (a->kind == prpparse::Kind::arg_assignment) {
+              for (const prpparse::Ast* p : a->kids) {
+                if (p->field == prpparse::Field::f_lvalue) {
+                  arg.name = std::string(trim(source_bytes(p->start_byte, p->end_byte)));
+                } else if (p->field == prpparse::Field::f_rvalue) {
+                  arg.text = std::string(trim(source_bytes(p->start_byte, p->end_byte)));
+                }
+              }
+            } else {
+              arg.text = std::string(trim(source_bytes(a->start_byte, a->end_byte)));
+            }
+            args.push_back(std::move(arg));
+          }
+        }
+      }
+      std::string    expanded;
+      prpparse::Ast* repl = expand_type_application(k, name_text, args, &expanded);
+      if (in_call_generic_position(node) && repl->kind == prpparse::Kind::expression_type
+          && repl->kids.size() == 1 && repl->kids.front()->kind != prpparse::Kind::identifier) {
+        repl = hoist_type_alias(node, k, expanded);
+      }
+      repl->field         = k->field;
+      repl->parent        = node;
+      node->kids[i]       = repl;
+      continue;
+    }
+    if (k->kind == prpparse::Kind::expression_type && !k->kids.empty()) {
+      // A bare name (`r:Req`, `r:types.Req`) of a template whose generics all
+      // have defaults is the application with no arguments.
+      bool plain = true;
+      for (const prpparse::Ast* c : k->kids) {
+        plain = plain && c->kind == prpparse::Kind::identifier;
+      }
+      if (plain) {
+        const auto name_text = trim(source_bytes(k->start_byte, k->end_byte));
+        if (const auto ref = find_type_template(name_text)) {
+          std::string    expanded;
+          prpparse::Ast* repl = expand_type_application(k, name_text, {}, &expanded);
+          if (in_call_generic_position(node) && repl->kind == prpparse::Kind::expression_type
+              && repl->kids.size() == 1 && repl->kids.front()->kind != prpparse::Kind::identifier) {
+            repl = hoist_type_alias(node, k, expanded);
+          }
+          repl->field         = k->field;
+          repl->parent        = node;
+          node->kids[i]       = repl;
+          continue;
+        }
+      }
+    }
+    expand_type_applications(k);
   }
 }
 
@@ -10465,7 +11002,7 @@ Lnast_node Prp2lnast::comptime_default_node(TSNode def, TSNode param) {
     if (!lookup_capture(name) && !name_in_inflight_scope(name) && !streamed_scope_names_.contains(name)
         && !streamed_function_names_.contains(name) && !hoisted.contains(name) && !str_tools::is_pyrope_type_word(name)
         && name != "self" && name != prp_builtins::std_namespace) {
-      report_error(c, "undefined-read", "name", prp_undefined_read_message(name), prp_undefined_read_hint);
+      report_error(c, "undefined-read", "name", prp_undefined_read_message(name), prp_undefined_read_hint_for(name));
     }
   }
   check_default_reads_no_input(def, param);

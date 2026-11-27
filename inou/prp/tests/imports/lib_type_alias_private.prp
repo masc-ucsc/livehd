@@ -1,0 +1,3 @@
+// A parameterized alias that is NOT pub: it can not be applied by an importer.
+type Hidden<W=8> = Unsigned(bits=W)
+pub type Shown<W=8> = Unsigned(bits=W)

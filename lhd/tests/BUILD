@@ -200,6 +200,14 @@ sh_test(
     data = ["//lhd"],
 )
 
+# A parameterized type alias is expanded in the importer from the exporter's
+# source: an exporter-only edit must invalidate the importer's cached unit.
+sh_test(
+    name = "lhd_compile_cache_type_alias_test",
+    srcs = ["lhd_compile_cache_type_alias_test.sh"],
+    data = ["//lhd"],
+)
+
 # A dirty caller can re-enter an unchanged mod whose generic GraphIO was
 # retired after constant specialization in the cached generation.
 sh_test(

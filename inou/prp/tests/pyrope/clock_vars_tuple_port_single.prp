@@ -1,0 +1,19 @@
+/*
+:name: clock_vars_tuple_port_single
+:type: compile
+*/
+// The only `Clock` is a field of a tuple port: it is the single Clock variable,
+// so the unannotated register and the child's omitted `Clock` input use it.
+mod leaf(clk:Clock, rst:Reset, d:U8) -> (q:U8@[1]) {
+  reg r:U8:[clock_pin=clk] = 0
+  r = d
+  q = r
+}
+
+pub mod clock_vars_tuple_port_single(io:(clk:Clock, d:U8), rst:Reset) -> (q:U8@[1], q2:U8@[1]) {
+  reg r:U8 = 0
+  r = io.d
+  q = r
+  const l = leaf(d=io.d)
+  q2 = l.q
+}

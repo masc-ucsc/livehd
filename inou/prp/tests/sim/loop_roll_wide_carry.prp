@@ -1,0 +1,27 @@
+/*
+:name: loop_roll_wide_carry
+:type: simulation
+*/
+// The second loop must see the 195-bit result of the first loop.
+pub comb loop_roll_wide_carry<lanes=3,bits=65,s=2>(enable:U3, choices:U6, words:U195) -> (out:U195) {
+  out = 0
+  mut gathered:Unsigned(bits=lanes*bits) = 0
+  for lane in 0..<lanes {
+    gathered#[(lane*bits)..+bits] = words#[(lane*bits)..+bits]
+  }
+  for i in 0..<lanes {
+    const port = choices#[(i*s)..+s]
+    const word = gathered#[(port*bits)..+bits]
+    if enable#[i] != 0 { out#[(i*bits)..+bits] = word }
+  }
+}
+test loop_roll_wide_carry.windows {
+  mut d = loop_roll_wide_carry
+  tick 1 {
+    d.enable = 7
+    d.choices = 0x24
+    d.words = (11 << 130) | (7 << 65) | 3
+    step
+    assert(d.out == d.words,"multiport select")
+  }
+}

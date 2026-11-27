@@ -1,0 +1,13 @@
+/*
+:name: loop_inlined_import
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+const packet = import("loop_inlined_import/packet")
+const expand = import("loop_inlined_import/ops.invert")
+
+pub mod top(x:U8) -> (direct:U4@[], lanes:U8@[]) {
+  lanes = packet.unpack<width=2>(x)
+  direct = expand(x=x#[0..+4])
+}

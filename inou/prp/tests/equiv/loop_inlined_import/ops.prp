@@ -1,0 +1,6 @@
+pub comb lowPair(x:U4) -> (y:U4) {
+  y = x ^ 3
+}
+pub comb invert(x:U4) -> (y:U4) {
+  y = x ^ 15
+}

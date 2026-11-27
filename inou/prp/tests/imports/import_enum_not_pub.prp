@@ -1,0 +1,11 @@
+/*
+:name: import_enum_not_pub
+:type: error
+:files: inou/prp/tests/imports/lib_enum_private.prp inou/prp/tests/imports/import_enum_not_pub.prp
+:error: (not a pub|pub)
+*/
+// A plain `enum` is file-local: an importer cannot name it (`pub enum` exports it).
+const lib = import("lib_enum_private")
+pub comb is_busy(m:lib.Mode) -> (y:Bool) {   // locate_error_here
+  y = m == lib.Mode.busy
+}

@@ -1,0 +1,13 @@
+/*
+:name: type_alias_arity
+:type: error
+:error: takes 1 generic argument
+:help: drop the extra argument
+*/
+
+// A type alias application binds at most as many generics as the alias declares.
+type Req<W=32> = (addr:Unsigned(bits=W), valid:Bool)
+
+pub mod type_alias_arity(r:Req<8, 9>) -> (o:U8@[0]) {   // locate_error_here
+  o = r.addr
+}

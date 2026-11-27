@@ -10,7 +10,7 @@ comb field_collision_child(a:U8) -> (rdata:U8, regOut:(value:U8)) {
 }
 
 // Field labels must not type the later instance or inherit the earlier local's range.
-pub comb tuple_field_instance_collision(a:U8) -> (y:U8, z:U8, q:U8) {
+pub comb tuple_field_instance_collision(a:U8) -> (y:U8, z:U8, q:U8, named:U8) {
   const narrow:U1 = 1
   wire io:(mtopi:U8, narrow:U8, `a.b`:U8) = nil
   const value = io.mtopi
@@ -21,4 +21,8 @@ pub comb tuple_field_instance_collision(a:U8) -> (y:U8, z:U8, q:U8) {
   y = mtopi.rdata
   z = io.narrow ^ narrow
   q = io.`a.b`
+  type Fetch = (ras:U2, pc:U8)
+  const head:Fetch = (ras=1, pc=a)
+  const ras = head.pc
+  named = ras ^ head.ras
 }

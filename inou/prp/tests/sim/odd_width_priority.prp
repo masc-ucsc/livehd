@@ -1,0 +1,23 @@
+/*
+:name: odd_width_priority
+:type: simulation
+*/
+// The lowest set bit indexes this five-lane priority encoder.
+pub comb odd_width_priority(mask:U5) -> (lane:U3) {
+  lane = 1
+  for i in 0..<5 {
+    if mask#[4-i] != 0 { lane = 5-i }
+  }
+}
+
+test odd_width_priority.exhaustive {
+  mut d = odd_width_priority
+  tick 1024 {
+    const mask = clock#[0..+5] & clock#[5..+5]
+    d.mask = mask
+    step
+    const first = mask & -mask
+    const index = if first == 16 { 5 } elif first == 8 { 4 } elif first == 4 { 3 } elif first == 2 { 2 } else { 1 }
+    assert(d.lane == index, "lowest active lane")
+  }
+}

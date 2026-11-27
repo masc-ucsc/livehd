@@ -1614,6 +1614,7 @@ void uPass_runner::check_concat_lanes() {
   bool              bad   = false;
   while (lm->move_to_sibling()) {
     const std::string  lane_name(lm->current_text());
+    const auto         raw_name    = lm->current_raw_text();
     const bool         lane_is_ref = lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref;
     livehd::diag::Span span        = lm->current_span();
     if (!lm->move_to_sibling()) {
@@ -1699,9 +1700,39 @@ void uPass_runner::check_concat_lanes() {
         continue;
       }
     }
-    if (const auto db = lane_is_ref ? concat_lane_declared_bits(lane_name) : 0; db != 0) {
+    if (const auto db = lane_is_ref ? concat_lane_declared_bits(lane_name, raw_name) : 0; db != 0) {
       total += db;
       continue;
+    }
+    // A generic input has a declared width, but its bound may still be a
+    // template expression. Leave its window unresolved until specialization.
+    const auto& tree = lm->get_lnast();
+    if (lane_is_ref && tree && tree->is_template() && !lm->in_inline_frame()) {
+      const auto* port = tree->io_meta().find(concat_logical_name(lane_name));
+      if (!port) {
+        if (const auto it = symbol_table_.tget_origin.find(lane_name); it != symbol_table_.tget_origin.end()) {
+          port = tree->io_meta().find(it->second);
+        }
+      }
+      bool deferred = port && port->has_deferred_bound();
+      if (!deferred) {
+        const auto& sites = decl_sites_of(tree);
+        if (const auto it = sites.find(std::string(raw_name)); it != sites.end()) {
+          for (const auto& site : it->second) {
+            const auto name_nid = tree->get_first_child(site);
+            const auto type    = name_nid.is_invalid() ? name_nid : tree->get_sibling_next(name_nid);
+            if (!type.is_invalid() && Lnast_ntype::is_prim_type_int(tree->get_type(type))) {
+              for (const auto bound : tree->children(type)) {
+                deferred |= Lnast_ntype::is_ref(tree->get_type(bound));
+              }
+            }
+          }
+        }
+      }
+      if (deferred) {
+        bad = true;  // the complete concat width is not available in this walk
+        continue;
+      }
     }
     livehd::diag::sink().emit(livehd::diag::Diagnostic{
         .severity = livehd::diag::Severity::error,
@@ -1815,7 +1846,7 @@ void uPass_runner::check_concat_dest(std::string_view dest_name, std::string_vie
 //   * nothing. A literal operand lands here (a literal has no declared type,
 //     however it is spelled) and so does an unannotated expression. Both keep
 //     the `nil` and are reported by upass.tolg, which has the span.
-uint32_t uPass_runner::concat_lane_declared_bits(std::string_view lane_name) const {
+uint32_t uPass_runner::concat_lane_declared_bits(std::string_view lane_name, std::string_view raw_name) const {
   if (lane_name.empty()) {
     return 0;
   }
@@ -1838,13 +1869,6 @@ uint32_t uPass_runner::concat_lane_declared_bits(std::string_view lane_name) con
   // declared source field in tget_origin. Follow that provenance so spelling
   // the desired named-bundle order explicitly as `concat(p.hi, p.lo)` works.
   // Ordinary untyped expression temps still have no origin and remain errors.
-  auto origin = symbol_table_.tget_origin.find(std::string(lane_name));
-  if (origin != symbol_table_.tget_origin.end()) {
-    const auto f = upass::decl_facts::lookup(symbol_table_, lm ? lm->get_lnast().get() : nullptr, origin->second);
-    if (f && f->has_type_spec && f->bits != 0) {
-      return f->bits;
-    }
-  }
   // A function body may be checked directly from its stored fdef before the
   // tuple_get statements have gone through the normal dispatch path, so the
   // transient origin map above is not necessarily populated yet. Recover the
@@ -1852,6 +1876,7 @@ uint32_t uPass_runner::concat_lane_declared_bits(std::string_view lane_name) con
   // `tuple_get(lane_name, base, field...)`. prp2lnast emits dotted argument
   // reads immediately before their consuming concat; limiting the search to
   // the enclosing statement list also avoids cross-function temp collisions.
+  const auto tree_name     = raw_name.empty() ? lane_name : raw_name;
   const bool compiler_temp = lane_name.front() == '%' || lane_name.starts_with("___");
   if (compiler_temp && lm && lm->get_lnast()) {
     const auto& ln         = *lm->get_lnast();
@@ -1868,7 +1893,7 @@ uint32_t uPass_runner::concat_lane_declared_bits(std::string_view lane_name) con
         if (Lnast_ntype::is_store(ln.get_type(stmt))) {
           const auto dst = ln.get_first_child(stmt);
           const auto rhs = dst.is_invalid() ? dst : ln.get_sibling_next(dst);
-          if (!dst.is_invalid() && !rhs.is_invalid() && ln.get_name(dst) == lane_name && Lnast_ntype::is_ref(ln.get_type(rhs))) {
+          if (!dst.is_invalid() && !rhs.is_invalid() && ln.get_name(dst) == tree_name && Lnast_ntype::is_ref(ln.get_type(rhs))) {
             const auto f = upass::decl_facts::lookup(symbol_table_, &ln, ln.get_name(rhs));
             if (f && f->has_type_spec && f->bits != 0) {
               return f->bits;
@@ -1880,7 +1905,7 @@ uint32_t uPass_runner::concat_lane_declared_bits(std::string_view lane_name) con
         }
         const auto dst = ln.get_first_child(stmt);
         const auto src = dst.is_invalid() ? dst : ln.get_sibling_next(dst);
-        if (dst.is_invalid() || src.is_invalid() || ln.get_name(dst) != lane_name || !Lnast_ntype::is_ref(ln.get_type(src))) {
+        if (dst.is_invalid() || src.is_invalid() || ln.get_name(dst) != tree_name || !Lnast_ntype::is_ref(ln.get_type(src))) {
           continue;
         }
         std::string source_field(ln.get_name(src));
@@ -1892,12 +1917,24 @@ uint32_t uPass_runner::concat_lane_declared_bits(std::string_view lane_name) con
           absl::StrAppend(&source_field, ".", ln.get_name(field));
         }
         if (!source_field.empty()) {
-          const auto f = upass::decl_facts::lookup(symbol_table_, &ln, source_field);
+          if (const auto* port = ln.io_meta().find(source_field); port && port->bits != 0) {
+            return port->bits;
+          }
+          // The inline prologue installs the formal's specialized declaration
+          // under its call-site name. Its actual may have a different width.
+          const auto f = upass::decl_facts::lookup(symbol_table_, &ln, lm->frame_variable(source_field));
           if (f && f->has_type_spec && f->bits != 0) {
             return f->bits;
           }
         }
       }
+    }
+  }
+  auto origin = symbol_table_.tget_origin.find(std::string(lane_name));
+  if (origin != symbol_table_.tget_origin.end()) {
+    const auto f = upass::decl_facts::lookup(symbol_table_, lm ? lm->get_lnast().get() : nullptr, origin->second);
+    if (f && f->has_type_spec && f->bits != 0) {
+      return f->bits;
     }
   }
   // A read is an SSA VERSION (`a___ssa_2`); the type was declared once on the
@@ -1969,6 +2006,7 @@ std::vector<std::string> uPass_runner::resolve_concat_widths(std::string& dst_na
   bool     all_bound = true;
   while (lm->move_to_sibling()) {
     const std::string lane_name(lm->current_text());
+    const auto        raw_name    = lm->current_raw_text();
     const bool        lane_is_ref = lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref;
     if (!lm->move_to_sibling()) {
       all_bound = false;  // trailing lane with no width operand: malformed, tolg reports it
@@ -1989,7 +2027,7 @@ std::vector<std::string> uPass_runner::resolve_concat_widths(std::string& dst_na
       }
       continue;
     }
-    const uint32_t bits = lane_is_ref ? concat_lane_declared_bits(lane_name) : 0;
+    const uint32_t bits = lane_is_ref ? concat_lane_declared_bits(lane_name, raw_name) : 0;
     if (bits == 0) {
       widths.emplace_back();  // unresolved: leave the nil; check_concat_lanes reported it
       all_bound = false;
@@ -9063,6 +9101,40 @@ bool uPass_runner::try_inline_func_call() {
       = gbinds.empty() && !has_in_place_type_folds(*callee)
             ? callee
             : clone_template_specialized(callee, std::string(callee->get_top_module_name()), inject, {}, {}, out_inject, gbinds);
+  // The private comb body bypasses SSA, which normally indexes port
+  // declarations. Keep the folded scalar bounds available for dotted reads.
+  if (inline_source != callee) {
+    // A fresh clone starts with an empty signature (clone_template_specialized
+    // only rewrites the body); seed it from the callee, which the bounds below
+    // then specialize.
+    auto& signature = inline_source->io_meta();
+    if (signature.empty()) {
+      signature = io;
+    }
+    const auto specialize_bounds = [](auto& ports, const auto& specs) {
+      for (std::size_t i = 0; i < ports.size() && i < specs.size(); ++i) {
+        auto&       port = ports[i];
+        const auto& spec = specs[i];
+        if (!port.has_deferred_bound() || !spec.max || !spec.min || port.array_size > 0) {
+          continue;
+        }
+        port.bits      = upass::range_bits(*spec.max, *spec.min);
+        port.is_signed = spec.min->is_negative();
+        port.bound_max_text.clear();
+        port.bound_min_text.clear();
+        if (spec.max->is_just_i64() && spec.min->is_just_i64()) {
+          port.has_range = true;
+          port.range_min = spec.min->to_just_i64();
+          port.range_max = spec.max->to_just_i64();
+        } else {
+          port.wide_range_min = spec.min;
+          port.wide_range_max = spec.max;
+        }
+      }
+    };
+    specialize_bounds(signature.inputs, inject);
+    specialize_bounds(signature.outputs, out_inject);
+  }
   // A call evaluated at compile time (its result feeds a `comptime`
   // declaration) cannot roll its loops: a rolled body is runtime hardware, so
   // `comptime const INIT = rows(size=4)` would lose its value.
@@ -14661,7 +14733,7 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
         auto fn  = dst.is_invalid() ? dst : body->get_sibling_next(dst);
         if (!fn.is_invalid() && Lnast_ntype::is_ref(body->get_type(fn))) {
           const std::string callee{body->get_name(fn)};
-          if (auto fv = try_fold_ref(callee); fv && fv->is_string()) {
+          if (auto fv = try_fold_ref(lm->frame_variable(callee)); fv && fv->is_string()) {
             auto name = fv->to_pyrope();
             if (name.size() >= 2 && name.front() == '\'' && name.back() == '\'') {
               name = name.substr(1, name.size() - 2);
@@ -15098,27 +15170,36 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast
     if (plan.registers.contains(raw_name)) {
       return;
     }
-    std::optional<std::pair<int64_t, int64_t>> r;
+    std::optional<Dlop> lo;
+    std::optional<Dlop> hi;
     if (const auto it = plan.carry_out_ranges.find(raw_name); it != plan.carry_out_ranges.end()) {
-      r = it->second;
-    } else if (const auto t = plan.types.find(raw_name); t != plan.types.end()) {
-      const auto& sp = t->second;
-      if (sp.kind != Io_kind::boolean && sp.array_size == 0 && sp.type_name.empty() && sp.max && sp.min && sp.max->is_integer()
-          && sp.min->is_integer() && sp.max->get_signed_bits() <= 62 && sp.min->get_signed_bits() <= 62) {
-        r = std::pair{sp.min->to_just_i64(), sp.max->to_just_i64()};
+      lo = *Dlop::create_integer(it->second.first);
+      hi = *Dlop::create_integer(it->second.second);
+    } else if (const auto t = plan.types.find(raw_name); t != plan.types.end() && t->second.array_size == 0
+               && t->second.type_name.empty()) {
+      lo = t->second.min;
+      hi = t->second.max;
+      if (t->second.kind == Io_kind::boolean && !lo && !hi) {
+        lo = *Dlop::create_integer(0);
+        hi = *Dlop::create_integer(1);
       }
     }
-    if (!r) {
-      return;
-    }
+    // A wide carry does not fit the i64 analysis side table. Its pre-loop
+    // seed still must be invalidated in both representations. Preserve the
+    // arbitrary-width declaration when available.
     if (auto b = symbol_table_.get_bundle_for_write(name); b && (b->is_empty() || b->has_trivial(bundle_path::of_string("0")))) {
       Bundle::Entry e = b->get_entry(bundle_path::of_string("0"));
       e.immutable     = false;
-      e.bw_max        = *Dlop::create_integer(r->second);
-      e.bw_min        = *Dlop::create_integer(r->first);
+      e.bw_min        = lo.value_or(Bundle::invalid_lconst);
+      e.bw_max        = hi.value_or(Bundle::invalid_lconst);
       b->set(bundle_path::of_string("0"), std::move(e));
     }
-    lm->get_lnast()->bw_meta().ranges[name] = BitwidthEntry{.min = r->first, .max = r->second, .unbounded = false};
+    auto& ranges = lm->get_lnast()->bw_meta().ranges;
+    if (lo && hi && lo->is_integer() && hi->is_integer() && lo->get_signed_bits() <= 62 && hi->get_signed_bits() <= 62) {
+      ranges[name] = BitwidthEntry{.min = lo->to_just_i64(), .max = hi->to_just_i64(), .unbounded = false};
+    } else {
+      ranges.erase(name);
+    }
   };
   std::vector<std::pair<std::string, std::string>> results;
   results.reserve(plan.finals.size() + plan.carries.size());
@@ -17464,7 +17545,7 @@ bool uPass_runner::try_init_construction() {
   // reference does not match the declared type. The old "the named `ref self`
   // mod IS the constructor" sugar is gone — construct with a `T(...)` call or
   // an `init` method inside the type instead.
-  if (v_is_ref && !v_raw.empty() && lookup_callee(v_raw)) {
+  if (v_is_ref && !v_raw.empty() && !lm->unit_lnast()->io_meta().find(v_raw) && lookup_callee(v_raw)) {
     if (tn.empty()) {
       return false;  // untyped binding — a plain function-value alias, allowed
     }
@@ -20092,8 +20173,10 @@ bool uPass_runner::try_detuple_store() {
   // val:Signed = 0)`, `mut t:Tone = 5`) names no field: the single-field
   // exception of the call naming rules (06-functions.md "Argument naming")
   // binds it to that field. A function reference stays an error (below).
+  const bool rhs_is_function = rest.size() == 1 && rest[0].is_ref()
+                               && !lm->unit_lnast()->io_meta().find(rest[0].get_name()) && lookup_callee(rest[0].get_name());
   if (rest.size() == 1 && split.fields.size() == 1 && split.fields.front().name.find('.') == std::string::npos
-      && (rest[0].is_const() || (rest[0].is_ref() && !lookup_callee(rest[0].get_name())))) {
+      && (rest[0].is_const() || (rest[0].is_ref() && !rhs_is_function))) {
     const auto& only      = split.fields.front();
     const auto  leaf_name = var + "." + only.name;
     (void)detuple_validate_scalar_store(leaf_name, only.type, rest[0]);
@@ -20107,7 +20190,7 @@ bool uPass_runner::try_detuple_store() {
   // it any more: once the type is split, `try_typename` finds no tuple and the
   // check reads the store as an untyped (legal) function-value alias. Report
   // the same thing here. (errors/mix_tup.prp)
-  if (rest.size() == 1 && rest[0].is_ref() && lookup_callee(rest[0].get_name())) {
+  if (rhs_is_function) {
     detuple_error("ctor-func-ref",
                   std::format("cannot assign function reference `{}` to typed variable `{}`", rest[0].get_name(), var),
                   "call it (`x = T(...)`) or give the type an `init` method; a bare function reference may only bind to an "
@@ -20611,6 +20694,9 @@ void uPass_runner::process_lnast() {
     // declared var (LHS, not folded); child1 the type subtree; child2 the mode
     // const; optional child3 an init value (folded if a ref).
     case Ntype::Lnast_ntype_declare: {
+      if (!loop_iter_ordinals_.empty()) {
+        lm->bind_iteration_state(loop_inst_suffix());
+      }
       // An index-range / enum array dimension declares its plain extent.
       const Index_dims_scope index_dims(*this);
       if (!open_fill_arrays_.empty() && lm->has_child()) {

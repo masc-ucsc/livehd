@@ -12,7 +12,13 @@ module \concat_tuple_lanes.top (
   ,input         [1:0] c
   ,output        [8:0] zt
   ,output        [8:0] zd
+  ,output       [11:0] pairs
+  ,output        [7:0] direct
+  ,output        [7:0] copied
 );
+  assign direct = {2'b00, \p.hi , c};
+  assign copied = direct;
+  assign pairs = {2'b00, c, \p.hi , \p.hi [1:0], c};
   assign zt = {\p.lo , \p.hi , c};
   assign zd = {\p.hi , \p.lo , c};
 endmodule

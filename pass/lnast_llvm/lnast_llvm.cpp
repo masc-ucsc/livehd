@@ -3727,7 +3727,7 @@ void order_view(const Tape& t, View& v) {
             static const char* const kinds[]
                 = {"input", "const",  "constw", "resize", "concat", "not",    "ror",    "count",  "insert",
                    "sext",  "binary", "mux",    "aread",  "awrite", "aclear", "lbegin", "lindex", "lphi",
-                   "lend",  "lfinal", "clock",  "latch",  "wire",   "lget",   "lset"};
+                   "lend",  "lfinal", "clock",  "edge",   "latch",  "wire",   "lget",   "lset"};
             std::function<void(uint32_t, int)> dump = [&](uint32_t id, int depth) {
               const auto& o  = t.ops[id];
               const auto  fc = v.folded(id);
@@ -3746,7 +3746,10 @@ void order_view(const Tape& t, View& v) {
               }
             };
             for (size_t k = from > 0 ? from - 1 : 0; k < stack.size(); ++k) {
-              if (t.ops[stack[k].u].kind == K::latch) {
+              const auto id = stack[k].u;
+              std::fprintf(stderr, "ring value #%u %s %s\n", id, kinds[static_cast<int>(t.ops[id].kind)],
+                           t.names.contains(id) ? t.names.at(id).c_str() : "");
+              if (t.ops[id].kind == K::latch) {
                 std::fprintf(stderr, "ring latch #%u enable:\n", stack[k].u);
                 dump(t.ops[stack[k].u].a.id, 1);
               }
@@ -4081,7 +4084,14 @@ void build_kernel(const Tape& t, const Kernel_job& job, const Activity& gate, si
       }
       it = map.emplace(r.id, made).first;
     }
-    return V{it->second.id, r.width, r.unsign};
+    // An aliased reference can view fewer bits than the mapped kernel input.
+    // Materialize that width before it becomes an operand or a loop carry.
+    const auto value = k.resize(it->second, r.width, r.unsign);
+    if (value.width == 0) {
+      bail(std::format("internal: invalid reference to tape op {} ({}, mapped width {}, requested width {})",
+                       r.id, static_cast<unsigned>(t.ops[r.id].kind), it->second.width, r.width));
+    }
+    return value;
   };
   const auto array_of = [&](uint64_t index) {
     auto it = arrays.find(index);
@@ -4259,8 +4269,10 @@ void build_kernel(const Tape& t, const Kernel_job& job, const Activity& gate, si
           if (!k.lane_buffer_insert(buffer, val(o.b), static_cast<uint32_t>(o.imm), val(o.c))) {
             bail("lane write");
           }
-          lane_buffer[i] = buffer;          // the same buffer now holds this value
-          map[i]         = map.at(o.a.id);  // nothing that is needed reads it as a value
+          // Inserting i can rehash map and invalidate references to its elements.
+          const V carry = map.at(o.a.id);
+          lane_buffer[i] = buffer;
+          map[i] = carry;
         } else {
           made(i, k.dynamic_insert(val(o.a), val(o.b), static_cast<uint32_t>(o.imm), val(o.c), o.width, o.unsign));
         }

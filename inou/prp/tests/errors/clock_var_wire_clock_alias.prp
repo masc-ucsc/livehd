@@ -1,0 +1,21 @@
+/*
+:name: clock_var_wire_clock_alias
+:type: error
+:tolg: 1
+:error: 2 .Clock. variables .*no implicit clock
+:help: :\[clock_pin=
+*/
+
+// Variables are counted, not nets: `pclk` is driven by `clk` itself here (the
+// comptime-config case of a gated pipeline), yet it is still a second Clock
+// variable, so the module is explicit in every configuration.
+pub mod clock_var_wire_clock_alias(clk:Clock, rst:Reset, d:U8) -> (q:U8@[], q2:U8@[]) {
+  wire pclk:Clock
+  pclk = clk
+  reg a:U8:[clock_pin=pclk] = 0
+  reg b:U8 = 0   // locate_error_here
+  a = d
+  b = d
+  q = a
+  q2 = b
+}

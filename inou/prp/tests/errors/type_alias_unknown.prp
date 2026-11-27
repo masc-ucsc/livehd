@@ -1,0 +1,13 @@
+/*
+:name: type_alias_unknown
+:type: error
+:error: is not a parametric type alias
+:help: declare it as
+*/
+
+// An application names a parameterized alias: a plain `type` or an unknown name is not one.
+type Plain = (addr:U8, valid:Bool)
+
+pub mod type_alias_unknown(r:Plain<8>) -> (o:U8@[0]) {   // locate_error_here
+  o = r.addr
+}

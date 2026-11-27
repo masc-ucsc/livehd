@@ -1,0 +1,14 @@
+/*
+:name: sig_type_declared_in_body
+:type: error
+:error: .Req. is not a type
+:help: declare it with
+*/
+
+// A type named in a lambda SIGNATURE is read before the body exists: a type the
+// body declares is not in scope there (it used to leave the port untyped with no
+// diagnostic).
+mod sig_type_declared_in_body<W=8>(r:Req) -> (o:Unsigned(bits=W)@[0]) {   // locate_error_here
+  type Req = (addr:Unsigned(bits=W), valid:Bool)
+  o = r.addr
+}

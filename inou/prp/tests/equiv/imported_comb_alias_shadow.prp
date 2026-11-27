@@ -12,7 +12,14 @@
 // z = a ^ 0xFF instead of a & 0x0F).
 const mid = import("imported_comb_alias_shadow/mid.mid")
 const lf  = import("imported_comb_alias_shadow/other.other")
-pub mod top(a:U8) -> (z:U8@[0], w:U8@[0]) {
+pub mod top(a:U8, other:U8) -> (z:U8@[0], w:U8@[0], copied:U8@[0], boxed:U8@[0]) {
+  // The imported unit named other does not hide this scalar input.
+  type Word = U8
+  mut value:Word = other
+  copied = value
+  type Box = (mut bits:U8 = 0)
+  mut from_port:Box = other
+  boxed = from_port.bits
   const r = mid(a=a)
   z = r.z
   const q = lf(a=a)

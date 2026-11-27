@@ -66,6 +66,21 @@ public:
     if (!Lnast_ntype::is_ref(lnast->get_type(current_nid))) {
       return raw;
     }
+    if (iteration_state_count_ && !Lnast::is_tmp(raw)) {
+      for (auto frame = frames_.rbegin(); frame != frames_.rend() && frame->iteration; ++frame) {
+        for (const auto& local : frame->locals) {
+          if (local.raw != raw || is_tuple_field_key(current_nid) || is_call_arg_key(current_nid)) {
+            continue;
+          }
+          // A declaration inside a nested block is visible only to that block.
+          for (auto n = current_nid; !n.is_invalid(); n = lnast->get_parent(n)) {
+            if (n == local.scope) {
+              return local.name;
+            }
+          }
+        }
+      }
+    }
     if (active_tag_.empty()) {
       // No tag → normally raw (the common, non-inlined case). Exception: a
       // *top-level* loop iteration frame (push_iteration) keeps the tag empty
@@ -171,6 +186,7 @@ public:
     nid_stack    = std::move(f.saved_stack);
     active_tag_  = std::move(f.tag);
     active_salt_ = f.salt;
+    iteration_state_count_ -= f.locals.size();
     frames_.pop_back();
   }
 
@@ -249,7 +265,30 @@ public:
     frames_.push_back(Source_frame{lnast, current_nid, std::move(nid_stack), active_tag_, active_salt_});
     nid_stack    = std::stack<Lnast_nid>{};
     active_salt_ = salt;
+    frames_.back().iteration = true;
     // lnast, current_nid, active_tag_ deliberately unchanged.
+  }
+
+  // A state declaration in an unrolled body creates a distinct register per
+  // iteration. A reference to a register declared outside retains its name.
+  void bind_iteration_state(std::string_view suffix) {
+    if (frames_.empty() || !frames_.back().iteration) {
+      return;
+    }
+    const auto var = lnast->get_first_child(current_nid);
+    const auto type = var.is_invalid() ? var : lnast->get_sibling_next(var);
+    const auto mode = type.is_invalid() ? type : lnast->get_sibling_next(type);
+    if (mode.is_invalid() || !Lnast_ntype::is_const(lnast->get_type(mode))) {
+      return;
+    }
+    const auto kind = lnast->get_name(mode);
+    if (kind != "reg" && kind != "latch" && !kind.starts_with("reg ")) {
+      return;
+    }
+    const auto raw = lnast->get_name(var);
+    frames_.back().locals.push_back({std::string(raw), intern(std::format("{}{}{}", active_tag_, raw, suffix)),
+                                     lnast->get_parent(current_nid)});
+    ++iteration_state_count_;
   }
 
   // Scope identity for nid-keyed pass state (constprop block scopes). Plain
@@ -329,12 +368,20 @@ protected:
   Lnast_nid              current_nid;
 
   // Saved caller state for one level of inline-source nesting.
+  struct Iteration_state {
+    std::string raw;
+    std::string_view name;
+    Lnast_nid scope;
+  };
+  size_t iteration_state_count_{0};
   struct Source_frame {
     std::shared_ptr<Lnast> tree;
     Lnast_nid              saved_cur;
     std::stack<Lnast_nid>  saved_stack;
     std::string            tag;
     uint32_t               salt;
+    bool iteration{false};
+    std::vector<Iteration_state> locals{};
   };
   std::vector<Source_frame> frames_;
   std::string               active_tag_;

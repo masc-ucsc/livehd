@@ -1,0 +1,41 @@
+/*
+:name: type_alias_param_positions
+:type: compile
+*/
+
+// fixprp 1: a parameterized type alias is expanded where it is written, so it
+// goes wherever a type goes. Same-file template: ports (input and output) of a
+// generic mod, locals, `reg`, tuple fields, an array element, a generic
+// argument, another alias, a default binding, a named binding and an operator
+// expression argument.
+type Req<W=32> = (addr:Unsigned(bits=W), valid:Bool)
+type Row<W> = Unsigned(bits=W)
+type Wide<W> = (lo:Row<W>, hi:Row<(W*2)>)
+type Pair<A, B=U8> = (first:A, second:B)
+
+mod pass_t<T>(a:T) -> (y:T@[0]) {
+  y = a
+}
+
+mod fetch<W=8>(r:Req<W>, v:[4]Row<W>, w:Wide<W>, p:Pair<U4>, d:Req)
+  -> (o:Req<W>@[1], a:Row<W>@[0], h:Row<(W*2)>@[0], f:U4@[0], s:U8@[0], e:Unsigned(bits=W)@[0]) {
+  reg held:Req<W> = nil
+  held = r
+  o = held
+  const i = pass_t<T=Row<W>>(a=r.addr)
+  const j = pass_t<T=Req<W>>(a=r)
+  a = i.y
+  h = w.hi
+  f = p.first
+  s = p.second
+  e = v[2]
+}
+
+pub mod type_alias_param_positions<W=8>(r:Req<W>, v:[4]Row<W>, w:Wide<W>, p:Pair<U4>, d:Req)
+  -> (a:Row<W>@[0], h:Row<(W*2)>@[0], f:U4@[0]) {
+  mut local:Req<16> = (addr=1, valid=true)
+  const ff = fetch<W=W>(r=r, v=v, w=w, p=p, d=d)
+  a = ff.a
+  h = ff.h
+  f = p.first
+}

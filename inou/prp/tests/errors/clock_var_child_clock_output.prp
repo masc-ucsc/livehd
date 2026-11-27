@@ -1,0 +1,19 @@
+/*
+:name: clock_var_child_clock_output
+:type: error
+:tolg: 1
+:error: 2 .Clock. variables .*no implicit clock
+:help: :\[clock_pin=
+*/
+
+// A child instance's `Clock` output is a Clock variable of the caller.
+mod gen(clk:Clock) -> (o:Clock@[0]) {
+  o = Clock(clock_pin=clk, enable=true)
+}
+
+pub mod clock_var_child_clock_output(clk:Clock, rst:Reset, d:U8) -> (q:U8@[]) {
+  const g = gen(clk=clk)
+  reg r:U8 = 0   // locate_error_here
+  r = d
+  q = r
+}
