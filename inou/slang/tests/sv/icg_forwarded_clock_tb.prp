@@ -1,0 +1,11 @@
+const dut = import("lg:icg_forwarded_clock")
+
+test dut.gate {
+  mut d = dut
+  tick 8 {
+    d.enable = clock#[0] == 0
+    d.data = clock + 10
+    step
+    assert(d.captured == 10 + (clock & 0xfe))
+  }
+}

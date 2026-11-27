@@ -1,0 +1,11 @@
+const dut = import("lg:clocked_assert_sampling")
+
+test dut.guard {
+  mut d = dut
+  tick 5 {
+    d.enable = clock#[0]
+    d.ok = clock#[0]
+    step
+    assert(d.captured == clock#[0])
+  }
+}
