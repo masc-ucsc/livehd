@@ -1634,21 +1634,26 @@ std::string inv_text(const std::vector<Cube>& inv, const Lit_model& m) {
 
 // Houdini: keep the cubes whose blocking clauses hold at reset and are
 // inductive together. Returns true when they also exclude `target`, i.e. the
-// property holds in every cycle.
+// property holds in every cycle. On any early return `inv` is cleared: an
+// unfiltered seed must never reach pdr_prove.
 bool houdini(const Lit_model& m, std::vector<Cube>& inv) {
   std::erase_if(inv, [](const Cube& c) {  // reset state is all-zero: a cube of zeros blocks it
     return std::all_of(c.begin(), c.end(), [](auto rv) { return !rv.second; });
   });
   Abc_Ntk_t* ntk = model_ntk(m);
   if (ntk == nullptr) {
+    inv.clear();
     return false;
   }
   Aig_Man_t* aig = Abc_NtkToDar(ntk, 0, 1);
   Abc_NtkDelete(ntk);
-  if (aig == nullptr || Aig_ManRegNum(aig) != static_cast<int>(m.regs.size())) {
+  // LHD_TEST_HOUDINI_ABORT forces this path (test only)
+  if (aig == nullptr || Aig_ManRegNum(aig) != static_cast<int>(m.regs.size())
+      || std::getenv("LHD_TEST_HOUDINI_ABORT") != nullptr) {
     if (aig != nullptr) {
       Aig_ManStop(aig);
     }
+    inv.clear();
     return false;
   }
   // One frame as a combinational circuit: latch outputs become inputs and
@@ -1705,6 +1710,8 @@ bool houdini(const Lit_model& m, std::vector<Cube>& inv) {
     as.push_back(Abc_Var2Lit(cnf->pVarNums[Aig_ObjId(Aig_ManCo(aig, 0))], 0));
     proved = sat_solver_solve(s, as.data(), as.data() + as.size(), 100000, 0, 0, 0) == l_False;
     inv    = std::move(keep);
+  } else {
+    inv.clear();
   }
   if (s != nullptr) {
     sat_solver_delete(s);

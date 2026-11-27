@@ -760,6 +760,14 @@ sh_test(
     tags = ["no-sandbox"],
 )
 
+# Reuse soundness corners: Houdini early return, assume that breaks after the failure.
+sh_test(
+    name = "lhd_formal_reuse_sound_test",
+    srcs = ["lhd_formal_reuse_sound_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
 # ABC bmc3 pre-pass: same verdicts, depths, failing cycles and witnesses as the
 # cvc5-only run.
 sh_test(
