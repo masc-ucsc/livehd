@@ -140,10 +140,13 @@ for d in "${DESIGNS[@]}"; do
     "$LHD" compile "$OUT/$src" --top "$top" --reader "$reader" --set yosys.setundef=zero \
       --workdir "$R/cw" --emit-dir "lg:$R/s1" > "$R/compile.log" 2>&1 \
       || { grep -o '"message":"[^"]*' "$R/compile.log" | head -3; echo "FAIL: $top ($reader) compile"; exit 1; }
-    "$LHD" pass single_edge --top "$top" "lg:$R/s1" --emit-dir "lg:$R/s2" --workdir "$R/sw" > "$R/single_edge.log" 2>&1 \
+    # The pass's summary (`single-edge-applied`) is a stat: lhd prints it only under a matching -d.
+    "$LHD" pass single_edge --top "$top" "lg:$R/s1" --emit-dir "lg:$R/s2" --workdir "$R/sw" -d single-edge-applied \
+      > "$R/single_edge.log" 2>&1 \
       || { grep -o '"message":"[^"]*' "$R/single_edge.log" | head -3; echo "FAIL: $top ($reader) single_edge"; exit 1; }
     grep -q 'falling-edge memory(ies) moved to the fall slot' "$R/single_edge.log" \
-      || { grep -o 'P=[0-9][^"]*' "$R/single_edge.log" | head -1; echo "FAIL: $top ($reader): the falling memory was not lowered"; exit 1; }
+      || { grep -o 'P=[0-9][^"]*' "$R/single_edge.log" | head -1 || true
+           echo "FAIL: $top ($reader): the falling memory was not lowered"; exit 1; }
     "$LHD" compile "lg:$R/s2" --top "$top" --workdir "$R/vw" --emit-dir "lean:$R/vc" \
       --set formal.lean.mode=verified_compiler > "$R/vc.log" 2>&1 \
       || { grep -o '"message":"[^"]*' "$R/vc.log" | head -3; echo "FAIL: $top ($reader) certificate"; exit 1; }
