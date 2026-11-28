@@ -311,6 +311,18 @@ struct Slang_module_state {
   absl::flat_hash_map<const slang::ast::Symbol*, std::map<int64_t, slang::SVInt>> mem_init_vals_;
   // File preload commands retain externally writable state, including read-only RTL memories.
   absl::flat_hash_map<const slang::ast::Symbol*, std::string>                     mem_init_images_;
+  // What collect_initial_values could not keep from each `initial` block: the
+  // first thing it dropped (`ignored`, empty when it kept every statement) and
+  // where, plus the variables whose constant ELEMENT writes it recorded, which
+  // only a memory consumes (lower_process checks them once the memory
+  // classification is known). The `initial-ignored` warning names a real drop.
+  struct Initial_harvest {
+    std::string                                 ignored;
+    slang::SourceRange                          where;
+    std::vector<const slang::ast::ValueSymbol*> element_targets;
+  };
+  absl::flat_hash_map<const slang::ast::ProceduralBlockSymbol*, Initial_harvest>  initial_harvest_;
+  Initial_harvest*                                                                initial_harvest_cur_ = nullptr;
   absl::flat_hash_set<const slang::ast::ProceduralBlockSymbol*>                   plusarg_blocks_;
   absl::flat_hash_set<const slang::ast::ValueSymbol*>                             plusarg_vars_;
   absl::flat_hash_set<const slang::ast::Expression*>                              readmem_calls_;
@@ -781,7 +793,14 @@ private:
   const Mem_info::Field* find_tuple_field(const Mem_info& mi, std::string_view name) const;
   // Walk an `initial` block body collecting constant scalar-register writes
   // into reg_init_vals_ and constant memory-element writes into mem_init_vals_.
+  // What it drops goes to initial_harvest_cur_ (note_initial_dropped).
   void                   collect_initial_values(const slang::ast::Statement& stmt);
+  void                   note_initial_dropped(slang::SourceRange where, std::string what) {
+    if (initial_harvest_cur_ != nullptr && initial_harvest_cur_->ignored.empty()) {
+      initial_harvest_cur_->ignored = std::move(what);
+      initial_harvest_cur_->where   = where;
+    }
+  }
   // Emit the comp_type_array declare for an unpacked array (reg or mut).
   // Returns false (with a diagnostic) for shapes the reader cannot lower.
   bool                   declare_unpacked(const slang::ast::ValueSymbol& sym, bool is_reg);

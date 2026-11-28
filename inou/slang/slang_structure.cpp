@@ -2457,8 +2457,11 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       }
       if (member.kind == slang::ast::SymbolKind::ProceduralBlock
           && member.as<slang::ast::ProceduralBlockSymbol>().procedureKind == slang::ast::ProceduralBlockKind::Initial) {
-        if (!plusarg_blocks_.contains(&member.as<slang::ast::ProceduralBlockSymbol>())) {
-          collect_initial_values(member.as<slang::ast::ProceduralBlockSymbol>().getBody());
+        const auto& pbs = member.as<slang::ast::ProceduralBlockSymbol>();
+        if (!plusarg_blocks_.contains(&pbs)) {
+          initial_harvest_cur_ = &initial_harvest_[&pbs];
+          collect_initial_values(pbs.getBody());
+          initial_harvest_cur_ = nullptr;
         }
       }
     }
@@ -2861,12 +2864,17 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
 // program-order forwarding).
 // Walk an `initial` block body, recording constant scalar-register and
 // `mem[const]` assignments. Direct assignments and constant-bounded for loops
-// are captured; anything else is skipped and remains covered by the reader's
-// limited-initial-block warning.
+// are captured; anything else is skipped, and the first thing skipped is noted
+// (note_initial_dropped) for the block's `initial-ignored` warning.
 void Slang_context::collect_initial_values(const slang::ast::Statement& stmt) {
   using slang::ast::ExpressionKind;
   using slang::ast::StatementKind;
+  const auto named = [](const slang::ast::Symbol* sym) {
+    return sym == nullptr ? std::string("a concatenation") : absl::StrCat("'", sym->name, "'");
+  };
   switch (stmt.kind) {
+    case StatementKind::Empty:
+    case StatementKind::VariableDeclaration: return;  // no effect of its own (a for header declares its counter so)
     case StatementKind::List:
       for (const auto* s : stmt.as<slang::ast::StatementList>().list) {
         collect_initial_values(*s);
@@ -2924,10 +2932,14 @@ void Slang_context::collect_initial_values(const slang::ast::Statement& stmt) {
           mem_init_images_[&sym] = hlop::memory_image_command(name == "$readmemh" ? 16 : 2, text.str());
           reg_syms_.insert(&sym);
           readmem_calls_.insert(&e);
+        } else {
+          note_initial_dropped(e.sourceRange, absl::StrCat("a call to ", call.isSystemCall() ? name : call.getSubroutineName()));
         }
         return;
       }
-      if (e.kind != ExpressionKind::Assignment) {
+      // `x += 1` reads the power-on value it would define: not an initializer.
+      if (e.kind != ExpressionKind::Assignment || e.as<slang::ast::AssignmentExpression>().isCompound()) {
+        note_initial_dropped(e.sourceRange, "an expression that is not a plain assignment");
         return;
       }
       const auto& as  = e.as<slang::ast::AssignmentExpression>();
@@ -2943,15 +2955,21 @@ void Slang_context::collect_initial_values(const slang::ast::Statement& stmt) {
           // harvest): do not turn `initial q = 'x` into a reset to `?`.
           if (auto cv = try_eval_const_net(as.right()); cv && cv->isInteger() && !cv->integer().hasUnknown()) {
             reg_init_vals_[sym] = const_text(cv->integer());
+          } else {
+            note_initial_dropped(e.sourceRange, absl::StrCat("a value for ", named(sym), " that is not a known constant"));
           }
+        } else {
+          note_initial_dropped(e.sourceRange, absl::StrCat("a whole write to ", named(sym), ", which is not a plain register"));
         }
         return;
       }
       if (lhs.kind != ExpressionKind::ElementSelect) {
+        note_initial_dropped(e.sourceRange, absl::StrCat("a write to part of ", named(lhs_base_symbol(lhs))));
         return;
       }
       const auto& es = lhs.as<slang::ast::ElementSelectExpression>();
       if (es.value().kind != ExpressionKind::NamedValue) {
+        note_initial_dropped(e.sourceRange, absl::StrCat("a write to part of ", named(lhs_base_symbol(lhs))));
         return;
       }
       const auto* sym = &es.value().as<slang::ast::NamedValueExpression>().symbol;
@@ -2982,11 +3000,18 @@ void Slang_context::collect_initial_values(const slang::ast::Statement& stmt) {
       // (see the scalar harvest).
       if (idx && val && val->isInteger() && !val->integer().hasUnknown()) {
         mem_init_vals_[sym][*idx - lower] = val->integer();
+        if (initial_harvest_cur_ != nullptr) {
+          initial_harvest_cur_->element_targets.push_back(sym);
+        }
+      } else {
+        note_initial_dropped(e.sourceRange,
+                             absl::StrCat("an element write to ", named(sym), " whose index or value is not a known constant"));
       }
       return;
     }
     case StatementKind::ForLoop: {
       if (!eval_ctx_) {
+        note_initial_dropped(stmt.sourceRange, "a for loop");
         return;
       }
       const auto                                  saved_inits     = mem_init_vals_;
@@ -3067,10 +3092,11 @@ void Slang_context::collect_initial_values(const slang::ast::Statement& stmt) {
         // last walked iteration's value as its power-on/reset state.
         mem_init_vals_ = saved_inits;
         reg_init_vals_ = saved_reg_inits;
+        note_initial_dropped(stmt.sourceRange, "a for loop whose bounds or steps do not fold to constants");
       }
       return;
     }
-    default: return;
+    default: note_initial_dropped(stmt.sourceRange, absl::StrCat("a ", slang::ast::toString(stmt.kind), " statement")); return;
   }
 }
 
@@ -6447,17 +6473,40 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
         return stmt.kind == StatementKind::ExpressionStatement
                && readmem_calls_.contains(&stmt.as<slang::ast::ExpressionStatement>().expr);
       };
-      if (handled(pbs.getBody())) {
-        return;
-      }
       // Constant scalar-register and memory-element initialization was
       // harvested before declarations. Other initial-block behavior remains
-      // outside this synthesis reader.
-      emit_warning(
-          slang::SourceRange(pbs.location, pbs.location),
-          "initial-ignored",
-          "unsupported",
-          "only supported constant register/memory initialization is preserved; other initial-block statements are ignored");
+      // outside this synthesis reader: warn when the harvest dropped something,
+      // or when it kept element writes that no memory consumes (a struct-element
+      // memory, a packed array that stays a flat register, a bit of a vector),
+      // and name the first such thing. A block the harvest kept entirely is
+      // silent.
+      std::string        ignored;
+      slang::SourceRange where(pbs.location, pbs.location);
+      if (auto hit = initial_harvest_.find(&pbs); hit != initial_harvest_.end()) {
+        ignored = hit->second.ignored;
+        where   = ignored.empty() ? where : hit->second.where;
+        for (const auto* sym : hit->second.element_targets) {
+          const auto& ct   = sym->getType().getCanonicalType();
+          // declare_unpacked keeps the contents of a 1-D unpacked array unless
+          // its element is a struct; a flattened array PORT reports its own
+          // `mem-init-ignored`. A packed 2-D array keeps them as a memory only.
+          const bool  kept = ct.kind == SymbolKind::FixedSizeUnpackedArrayType
+                                 ? !ct.as<slang::ast::FixedSizeUnpackedArrayType>().elementType.getCanonicalType().isStruct()
+                                 : packed_mem_regs_.contains(sym);
+          if (ignored.empty() && !kept) {
+            ignored = absl::StrCat("the element writes to '", sym->name, "', which is not lowered as a memory");
+            where   = slang::SourceRange(sym->location, sym->location);
+          }
+        }
+      } else if (!handled(pbs.getBody())) {
+        ignored = "statements other than file preloads";  // a block the harvest did not walk
+      }
+      if (!ignored.empty()) {
+        emit_warning(where,
+                     "initial-ignored",
+                     "unsupported",
+                     absl::StrCat("only supported constant register/memory initialization is preserved; ignored: ", ignored));
+      }
       return;
     }
     case ProceduralBlockKind::Final     : return;

@@ -363,6 +363,14 @@ sh_test(
     env_inherit = ["PATH"],
 )
 
+# `initial-ignored` fires only for what the initial-block harvest dropped, and
+# names it: fully harvested blocks are silent.
+sh_test(
+    name = "slang_initial_ignored",
+    srcs = ["tests/initial_ignored_test.sh"],
+    data = ["//lhd"],
+)
+
 sh_test(
     name = "slang_ignored_assertion_past",
     srcs = ["tests/ignored_assertion_past_test.sh"],
