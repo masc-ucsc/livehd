@@ -24,7 +24,7 @@
 #          exported by lhd, every Lean route on their certificates against iverilog on the source,
 #          and the value gates on the real scanner's certificates), all 21 in one test (about 30
 #          min).
-#   long   weekly (about 10 to 14 h, most of it L3): L1 to L5 only, in long_tier.sh (its header
+#   long   weekly (about 20 to 26 h, most of it L3: about 12 probes reach the 90 min timeout): L1 to L5 only, in long_tier.sh (its header
 #          says what each runs, fails on and writes, and its environment): L1 census_speed
 #          (cert_trace and cert_run, ir and vc, on the census speed rows: $OUT/speed.tsv), L2
 #          fp_census (route:fp of cert_trace and dcert2_memroute against route:ir: $OUT/fp.tsv), L3

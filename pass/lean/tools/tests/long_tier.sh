@@ -61,7 +61,8 @@
 #                 lines) of L3 and L4
 #   SURVEY_SIZES  a census TSV with family, block, nodes (sym_survey.py --sizes: smallest first, fp
 #                 skipped above 150,000 nodes); SURVEY_ONLY a regex (--only: a subset, said so in
-#                 the note); SURVEY_TIMEOUT seconds per probe (default 1800)
+#                 the note); SURVEY_TIMEOUT seconds per probe (default 5400: the user chose three times the
+#                 first 1800, so the largest designs get a chance to finish)
 #   ROUNDTRIP     TSV files (space-separated) with columns converted, original, stim,
 #                 original_trace (`-` where there is none): the converted corpus (L4)
 #   EXTRA_CERTS   a glob of more certificates to admit, read only (L4)
@@ -296,7 +297,7 @@ L3_sym_survey() {
   long_natives "$d/natives.log" sym_probe \
     || { echo "RESULT FAIL the natives did not build or are stale ($d/natives.log)"; return 1; }
   local args=(--probe "$NATROOT/nat/sym_probe" --inputs "$SURVEY_INPUTS" --out "$d" --mem "$LONG_MEM"
-              --timeout "${SURVEY_TIMEOUT:-1800}")
+              --timeout "${SURVEY_TIMEOUT:-5400}")
   [[ -n "${SURVEY_SIZES:-}" ]] && args+=(--sizes "$SURVEY_SIZES")
   [[ -n "${SURVEY_ONLY:-}" ]] && args+=(--only "$SURVEY_ONLY")
   echo "load at the start $(load)"
