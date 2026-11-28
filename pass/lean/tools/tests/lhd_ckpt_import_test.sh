@@ -25,6 +25,9 @@ set -euo pipefail
 # refused, and imported with `fill` (a note names it); a memory word changed in state.bin resumes
 # to a different state; a map file that names a missing memory is refused; the same two
 # refusals in the earlier layout.
+# emit-map and fill (RS-17): the map `emit-map` prints, given back as map:, reproduces the import;
+# a map naming a missing memory is imported with `fill` (a note names it) and the memory is then
+# the power-on image, not the testbench's (it wrote word 3).
 #
 # Needs an lhd from 2026-11-21 or later (the state.bin layout). CK_NAT=<dir with native lhd_ckpt
 # and cert_trace> uses them; otherwise the drivers run interpreted against formal/lean/.olean-dev.
@@ -208,6 +211,19 @@ expect 0 "" ct "$C" 10 "$V/tb.stim" ckpt-in:"$K/word.ckpt" ckpt-out:"$K/word30.c
 expect 1 "DIFFER: memory 0 word 0x5" ck diff "$K/word30.ckpt" "$I/30.ckpt"
 printf 'mem 0 t.nosuch\n' > "$K/bad.map"
 expect 1 "REFUSED: memory 0 (arr_1): no memory \`t.nosuch\`" ck import-lhd "$C" "$S/c20" "$K/x.ckpt" map:"$K/bad.map"
+# RS-17 emit-map: the mapping printed, given back, imports the same checkpoint
+expect 0 "flop 1 t.cnt" ck import-lhd "$C" "$S/c20" "$K/em.ckpt" emit-map
+grep -E '^(flop|mem) ' "$LOG" > "$K/em.map"
+[[ $(wc -l < "$K/em.map") == 3 ]] || { cat "$LOG"; echo "FAIL: emit-map printed $(wc -l < "$K/em.map") lines, expected 2 flops and 1 memory"; exit 1; }
+expect 0 "" ck import-lhd "$C" "$S/c20" "$K/em2.ckpt" map:"$K/em.map"
+expect 0 "SAME" ck diff "$K/em2.ckpt" "$I/20.ckpt"
+expect 0 "SAME" ck diff "$K/em.ckpt" "$I/20.ckpt"
+# RS-17 fill on a memory: the map names a missing memory; fill takes the power-on image, which
+# differs from the testbench's (word 3 written); without fill the same map is refused (above)
+expect 0 "note: memory 0 (arr_1): no memory \`t.nosuch\`, took its power-on image" \
+  ck import-lhd "$C" "$S/c20" "$K/mf.ckpt" map:"$K/bad.map" fill
+expect 1 "DIFFER: memory 0" ck diff "$K/mf.ckpt" "$I/20.ckpt"
+echo "ok: RS-17 import-lhd emit-map reproduces the import; fill takes a missing memory's power-on image"
 # the earlier layout's refusals
 O="$V/old/top_run/ckp20"
 mkdir -p "$K/oldmiss"; cp -r "$O" "$K/oldmiss/ckp20"; sed -i 's/"t.cnt"/"t.cnt_old"/' "$K/oldmiss/ckp20/regs.json"
