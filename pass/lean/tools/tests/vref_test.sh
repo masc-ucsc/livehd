@@ -7,6 +7,7 @@
 #   memrst   a memory cleared by an asynchronous reset (a for loop in the reset arm)
 #   signedops  signed operands in wider contexts (sign extension before shifts, sums, products,
 #            division, compares and muxes; a mixed signed/unsigned sum is unsigned)
+#   twoclkmem  a memory written from two clock domains that fire apart (the commit table)
 #   meminit  a memory initialized by an `initial` for loop with nonzero values
 #   modvar   `%` with a variable divisor: the certificate export must refuse it (x % 0 is X)
 # A route passes a case when its STEP lines equal Verilator's. Verilator, not iverilog: iverilog
@@ -111,16 +112,18 @@ if export_case "$d" allops; then
   else fail "allops: Verilator (logs in $d)"; fi
 else fail "allops: lhd export (logs in $d)"; fi
 
-# signedops: signed operands in wider contexts, generated inputs
-d=$(case_dir signedops)
-cp "$V/allops/make_inputs.py" "$d/"
-if export_case "$d" signedops; then
-  "$PY" -I "$d/make_inputs.py" "$d/lean/signedops_io.json" "$CYCLES" "$SEED" "$d" --top signedops \
-    > "$d/make_inputs.log" 2>&1 || fail "signedops: make_inputs.py (log $d/make_inputs.log)"
-  if verilator_run "$d" signedops; then
-    routes "$d" signedops "$CYCLES" "edges:file:$d/edges.txt"
-  else fail "signedops: Verilator (logs in $d)"; fi
-else fail "signedops: lhd export (logs in $d)"; fi
+# signedops and twoclkmem: generated inputs, like allops
+for c in signedops twoclkmem; do
+  d=$(case_dir $c)
+  cp "$V/allops/make_inputs.py" "$d/"
+  if export_case "$d" $c; then
+    "$PY" -I "$d/make_inputs.py" "$d/lean/${c}_io.json" "$CYCLES" "$SEED" "$d" --top $c \
+      > "$d/make_inputs.log" 2>&1 || fail "$c: make_inputs.py (log $d/make_inputs.log)"
+    if verilator_run "$d" $c; then
+      routes "$d" $c "$CYCLES" "edges:file:$d/edges.txt"
+    else fail "$c: Verilator (logs in $d)"; fi
+  else fail "$c: lhd export (logs in $d)"; fi
+done
 d="$OUT/allops"
 
 # allops on the per-design simulators
