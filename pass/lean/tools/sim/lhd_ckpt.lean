@@ -23,7 +23,9 @@ fast-forward and a Lean route continue. It reads both layouts `lhd sim` has writ
   being the entry's storage width (8, 16, 32 or whole words), or `bits` for a memory of at most
   128 bits packed. `sim:<dir>` gives the `sim` folder when the checkpoint was moved.
 - the earlier one: `<workdir>/ckpt/<test>/ckp<N>/` with `regs.json`, one `<inst>.<memory>.hex` per
-  memory, and `meta.json`.
+  memory, and `meta.json`. `lhd sim` has not written it since 2026-11-21, but
+  `pass/lean/xpatch/transport.py` writes it (a state built outside `lhd sim`, by flop and memory
+  name, for another certificate), so this reader stays.
 Names come from the `_io.json` beside the certificate:
 - flop `n` is the key `<inst>.<n>` (a `regs.json` key, or the field `n` of instance `inst`);
   memory `m` is `<inst>.<i>` (the field, or the file `<inst>.<i>.hex`: `$readmemh` words), `i` being

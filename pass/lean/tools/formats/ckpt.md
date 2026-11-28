@@ -171,7 +171,10 @@ It reads both layouts `lhd sim` has written:
   storage width (packed). `sim:<dir>` names the `sim` folder when the checkpoint was moved (the
   folder above the checkpoint must keep the test's name).
 - The earlier one: `<workdir>/ckpt/<test>/ckp<N>/` with `regs.json` (registers by name), one
-  `<inst>.<memory>.hex` per memory (`$readmemh` words), and `meta.json` (the cycle).
+  `<inst>.<memory>.hex` per memory (`$readmemh` words), and `meta.json` (the cycle). `lhd sim` has
+  not written it since 2026-11-21. `pass/lean/xpatch/transport.py` still writes it: xpatch builds
+  a design's state from another design's run, by flop and memory name, and imports it here. So
+  the reader stays.
 
 - Names come from the `_io.json` beside the certificate. Flop `n` is the key `<inst>.<n>`: the
   field `n` of instance `<inst>` (earlier layout: the `regs.json` key). Memory `k` is
