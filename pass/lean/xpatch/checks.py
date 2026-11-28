@@ -207,6 +207,15 @@ def s0 : StateM := Projection.HwMem.initStateOf D
 
 def spec : InvSpec := @SPEC@
 
+/-- A byte string from its hex digits. -/
+def hexBytes (s : String) : ByteArray := Id.run do
+  let cs := s.toList.toArray
+  let hv (c : Char) : UInt8 := if c.isDigit then (c.toNat - 48).toUInt8 else (c.toNat - 87).toUInt8
+  let mut out := ByteArray.empty
+  for i in [0:cs.size / 2] do
+    out := out.push (hv cs[2 * i]! * 16 + hv cs[2 * i + 1]!)
+  return out
+
 def pfB : ByteArray := <pfB>
 def pfS : ByteArray := <pfS>
 
@@ -243,12 +252,12 @@ def check_thm(thm, dcert, p_io, other, outdir):
     same or bad.append('embedded design')
     lits = {}
     for nm in ('pfB', 'pfS'):
-        mm = re.search(rf'^def {nm} : ByteArray := ⟨#\[([0-9, ]*)\]⟩$', text, re.M)
+        mm = re.search(rf'^def {nm} : ByteArray := hexBytes "([0-9a-f]*)"$', text, re.M)
         lits[nm] = mm
     skeleton = text[:lit0] + '"<design>"' + text[lit1:]
     for nm in ('pfB', 'pfS'):
         skeleton = skeleton.replace(lits[nm].group(0), f'def {nm} : ByteArray := <{nm}>')
-    nb = {nm: len(lits[nm].group(1).split(',')) for nm in lits}
+    nb = {nm: len(lits[nm].group(1)) // 2 for nm in lits}
     res.append(f"proof literals: pfB {nb['pfB']} bytes, pfS {nb['pfS']} bytes")
     tm = template_match(skeleton)
     checks = {'text outside the three literals = sym_verify\'s template, exactly': tm is not None}
@@ -280,8 +289,8 @@ def check_thm(thm, dcert, p_io, other, outdir):
         v or bad.append(k)
     # the corrupted copies (each must be refused by Lean)
     os.makedirs(outdir, exist_ok=True)
-    s = lits['pfS'].group(1).split(', ')
-    cut = f"def pfS : ByteArray := ⟨#[{', '.join(s[:len(s) // 2])}]⟩"
+    s = lits['pfS'].group(1)
+    cut = f'def pfS : ByteArray := hexBytes "{s[:len(s) // 4 * 2]}"'
     mut = {
         'badproof': text.replace(lits['pfS'].group(0), cut),
         'wrongdesign': text[:lit0] + lean_str(open(other, encoding='utf-8').read()) + text[lit1:],

@@ -90,7 +90,7 @@ import LeanSemanticPrimitives.Projection.CkptStateM
 import HDLProof.Reach.Refute
 
 open Compiler Projection HDLProof HDLProof.Sym HDLProof.Driver Projection.MemProjection Projection.HwMem
-open HDLProof.Kit (SymRoute mkSymRoute defaultSim simWhy leanStr)
+open HDLProof.Kit (SymRoute mkSymRoute defaultSim simWhy leanStr leanBytes hexBytesDef)
 open Std.Tactic.BVDecide
 
 /-! ## Counterexample replay -/
@@ -138,9 +138,6 @@ def replay (D : DesignCert) (R : Program) (sp : InvSpec) (s0 : StateM) (ins : Ar
 
 /-! ## F2: the theorem form -/
 
-def leanBytes (b : ByteArray) : String :=
-  "⟨#[" ++ ", ".intercalate (b.toList.map toString) ++ "]⟩"
-
 def leanProp (p : PropSpec) : String := s!"\{ out := {p.out}, nz := {p.nz} }"
 
 def leanSpec (sp : InvSpec) : String :=
@@ -185,7 +182,7 @@ theorem certText_reads : CertIO.certReads certText = true := by native_decide
 
 def spec : InvSpec := {leanSpec sp}
 
-def pfB : ByteArray := {leanBytes pfB}
+{hexBytesDef}def pfB : ByteArray := {leanBytes pfB}
 def pfS : ByteArray := {leanBytes pfS}
 
 theorem verdict : {chk} D spec s0 pfB pfS = true := by native_decide

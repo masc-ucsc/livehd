@@ -317,24 +317,6 @@ def symRouteOf (sim : String) (D : DesignCert) (sf wf : Nat) : IO (Except String
 
 /-! ## Theorem files -/
 
-def hexDigit (n : Nat) : Char := "0123456789abcdef".toList.getD n '0'
-
-/-- A proof as a hex string the file decodes (`hexBytes`): an array literal of its bytes
-exceeds the elaborator's recursion depth for all but the smallest proofs. -/
-def leanBytes (b : ByteArray) : String :=
-  "hexBytes \"" ++ String.ofList (b.toList.flatMap fun x => [hexDigit (x.toNat / 16), hexDigit (x.toNat % 16)]) ++ "\""
-
-def hexBytesDef : String := "/-- A byte string from its hex digits. -/
-def hexBytes (s : String) : ByteArray := Id.run do
-  let cs := s.toList.toArray
-  let hv (c : Char) : UInt8 := if c.isDigit then (c.toNat - 48).toUInt8 else (c.toNat - 87).toUInt8
-  let mut out := ByteArray.empty
-  for i in [0:cs.size / 2] do
-    out := out.push (hv cs[2 * i]! * 16 + hv cs[2 * i + 1]!)
-  return out
-
-"
-
 def leanBytesL (bs : List ByteArray) : String := "[" ++ ", ".intercalate (bs.map leanBytes) ++ "]"
 
 def leanBytesLL (bss : List (List ByteArray)) : String := "[" ++ ", ".intercalate (bss.map leanBytesL) ++ "]"
