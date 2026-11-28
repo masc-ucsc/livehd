@@ -21,6 +21,23 @@ version, truncation, trailing data, a malformed clock separator, a short name,
 an unsupported opcode -- plus a SENSITIVITY control, because a comparison that
 cannot fail proves nothing, and the codec/admission split on real data.
 
+A CONTROL THAT DID NOT RUN IS A FAILURE.  The sensitivity and admission
+controls need a flop and a memory to perturb.  A design without one cannot run
+them, and the run FAILS saying which, unless `--allow-skip` is given (then it
+prints a `--` line for each block it skipped).  So a parity OK always means every
+control ran, unless the caller said otherwise.
+
+HOW IT RUNS.  The probe imports the Mathlib-free codec (`Compiler.CertIOCodec`:
+`renderCert`, `parseCert`, `readCertChecked`) and runs interpreted against
+`formal/lean/.olean-dev` (`formal/lean/.build-proj.sh`), as the tools' tests do.
+The theorem that makes byte equality mean field equality,
+`renderCert_injective` (`Compiler/CertIOParity.lean`), imports Mathlib; `lake
+build LeanSemanticPrimitives.Compiler.CertIOAudit` builds it and fails on any
+non-standard axiom under it.  In the full test tier (`pass/lean/tools/tests/
+run_tier.sh full`), `lhd_dcert_test.sh` there runs this script on three designs
+lhd exports, with its controls, and `scanner_dcert_test.sh` on the real
+scanner's multi-domain certificates.
+
 WHAT IT DOES NOT PROVE.  That the `CertificateIR` is a faithful transcription
 of the LGraph.  That link is `pass.lean`'s, unchanged by any of this.
 """
@@ -52,7 +69,7 @@ def cert_block(text: str, base: str) -> str:
 
 
 PROBE = r'''
-import LeanSemanticPrimitives.Compiler.CertIOParity
+import LeanSemanticPrimitives.Compiler.CertIOCodec
 
 set_option maxRecDepth 1000000
 set_option maxHeartbeats 0
@@ -80,6 +97,12 @@ def ok (_lg : Log) (m : String) : IO Unit := do IO.println s!"  ok   {m}"
 def bad (lg : Log) (m : String) : IO Unit := do
   IO.println s!"  FAIL {m}"
   lg.modify (fun a => a.push m)
+
+/-- A block of controls the design cannot run (no flop or no memory to perturb): a failure,
+unless the caller allowed it (`--allow-skip`). -/
+def skipped (lg : Log) (m : String) : IO Unit :=
+  if %(allow_skip)s then IO.println s!"  --   {m}"
+  else bad lg s!"{m} (the design has nothing to run them on; --allow-skip allows it)"
 
 def expectError (lg : Log) (what : String) (r : Except String DesignCert) : IO Unit :=
   match r with
@@ -113,7 +136,7 @@ def main : IO UInt32 := do
 
     -- 3. SENSITIVITY. A comparison that cannot fail proves nothing.
     if D.flops.isEmpty then
-      IO.println "  --   no flops: flop sensitivity controls skipped"
+      skipped lg "no flops: flop sensitivity controls skipped"
     else
       let widened := { D with flops := D.flops.modify 0 (fun f => { f with width := f.width + 1 }) }
       if renderCert widened == raw then bad lg "changing a flop width left the bytes identical"
@@ -137,7 +160,7 @@ def main : IO UInt32 := do
     -- that names no slot of the design, or a malformed commit-table entry, is
     -- a good record (the codec reads it) and a refused design (admission).
     if D.memories.isEmpty then
-      IO.println "  --   no memories: DCERT3/DCERT4 memory controls skipped"
+      skipped lg "no memories: DCERT3/DCERT4 memory controls skipped"
     else
       let mem0 := fun (f : MemoryDesc → MemoryDesc) => { D with memories := D.memories.modify 0 f }
       let pw := mem0 (fun m => { m with init := m.init.push 1 })
@@ -207,8 +230,11 @@ def main() -> int:
     ap.add_argument("--base", required=True)
     ap.add_argument("--lean", required=True, help="the emitted <base>_Lgraph.lean")
     ap.add_argument("--dcert", required=True, help="the emitted <base>.dcert")
-    ap.add_argument("--iso", default=str(ROOT / "generated/port_staging/iso"),
-                    help="build root holding CertIOParity.olean")
+    ap.add_argument("--olean", default=str(ROOT / "formal/lean/.olean-dev"),
+                    help="the LEAN_PATH holding LeanSemanticPrimitives/Compiler/CertIOCodec.olean "
+                         "(formal/lean/.build-proj.sh builds it)")
+    ap.add_argument("--allow-skip", action="store_true",
+                    help="pass a design without flops or memories (its controls on them are skipped)")
     ap.add_argument("--out", required=True, help="directory for the probe and its log")
     # The toolchain pinned in formal/lean/lean-toolchain, in elan's directory naming.
     pin = (ROOT / "formal/lean/lean-toolchain").read_text(encoding="utf-8").strip()
@@ -222,15 +248,14 @@ def main() -> int:
     out = pathlib.Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     probe = out / f"parity_{a.base}.lean"
-    probe.write_text(PROBE % {"cert": cert_block(lean_src, a.base),
-                              "path": str(dcert), "base": a.base}, encoding="utf-8")
+    probe.write_text(PROBE % {"cert": cert_block(lean_src, a.base), "path": str(dcert), "base": a.base,
+                              "allow_skip": "true" if a.allow_skip else "false"}, encoding="utf-8")
 
-    iso = pathlib.Path(a.iso).resolve()
-    lean_dir = ROOT / "formal/lean"
-    pkgs = sorted(lean_dir.glob(".lake/packages/*/.lake/build/lib/lean"))
-    lean_path = os.pathsep.join([str(iso / "build/lib/lean")] + [str(p) for p in pkgs]
-                                + [str(lean_dir / ".lake/build/lib/lean")])
-    env = dict(os.environ, LEAN_PATH=lean_path, LEAN_NUM_THREADS="2")
+    olean = pathlib.Path(a.olean).resolve()
+    if not (olean / "LeanSemanticPrimitives/Compiler/CertIOCodec.olean").is_file():
+        raise SystemExit(f"no LeanSemanticPrimitives/Compiler/CertIOCodec.olean under {olean} "
+                         "(run formal/lean/.build-proj.sh)")
+    env = dict(os.environ, LEAN_PATH=str(olean), LEAN_NUM_THREADS="2")
 
     log = out / f"parity_{a.base}.log"
     # `--run`, not `lake env`: the libraries are already built and the probe is a
