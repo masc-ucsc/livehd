@@ -34,6 +34,9 @@ ROOTS=(
   # the routes as engines (a route's step on a state of its own kind) and their soundness
   LeanSemanticPrimitives.Compiler.Engine
   LeanSemanticPrimitives.Compiler.VcEngine
+  # the certificate semantics stated as plain rules: clocks, resets, enables and memories
+  # (StateSpec), each with its axiom-gate line
+  LeanSemanticPrimitives.Compiler.StateSpec
   # the direct simulator (lgraph-sim's library) and its examples; DirectTests' 104 #guards run
   # while it builds (the accepted examples step and agree with interpretDesign; each malformed
   # certificate is refused for its stated reason; the async-reset and memory rules give the
