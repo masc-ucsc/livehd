@@ -218,7 +218,7 @@ run1() { # <mode> <expect> <refmap> args...
   fi
   local got
   got=$(grep -o 'RESULT: [A-Z -]*' "$log" | tail -1 | sed 's/RESULT: //; s/[ -]*$//')
-  if [[ "$got" != "$expect"* ]]; then
+  if [[ "$got" != "$expect" ]]; then
     tail -6 "$log"; echo "FAIL: $mode $rm $* -- expected $expect, got '$got'"; exit 1
   fi
   echo "ok: $mode $rm $* -> $got"

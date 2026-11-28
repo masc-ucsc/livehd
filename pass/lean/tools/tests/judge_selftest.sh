@@ -224,7 +224,7 @@ judge() { # <expect> <refmap> args...
   drv sym_refmap judge "$OUT/$rm.refmap" "$@" "work:$OUT/jw_$N" > "$log" 2>&1 || true
   local got
   got=$(grep -o 'RESULT: [A-Z -]*' "$log" | tail -1 | sed 's/RESULT: //; s/[ -]*$//')
-  if [[ "$got" != "$expect"* ]]; then tail -8 "$log"; echo "FAIL: judge $rm $* -- expected $expect, got '$got'"; exit 1; fi
+  if [[ "$got" != "$expect" ]]; then tail -8 "$log"; echo "FAIL: judge $rm $* -- expected $expect, got '$got'"; exit 1; fi
   echo "ok: judge $rm $* -> $got"
 }
 judge "MATCH FOUND" acc2      random:40,8
@@ -313,12 +313,12 @@ product() { # <name> <refmap> <d0> <d1> <k list> <expect>
   drv sym_verify "$OUT/${nm}_lean/$nm.dcert" ok asm:env_ok base "k:$ks" "work:$OUT/${nm}_sw2" > "$log" 2>&1 || true
   local got
   got=$(grep -o 'RESULT: [A-Z -]*' "$log" | tail -1 | sed 's/RESULT: //; s/[ -]*$//')
-  if [[ "$got" != "$expect"* ]]; then tail -8 "$log"; echo "FAIL: product search $nm -- expected $expect, got '$got'"; exit 1; fi
+  if [[ "$got" != "$expect" ]]; then tail -8 "$log"; echo "FAIL: product search $nm -- expected $expect, got '$got'"; exit 1; fi
   echo "ok: product search $nm -> $got"
 }
 product prod_acc2b acc2b accS acc2b 2,4,8 "COUNTEREXAMPLE"
 judge "NO MATCH" acc2b "trace:$(ls "$OUT"/prod_acc2b_sw2/*cex_inputs.tsv | head -1)"
-product prod_acc2 acc2 accS acc2 2,4,8 "NO COUNTEREXAMPLE"
+product prod_acc2 acc2 accS acc2 2,4,8 "NO COUNTEREXAMPLE UP TO"
 product prod_pv1b pv1b pv0 pv1b 4,8,16 "COUNTEREXAMPLE"
 judge "NO MATCH" pv1b "trace:$(ls "$OUT"/prod_pv1b_sw2/*cex_inputs.tsv | head -1)"
 # a guard on a 1-bit port (out:v.0) reads the port itself
@@ -328,7 +328,7 @@ judge "NO MATCH" r_same "trace:$(ls "$OUT"/prod_r_same_sw2/*cex_inputs.tsv | hea
 judge "CONTROLS FAIL" r_same "trace:$(ls "$OUT"/prod_r_same_sw2/*cex_inputs.tsv | head -1)" control:pos delay:v=1,y=1
 has 'the trace ends at step [0-9]+: the classification reads on past it with random inputs drawn on D1' "a control on a short trace is re-read past its end"
 # @next: the product runs D0 one step behind; a counterexample at cycle m is the judge's step m-1
-product prod_r_late r_late rS rD 2,4,8 "NO COUNTEREXAMPLE"
+product prod_r_late r_late rS rD 2,4,8 "NO COUNTEREXAMPLE UP TO"
 grep -q 'D0 one step behind' "$OUT/prod_r_late.gen.log" || { cat "$OUT/prod_r_late.gen.log"; echo "FAIL: @next product mode not reported"; exit 1; }
 product prod_rb_late rb_late rS rDb 2,4,8 "COUNTEREXAMPLE"
 m=$(grep -o 'fails the property at cycle [0-9]*' "$OUT/prod_rb_late.search.log" | tail -1 | grep -o '[0-9]*$' || true)

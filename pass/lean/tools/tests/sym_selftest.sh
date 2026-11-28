@@ -299,7 +299,7 @@ run1() { # <driver> <expect> args...
   fi
   local got
   got=$(grep -o 'RESULT: [A-Z -]*' "$log" | tail -1 | sed 's/RESULT: //; s/ *$//')
-  if [[ "$got" != "$expect"* ]]; then
+  if [[ "$got" != "$expect" ]]; then
     tail -6 "$log"; echo "FAIL: $drv $* -- expected $expect, got '$got'"; exit 1
   fi
   echo "ok: $drv ${*##*/} -> $got"
