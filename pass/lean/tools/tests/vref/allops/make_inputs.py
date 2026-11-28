@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Stimulus, edge schedule and a Verilog testbench for allops, from its _io.json.
-usage: make_inputs.py <io.json> <cycles> <seed> <outdir> [--zero-div]
+"""Stimulus, edge schedule and a Verilog testbench for a vref design, from its _io.json.
+usage: make_inputs.py <io.json> <cycles> <seed> <outdir> [--zero-div] [--top NAME]  (default top: allops)
 Cycle k: inputs set, outputs sampled before the edge (cert_trace's STEP k), then each clock
 that fires at k (edges v1) has one rising edge. rst_n is low on cycles 0-1 and 37-38 (an async
 reset asserted and released mid-run). The testbench starts rst_n high and drops it at cycle 0, so
@@ -9,6 +9,7 @@ Divisors are never 0 unless --zero-div (Verilog's x/0 is X)."""
 import json, random, sys
 io = json.load(open(sys.argv[1])); N = int(sys.argv[2]); seed = int(sys.argv[3]); out = sys.argv[4]
 zero_div = "--zero-div" in sys.argv
+top = sys.argv[sys.argv.index("--top") + 1] if "--top" in sys.argv else "allops"
 random.seed(seed)
 ins = sorted(io["inputs"], key=lambda p: p["ordinal"])
 outs = sorted(io["outputs"], key=lambda p: p["ordinal"])
@@ -45,7 +46,7 @@ with open(f"{out}/edges.txt", "w") as f:
 L = ["`timescale 1ns/1ps", "module tb;"]
 for p in ins: L.append(f"  reg [{p['width']-1}:0] {p['name']};")
 for p in outs: L.append(f"  wire [{p['width']-1}:0] {p['name']};")
-L.append("  allops dut(" + ", ".join(f".{p['name']}({p['name']})" for p in ins + outs) + ");")
+L.append(f"  {top} dut(" + ", ".join(f".{p['name']}({p['name']})" for p in ins + outs) + ");")
 L.append("  initial begin")
 for p in ins: L.append(f"    {p['name']} = {1 if p['name'] == 'rst_n' else 0};")
 L.append("    #1;")

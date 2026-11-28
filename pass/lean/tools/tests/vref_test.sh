@@ -5,6 +5,8 @@
 #            memories (two write ports, byte enables, a $readmemh ROM, an async reset), two clocks
 #            firing apart and an async reset asserted mid-run; inputs from make_inputs.py
 #   memrst   a memory cleared by an asynchronous reset (a for loop in the reset arm)
+#   signedops  signed operands in wider contexts (sign extension before shifts, sums, products,
+#            division, compares and muxes; a mixed signed/unsigned sum is unsigned)
 #   meminit  a memory initialized by an `initial` for loop with nonzero values
 #   modvar   `%` with a variable divisor: the certificate export must refuse it (x % 0 is X)
 # A route passes a case when its STEP lines equal Verilator's. Verilator, not iverilog: iverilog
@@ -108,6 +110,18 @@ if export_case "$d" allops; then
     routes "$d" allops "$CYCLES" "edges:file:$d/edges.txt"
   else fail "allops: Verilator (logs in $d)"; fi
 else fail "allops: lhd export (logs in $d)"; fi
+
+# signedops: signed operands in wider contexts, generated inputs
+d=$(case_dir signedops)
+cp "$V/allops/make_inputs.py" "$d/"
+if export_case "$d" signedops; then
+  "$PY" -I "$d/make_inputs.py" "$d/lean/signedops_io.json" "$CYCLES" "$SEED" "$d" --top signedops \
+    > "$d/make_inputs.log" 2>&1 || fail "signedops: make_inputs.py (log $d/make_inputs.log)"
+  if verilator_run "$d" signedops; then
+    routes "$d" signedops "$CYCLES" "edges:file:$d/edges.txt"
+  else fail "signedops: Verilator (logs in $d)"; fi
+else fail "signedops: lhd export (logs in $d)"; fi
+d="$OUT/allops"
 
 # allops on the per-design simulators
 if [[ "${PERDESIGN:-0}" == 1 && -s "$d/verilator.txt" ]]; then
