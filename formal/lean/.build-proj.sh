@@ -46,6 +46,8 @@ ROOTS=(
   # lake builds them only with lgraph-sim (`lake build LgraphSim`), which nothing runs.
   LeanSemanticPrimitives.Compiler.DirectSim
   LeanSemanticPrimitives.Compiler.DirectTests
+  # the certificate format: the DCERT4 codec's and admission's #guards (CertIOChecks)
+  LeanSemanticPrimitives.Compiler.CertIOChecks
   # translation validation's reifier (a meta-program; the per-design TV drivers use it)
   LeanSemanticPrimitives.Compiler.ReifyGen
   # the legacy models' fast operators (the per-design legacy drivers import it; interpreted runs
