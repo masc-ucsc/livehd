@@ -788,7 +788,7 @@ def refmapMain (path : String) (rest : List String) (facts : Bool) : IO UInt32 :
   let some specCert := pathOf "spec" | IO.eprintln "no spec <certificate>"; return 2
   let implCert := (pathOf "impl").getD ""
   if !facts && implCert.isEmpty then IO.eprintln "no impl <certificate>"; return 2
-  let (_, DS) ← Projection.CertLoadAny.admitFile specCert
+  let DS ← Projection.CertLoadAny.admitFile specCert
   -- a theorem file embeds each certificate and reads it with `readCertChecked` (`certOf`)
   if (emitOpt rest).isSome then
     for c in (if facts then [specCert] else [specCert, implCert]) do
@@ -809,7 +809,7 @@ def refmapMain (path : String) (rest : List String) (facts : Bool) : IO UInt32 :
     | .error e => do say s!"  RESULT: REFUSED (spec: {e})"; return 4
   say s!"  spec route sim:{simS}{simWhy gS fpOnly}: {nameS}"
   let (DI, RI, fuelI) ← if facts then pure (DS, RS, fuelS) else do
-    let (_, DI) ← Projection.CertLoadAny.admitFile implCert
+    let DI ← Projection.CertLoadAny.admitFile implCert
     say s!"impl {implCert}: flops {DI.flops.size} outputs {DI.outputs.size} memories {DI.memories.size}"
     unless HwMem.admitsWB DI do say "  RESULT: REFUSED (the memory route does not admit the implementation)"; return 4
     let (RI, fuelI, nameI) ← match ← symRouteOf simI DI sf wf with
@@ -1845,8 +1845,8 @@ def judgeMain (path : String) (rest : List String) : IO UInt32 := do
       if p.startsWith "/" then p else (dir / p).toString
   let some specCert := pathOf "spec" | IO.eprintln "no spec <certificate>"; return 2
   let some implCert := pathOf "impl" | IO.eprintln "no impl <certificate>"; return 2
-  let (_, DS) ← Projection.CertLoadAny.admitFile specCert
-  let (_, DI) ← Projection.CertLoadAny.admitFile implCert
+  let DS ← Projection.CertLoadAny.admitFile specCert
+  let DI ← Projection.CertLoadAny.admitFile implCert
   say s!"judge {path}"
   say s!"  spec {specCert}: flops {DS.flops.size} outputs {DS.outputs.size} memories {DS.memories.size}"
   say s!"  impl {implCert}: flops {DI.flops.size} outputs {DI.outputs.size} memories {DI.memories.size}"

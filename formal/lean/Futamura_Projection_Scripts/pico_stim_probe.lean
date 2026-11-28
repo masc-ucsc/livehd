@@ -20,7 +20,7 @@ then HIGH, `mem_ready` reacting to the previous cycle's `mem_valid`, and
 gone, so a stimulus that reacts to the outputs lives in code like this.)
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemRuntime
-import LeanSemanticPrimitives.Compiler.CertIOFacade
+import LeanSemanticPrimitives.Compiler.CertIOCodec
 
 open Compiler Projection Projection.HwMem
 
@@ -51,9 +51,9 @@ def main (args : List String) : IO UInt32 := do
   | path :: rest =>
     let cycles := (rest.head?.getD "40").toNat?.getD 40
     let bytes ← IO.FS.readBinFile path
-    match CertIO.admitAny bytes with
+    match CertIO.readCertChecked bytes with
     | .error e => do IO.eprintln s!"PARSE FAILED: {e}"; return 8
-    | .ok (_, D) => do
+    | .ok D => do
       IO.println s!"{path}"
       IO.println s!"  sources {D.sources.size} nodes {D.nodes.size} flops {D.flops.size} \
 memories {D.memories.size}"

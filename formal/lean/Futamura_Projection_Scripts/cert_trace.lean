@@ -132,7 +132,7 @@ def main (args : List String) : IO UInt32 := do
         | some (.ok k) => knobs := k
         | some (.error _) => do IO.eprintln s!"unknown option {opt}"; return 2
         | none => traceOpts := traceOpts.push opt
-    let (_, D) ← Projection.CertLoadAny.admitFile cert
+    let D ← Projection.CertLoadAny.admitFile cert
     let targs := cyc :: stimPath :: traceOpts.toList
     match EngineSelector D knobs with
     | .ok sel =>

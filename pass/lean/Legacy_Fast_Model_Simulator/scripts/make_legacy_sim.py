@@ -429,7 +429,7 @@ def trace_driver(a, src, text, top, ins, outs, stateful) -> int:
               file=sys.stderr)
         return 2
     imports = list(dict.fromkeys(model_imports + ["import HDLProof.Run.Trace",
-                                                  "import LeanSemanticPrimitives.Compiler.CertIORoute"]))
+                                                  "import LeanSemanticPrimitives.Compiler.CertIOCodec"]))
     state_ty = f"{top}_state" if stateful else "Unit"
     init_reset = f"{top}_initState" if stateful else "()"
     init_zero = f"(default : {top}_state)" if stateful else "()"
@@ -494,8 +494,8 @@ open {top}_Lgraph in
 def main (args : List String) : IO UInt32 := do
   match args with
   | cert :: rest =>
-    let D ← match Compiler.CertIO.admitAny (← IO.FS.readBinFile cert) with
-      | .ok (_, D) => pure D
+    let D ← match Compiler.CertIO.readCertChecked (← IO.FS.readBinFile cert) with
+      | .ok D => pure D
       | .error e => do IO.eprintln s!"{{cert}}: {{e}}"; return 2
     unless D.flops.size == {len(flop_map)} && D.memories.size == {len(mem_map)} &&
         D.outputs.size == {len(outs)} do

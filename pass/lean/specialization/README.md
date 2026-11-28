@@ -320,7 +320,7 @@ One rule decides where a file goes:
 | `axiom_gate_controls.sh`: the axiom gate refuses `sorry`, `native_decide` and an explicit axiom | `bash pass/lean/specialization/tests/axiom_gate_controls.sh` |
 | `check_overlay.sh`: the shared semantics have not drifted from their base | `bash pass/lean/specialization/tests/check_overlay.sh [--semantic]` |
 | `check_certio.sh`: the provenance of the DCERT1 codec (`Compiler/CertIOV1.lean`) | `bash pass/lean/specialization/tests/check_certio.sh` |
-| `fp_sext_controls.lean`, `fp_dcert1_admission_controls.lean` | from `formal/lean`: `LEAN_PATH=.olean-dev lean ../../pass/lean/specialization/tests/<file>` |
+| `fp_sext_controls.lean`, `fp_dcert1_admission_controls.lean` (fp history: no driver admits DCERT1) | from `formal/lean`: `LEAN_PATH=.olean-dev lean ../../pass/lean/specialization/tests/<file>` |
 | `fp_csimp_checks.lean`: the `@[csimp]` equalities and their axioms | it needs the `Proto/` modules, which only `build-opt.sh` builds: `LEAN_PATH=$ROOT/olean lean ...` |
 
 `evidence/` holds the coverage, admission, generation and readiness tables

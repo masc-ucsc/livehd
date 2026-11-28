@@ -41,7 +41,7 @@ import HDLProof.Reach.Defs
 import HDLProof.Run.Engine
 import HDLProof.Run.Kit
 import HDLProof.Run.Stim
-import LeanSemanticPrimitives.Compiler.CertIORoute
+import LeanSemanticPrimitives.Compiler.CertIOCodec
 
 open Compiler Compiler.Direct Compiler.Ckpt HDLProof HDLProof.Reach HDLProof.Run
 
@@ -88,19 +88,19 @@ texts below. `verdict` evaluates the witness checker `checkReach` by `native_dec
 one `_native` axiom); `reachable` is what `checkReach_sound` proves from it. -/
 import HDLProof.Reach.Defs
 import HDLProof.Run.Stim
-import LeanSemanticPrimitives.Compiler.CertIORoute
+import LeanSemanticPrimitives.Compiler.CertIOCodec
 open Compiler Compiler.Direct Compiler.Ckpt HDLProof HDLProof.Reach HDLProof.Run
 
 namespace CkptReach.{name}
 
 def certText : String := {leanStr certText}
 
-def D : DesignCert := match CertIO.admitAny certText.toUTF8 with
-  | .ok (_, d) => d
+def D : DesignCert := match CertIO.readCertChecked certText.toUTF8 with
+  | .ok d => d
   | .error _ => default
 
 /-- The text admits: `D` is the certificate it describes, not the empty design. -/
-theorem certText_reads : (match CertIO.admitAny certText.toUTF8 with
+theorem certText_reads : (match CertIO.readCertChecked certText.toUTF8 with
     | .ok _ => true | .error _ => false) = true := by native_decide
 
 def ckptText : String := {leanStr ckText}
@@ -153,8 +153,8 @@ def check (cert ck stim : String) (opts : List String) : IO UInt32 := do
     IO.eprintln "route:fp: ckpt_reach decides on a route whose state is interpretDesign's (ir, vc, ref); fp's agrees only below each memory's depth"
     return 2
   let certBytes ← IO.FS.readBinFile cert
-  let D ← match CertIO.admitAny certBytes with
-    | .ok (_, D) => pure D
+  let D ← match CertIO.readCertChecked certBytes with
+    | .ok D => pure D
     | .error e => do IO.eprintln s!"{cert}: {e}"; say "RESULT: REFUSED (certificate)"; return 3
   let hash := designHashLazy D
   let c ← match ← loadCkpt D hash ck with

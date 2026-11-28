@@ -17,7 +17,7 @@ fit its declared width; 6 on a `--expect-sext` width mismatch.  Without those
 flags it only reports, so a caller that wants a check must ask for one.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemRuntime
-import LeanSemanticPrimitives.Compiler.CertIOFacade
+import LeanSemanticPrimitives.Compiler.CertIOCodec
 
 open Compiler Projection
 
@@ -58,9 +58,9 @@ def main (args : List String) : IO UInt32 := do
     let expectSext := (flagOf rest "--expect-sext").bind (·.toNat?)
     let requireFit := rest.contains "--require-fit"
     let bytes ← IO.FS.readBinFile path
-    match CertIO.admitAny bytes with
+    match CertIO.readCertChecked bytes with
     | .error e => do IO.eprintln s!"PARSE FAILED: {e}"; return 8
-    | .ok (_, D) => do
+    | .ok D => do
       IO.println s!"{path}"
       IO.println s!"  sources {D.sources.size} nodes {D.nodes.size}, input forced to {inp}"
       -- report every Sext the adapter may have inserted

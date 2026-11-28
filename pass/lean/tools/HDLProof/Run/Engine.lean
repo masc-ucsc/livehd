@@ -4,7 +4,7 @@
 `EngineSelector D knobs` is the one place that turns a design and a choice of route into a
 simulator that can be stepped:
 
-    D      : DesignCert                        the design certificate (`CertIO.admitAny` on a `.dcert`)
+    D      : DesignCert                        the design certificate (`CertLoadAny.admitFile` on a `.dcert`)
     knobs  : Knobs                             the route and its modes (defaults: the fastest proved)
     result : Except SelectError SelectedEngine
 

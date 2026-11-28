@@ -410,7 +410,7 @@ def conjMain (cert specPath : String) (rest : List String) : IO UInt32 := do
     | none => do pure ((← IO.appDir) / "cadical").toString
   let work := System.FilePath.mk ((opt "work").getD "sym_work")
   IO.FS.createDirAll work
-  let (_, D) ← Projection.CertLoadAny.admitFile cert
+  let D ← Projection.CertLoadAny.admitFile cert
   -- a theorem file embeds the certificate and reads it with `readCertChecked`
   if (opt "emit").isSome then
     match CertIO.readCertChecked (← IO.FS.readBinFile cert) with
@@ -677,7 +677,7 @@ def main (args : List String) : IO UInt32 := do
           pure (sys / "cadical").toString
     let work := System.FilePath.mk ((opt "work").getD "sym_work")
     IO.FS.createDirAll work
-    let (_, D) ← Projection.CertLoadAny.admitFile cert
+    let D ← Projection.CertLoadAny.admitFile cert
     -- a theorem file embeds the certificate and reads it with `readCertChecked`
     if (opt "emit").isSome then
       match CertIO.readCertChecked (← IO.FS.readBinFile cert) with

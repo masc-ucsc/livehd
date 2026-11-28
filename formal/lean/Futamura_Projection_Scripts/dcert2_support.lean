@@ -19,15 +19,9 @@ they are different obligations:
 Nothing here weakens a predicate, erases a memory or claims support. It reports.
 -/
 import LeanSemanticPrimitives.Projection.CertLoad
-import LeanSemanticPrimitives.Compiler.CertIORoute   -- DCERT2 + DCERT1, routed by magic (Mathlib-free)
+import LeanSemanticPrimitives.Projection.CertLoadAny   -- admitFile (DCERT4, readCertChecked)
 
 open Compiler Projection Projection.Hw
-
-def loadAny (p : System.FilePath) : IO (CertIO.Format × DesignCert) := do
-  let b ← IO.FS.readBinFile p
-  match CertIO.admitAny b with
-  | .ok fd   => pure fd
-  | .error e => throw (IO.userError s!"{p}: {e}")
 
 /-- Constructor name only: a `memConst`'s contents are megabytes and a census
 wants the KIND and the count, not the payload. -/
@@ -55,10 +49,10 @@ def main (args : List String) : IO UInt32 := do
     return 2
   let mut unsupported := 0
   for p in args do
-    let (fmt, D) ← loadAny p
+    let D ← CertLoadAny.admitFile p
     let sr := CertLoad.supportReport D
     IO.println s!"{p}"
-    IO.println s!"  format {repr fmt}"
+    IO.println s!"  format DCERT4"
     IO.println s!"  shape: sources {D.sources.size} nodes {D.nodes.size} \
 outputs {D.outputs.size} flops {D.flops.size} memories {D.memories.size} \
 clocks {D.clocks.size}"

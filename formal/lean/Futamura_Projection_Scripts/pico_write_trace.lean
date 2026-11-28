@@ -8,7 +8,7 @@ the certificate's STRUCTURE, not about any execution: it costs nothing to
 answer and no simulation is run here.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemRuntime
-import LeanSemanticPrimitives.Compiler.CertIOFacade
+import LeanSemanticPrimitives.Compiler.CertIOCodec
 
 open Compiler Projection Projection.HwMem
 
@@ -32,9 +32,9 @@ def main (args : List String) : IO UInt32 := do
   match args with
   | path :: _ => do
     let bytes ← IO.FS.readBinFile path
-    match CertIO.admitAny bytes with
+    match CertIO.readCertChecked bytes with
     | .error e => do IO.eprintln s!"PARSE FAILED: {e}"; return 8
-    | .ok (_, D) => do
+    | .ok D => do
       IO.println s!"{path}"
       IO.println s!"  sources {D.sources.size} nodes {D.nodes.size} memories {D.memories.size}"
       for (md, k) in D.memories.toList.zipIdx do

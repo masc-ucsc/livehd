@@ -1,24 +1,11 @@
 /-
-One import point for both certificate codecs, with NEITHER policy widened.
+The router's theorems (FP HISTORY): `Compiler.CertIORoute` tells DCERT1 (FP's codec,
+`Compiler.CertIO.V1`) from the clock-aware codec (`Compiler.CertIO`, DCERT4) by magic. The
+router cannot mis-route: `magics_are_exclusive` proves no buffer satisfies both magics; and
+`parseAny_renderCert` that a rendered certificate comes back through it unchanged.
 
-`Compiler.CertIO` is the DCERT3 codec and the checked-compiler runtime that D4
-contributes. `Compiler.CertIO.V1` is FP's DCERT1 codec and its `asyncOK`
-transport constraint. They judge different things and they admit on different
-grounds, so this module routes by MAGIC and then calls each side's own
-admission -- it does not define a third policy, and it does not make either
-stricter or looser than the branch it came from.
-
-Specifically:
-
-  * `admitV2` is exactly `readCertChecked`: parse, then `certWfError`.
-  * `admitV1` is exactly FP's: parse, then `asyncOK`. It does NOT also apply
-    `certWfError`. That predicate is about clock ordinals and slot bounds on
-    the clock-aware record; a DCERT1 file parses to the default one-clock
-    table, so applying it here would be imposing a check FP never ran, on
-    fields the format never carried.
-
-The router cannot mis-route: `magics_are_exclusive` proves no buffer satisfies
-both magics.
+No driver reads through the router: every driver and proof tool admits with
+`CertIO.readCertChecked` (DCERT4), and DCERT1 is refused (`CertIORoute` says why).
 -/
 import LeanSemanticPrimitives.Compiler.CertIORoute
 import LeanSemanticPrimitives.Compiler.CertIOParity

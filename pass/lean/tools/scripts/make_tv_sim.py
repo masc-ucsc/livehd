@@ -68,7 +68,7 @@ def main() -> int:
 Translation validation's route for this certificate: its step reified by `{reify.split()[0]}`
 (compileDesign run while this file is compiled), driven by `HDLProof.Run.traceMain`
 (cert_trace's arguments, STEP lines and lhdcert-ckpt v1 checkpoints). -/
-import LeanSemanticPrimitives.Compiler.CertIORoute
+import LeanSemanticPrimitives.Compiler.CertIOCodec
 import LeanSemanticPrimitives.Compiler.ReifyGen
 import HDLProof.Run.Trace
 
@@ -82,11 +82,11 @@ def certText : String := include_str "{name}.dcert"
 
 set_option compiler.extract_closed false in
 def cert : DesignCert :=
-  match CertIO.admitAny certText.toUTF8 with
-  | .ok (_, D) => D
+  match CertIO.readCertChecked certText.toUTF8 with
+  | .ok D => D
   | .error _ => default
 
--- `admitAny` refuses with an error, read here as `default`: rule that out
+-- `readCertChecked` refuses with an error, read here as `default`: rule that out
 #guard cert.nodes.size > 0
 
 set_option maxRecDepth 1000000

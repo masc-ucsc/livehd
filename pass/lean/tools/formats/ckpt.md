@@ -139,7 +139,7 @@ lhd_ckpt to-state  <cert> <ckpt> <out>             the same state as an lgraph-s
 lhd_ckpt import-lhd <cert> <ckpt dir> <out.ckpt> ...  an `lhd sim` checkpoint, imported (below)
 ```
 
-- `<cert>` is a DCERT4, DCERT3 or DCERT1 file.
+- `<cert>` is a DCERT4 file (DCERT3 is still read), admitted with `CertIO.readCertChecked`.
 - Exit codes: 0 for OK or SAME; 1 for REFUSED or DIFFER; 2 for usage or I/O errors; 3 when
   the checkpoint does not parse.
 - `init reset` starts every flop at its declared reset value and every memory at its power-on

@@ -38,7 +38,7 @@ Prints `PASS engine: <n> runs` or one `FAIL` line per run or option list that we
 -/
 import HDLProof.Run.Engine
 import HDLProof.Run.Stim
-import LeanSemanticPrimitives.Compiler.CertIORoute
+import LeanSemanticPrimitives.Compiler.CertIOCodec
 import LeanSemanticPrimitives.Compiler.Ckpt
 import LeanSemanticPrimitives.Compiler.DirectExamples
 
@@ -155,8 +155,8 @@ def certsOf (args : List String) : IO (Except String (List (String × DesignCert
     return .ok (Compiler.Direct.Examples.registry.filter (·.1 != "chain-200k"))
   let mut out := []
   for cert in args do
-    match CertIO.admitAny (← IO.FS.readBinFile cert) with
-    | .ok (_, D) => out := out ++ [(cert, D)]
+    match CertIO.readCertChecked (← IO.FS.readBinFile cert) with
+    | .ok D => out := out ++ [(cert, D)]
     | .error e => return .error s!"{cert}: {e}"
   return .ok out
 

@@ -20,7 +20,7 @@ unsupported / 3 projection ran out of fuel at the requested budget.
 -/
 import LeanSemanticPrimitives.Projection.Proto.RunnerSupport
 import LeanSemanticPrimitives.Projection.CertLoad
-import LeanSemanticPrimitives.Projection.CertLoadAny   -- DCERT1 (unchanged) or DCERT2
+import LeanSemanticPrimitives.Projection.CertLoadAny   -- admitFile (DCERT4, readCertChecked)
 import LeanSemanticPrimitives.Compiler.RunAdmission   -- C3 edges / C4 reset polarity
 
 open Compiler Projection Projection.Hw Projection.Runner Projection.ProtoVar
@@ -56,7 +56,7 @@ def traceBoth (sim : ProjectedSimulator) (D : DesignCert) (n seed : Nat) :
 def main (args : List String) : IO UInt32 := do
   match args with
   | path :: a :: b :: _ => do
-      let D ← CertLoadAny.loadCertAny path
+      let D ← CertLoadAny.admitFile path
       if let some rc := (← RunAdmission.refuseDesign? D) then return rc
       -- Every edge vector this probe uses: `allEdges D` and the 3-periodic
       -- `edgeSchedule D k`.  Checked once here, exactly as each step would be.

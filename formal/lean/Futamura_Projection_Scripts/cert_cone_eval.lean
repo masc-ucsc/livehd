@@ -23,7 +23,7 @@ Exits: 0 only when every requested expectation held; 2 on a shape failure
 against `--expect`; 4 on an ARM mismatch against `--expect-arms`.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemRuntime
-import LeanSemanticPrimitives.Compiler.CertIOFacade
+import LeanSemanticPrimitives.Compiler.CertIOCodec
 
 open Compiler Projection Projection.HwMem
 
@@ -65,9 +65,9 @@ def main (args : List String) : IO UInt32 := do
     let expect    := (rest.drop 1).head?.bind (·.toNat?)
     let expectArms := rest.contains "--expect-arms"
     let bytes ← IO.FS.readBinFile path
-    match CertIO.admitAny bytes with
+    match CertIO.readCertChecked bytes with
     | .error e => do IO.eprintln s!"PARSE FAILED: {e}"; return 8
-    | .ok (_, D) => do
+    | .ok D => do
       IO.println s!"{path}"
       IO.println s!"  sources {D.sources.size} nodes {D.nodes.size} memories {D.memories.size}"
       match D.memories[0]? with

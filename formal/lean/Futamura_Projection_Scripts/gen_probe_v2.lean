@@ -2,6 +2,10 @@
 GENERATION-ONLY runner, DCERT2-capable.  Same driver as `gen_probe.lean` in
 every respect except the loader, and the loader is the whole point.
 
+NOW: both load through `Projection.CertLoadAny.admitFile` (`readCertChecked`,
+DCERT4); the DCERT1 route described below was removed when every driver moved to
+one admission, and DCERT1 is refused. The rest of this header is the history.
+
 WHY THIS FILE EXISTS.  `gen_probe.lean` loads through `CertIO.V1.loadCert`, which
 is FP's **DCERT1** codec: no clocks section, no `FlopDesc.clock`, no
 `FlopDesc.asyncReset`, no `MemoryDesc.clock`.  The C++ pass now emits **DCERT2**,
@@ -47,21 +51,13 @@ unsupported / 3 out of fuel at the requested budget.
 -/
 import LeanSemanticPrimitives.Projection.Proto.RunnerSupport
 import LeanSemanticPrimitives.Projection.CertLoad
-import LeanSemanticPrimitives.Compiler.CertIORoute   -- DCERT2 + DCERT1, routed by magic (Mathlib-free)
+import LeanSemanticPrimitives.Projection.CertLoadAny   -- admitFile (DCERT4, readCertChecked)
 import LeanSemanticPrimitives.Compiler.RunAdmission   -- C3 edges / C4 reset polarity
 import LeanSemanticPrimitives.Projection.ResidualIO   -- save:<file> (B10)
 
 open Compiler Projection Projection.Hw Projection.Runner Projection.ProtoVar
 
 def szOf (R : Program) : Nat := (R.funs.map (fun fd => CertLoad.tsize fd.body)).foldl (·+·) 0
-
-/-- Load by magic, under the loaded format's own admission policy.  Returns the
-format alongside the design so the run can report which codec admitted it. -/
-def loadAny (p : System.FilePath) : IO (CertIO.Format × DesignCert) := do
-  let b ← IO.FS.readBinFile p
-  match CertIO.admitAny b with
-  | .ok fd   => pure fd
-  | .error e => throw (IO.userError s!"{p}: {e}")
 
 def main (args : List String) : IO UInt32 := do
   match args with
@@ -71,14 +67,14 @@ def main (args : List String) : IO UInt32 := do
       let sf := (a.toNat?).getD 20000
       let wf := (b.toNat?).getD 200
       let t0 ← IO.monoMsNow
-      let (fmt, D) ← loadAny path
+      let D ← CertLoadAny.admitFile path
       if let some rc := (← RunAdmission.refuseDesign? D) then return rc
       let t1 ← IO.monoMsNow
       let sr := CertLoad.supportReport D
       let okAll := sr.wf && sr.memFree && sr.sources && sr.ops && sr.arities && sr.flopClocks
       let t2 ← IO.monoMsNow
       IO.println s!"{path}"
-      IO.println s!"  format {repr fmt} (routed by magic; admitted under that format's own policy)"
+      IO.println s!"  format DCERT4 (admitted by readCertChecked)"
       IO.println s!"  sources {D.sources.size} nodes {D.nodes.size} \
 flops {D.flops.size} outputs {D.outputs.size} clocks {D.clocks.size} \
 memories {D.memories.size}"

@@ -2,7 +2,8 @@
 # The DCERT4 codec (it reads DCERT3 too) -- Mathlib-free
 
 The wire format, the pure writer, the TOTAL reader, checked admission
-(`certWfError` / `readCertChecked`), `loadCert`, and the deterministic stimulus
+(`certWfError` / `readCertChecked`), `loadCert` (read a file, then `readCertChecked`), and the
+deterministic stimulus
 helpers, moved verbatim out of `Compiler/CertIO.lean` and kept in the same
 namespace (`Compiler.CertIO`), so every name is unchanged.
 
@@ -592,9 +593,13 @@ def readCertChecked (b : ByteArray) : Except String DesignCert :=
     | some w => .error s!"refused: {w}"
     | none   => .ok D
 
+/-- Read a certificate file and admit it: `readCertChecked`, the one admission. A refusal is an
+`IO.userError` naming the file. Every driver and proof tool loads through this function
+(`Projection.CertLoadAny.admitFile` is it under the name the drivers use); it does not parse
+without admitting. -/
 def loadCert (p : System.FilePath) : IO DesignCert := do
   let b ← IO.FS.readBinFile p
-  match parseCert b with
+  match readCertChecked b with
   | .ok D    => pure D
   | .error e => throw (IO.userError s!"{p}: {e}")
 

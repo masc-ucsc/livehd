@@ -9,8 +9,9 @@ question: is the design admitted by the MEMORY route, and does its residual run?
 
 WHAT IT DOES, in the order the phases are reported.
 
-  1. PARSE.  `CertIO.admitAny`, under the format's own policy.  Every piece of
-     DCERT2 metadata the parser produced is retained and reported: clock table,
+  1. PARSE.  `CertIO.readCertChecked` (DCERT4), the one admission every driver
+     uses.  Every piece of the clock and reset metadata (DCERT2 added it) the parser
+     produced is retained and reported: clock table,
      per-flop clock ordinal / reset pin / polarity / async flag / enable, and
      per-memory aw/dw/nextImg/clock.  Nothing is dropped or defaulted here.
   2. SUPPORT.  The SCALAR report, verbatim from `CertLoad.supportReport`, with
@@ -95,7 +96,7 @@ import LeanSemanticPrimitives.Projection.MemFused
 import LeanSemanticPrimitives.Projection.MemRunFast
 import LeanSemanticPrimitives.Projection.ShareTails
 import LeanSemanticPrimitives.Projection.Proto.RunnerSupport
-import LeanSemanticPrimitives.Compiler.CertIORoute   -- DCERT2 + DCERT1, routed by magic (Mathlib-free)
+import LeanSemanticPrimitives.Compiler.CertIOCodec   -- readCertChecked, the one admission (Mathlib-free)
 import LeanSemanticPrimitives.Compiler.RunAdmission   -- C3 edges / C4 reset polarity
 import LeanSemanticPrimitives.Compiler.DirectSemantics -- the reference step, computed in one dense pass
 import HDLProof.Run.Stim   -- the stim v1 and edges v1 readers every trace driver uses
@@ -129,12 +130,6 @@ def cpuTicks : IO Nat := do
   catch _ => pure 0
 
 /-! ## Loading -/
-
-def loadAny (p : System.FilePath) : IO (CertIO.Format × DesignCert) := do
-  let b ← IO.FS.readBinFile p
-  match CertIO.admitAny b with
-  | .ok fd   => pure fd
-  | .error e => throw (IO.userError s!"{p}: {e}")
 
 /-- FNV-1a over the certificate's bytes.  The artifact says which certificate it
 describes, independently of the path it was read from. -/
@@ -1138,14 +1133,13 @@ def main (args : List String) : IO UInt32 := do
           let bytes? ← try (do let b ← IO.FS.readBinFile path; pure (some b))
                        catch e => do IO.eprintln s!"LOAD FAILED: {e}"; pure none
           let some bytes := bytes? | return (8 : UInt32)
-          match CertIO.admitAny bytes with
+          match CertIO.readCertChecked bytes with
           | .error e => do
               IO.eprintln s!"PARSE FAILED: {path}: {e}"
               IO.println "  RESULT: MEMROUTE PARSE FAILED"
               return 8
-          | .ok (fmt, D) => do
-              IO.println s!"  format {repr fmt} (routed by magic; admitted under \
-that format's own policy)"
+          | .ok D => do
+              IO.println "  format DCERT4 (admitted by readCertChecked)"
               let hash := HDLProof.Run.designHashLazy D
               match ← buildState D hash cfg.init with
               | .error e => do IO.eprintln s!"REFUSING: {e}"; return 2

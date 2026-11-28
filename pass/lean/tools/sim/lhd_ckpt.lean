@@ -41,25 +41,22 @@ Names come from the `_io.json` beside the certificate:
 - Values are hex (`0x...`) or decimal, a negative one modulo `2 ^ width`; a memory word past
   the memory's depth must be 0. The cycle is `meta.json`'s `cycle`.
 
-`<cert>` is a DCERT4, DCERT3 or DCERT1 file. Exit codes: 0 ok / SAME, 1 refused / DIFFER,
+`<cert>` is a DCERT4 file (DCERT3 is still read), admitted with `CertIO.readCertChecked`. Exit codes: 0 ok / SAME, 1 refused / DIFFER,
 2 usage or I/O, 3 the checkpoint does not parse.
 
 The format and every refusal are in `Compiler/Ckpt.lean`; `pass/lean/tools/formats/ckpt.md`
 documents them.
 -/
 import LeanSemanticPrimitives.Compiler.Ckpt
-import LeanSemanticPrimitives.Compiler.CertIORoute
+import LeanSemanticPrimitives.Compiler.CertIOCodec
 import LeanSemanticPrimitives.Compiler.DirectTrace
 import HDLProof.Run.IoMeta
 import HDLProof.Run.Image
 
 open Compiler Compiler.Ckpt
 
-def loadCert (path : String) : IO DesignCert := do
-  let b ← IO.FS.readBinFile path
-  match CertIO.admitAny b with
-  | .ok (_, D) => pure D
-  | .error e   => throw (IO.userError s!"{path}: {e}")
+/-- `CertIO.loadCert`: read the file, admit it with `readCertChecked`. -/
+def loadCert (path : String) : IO DesignCert := CertIO.loadCert path
 
 def readCkpt (path : String) (checkDigest : Bool := true) : IO (Except String Ckpt) := do
   return parse (← IO.FS.readBinFile path) checkDigest

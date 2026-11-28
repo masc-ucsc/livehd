@@ -30,7 +30,7 @@ TWO MODES, because a census and an acceptance run are different claims:
 Exit 0 only when every file parsed and every checked condition held.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemWriteAdmit
-import LeanSemanticPrimitives.Compiler.CertIOFacade
+import LeanSemanticPrimitives.Compiler.CertIOCodec
 
 open Compiler Projection Projection.HwMem
 
@@ -93,9 +93,9 @@ def main (args : List String) : IO UInt32 := do
   let mut plainAdmitted := 0
   for path in paths do
     let bytes ← IO.FS.readBinFile path
-    match CertIO.admitAny bytes with
+    match CertIO.readCertChecked bytes with
     | .error e => do IO.eprintln s!"PARSE FAILED {path}: {e}"; bad := bad + 1
-    | .ok (_, D) =>
+    | .ok D =>
       let pw := plainWrites D
       let be := beWrites D
       let a  := admitsB D

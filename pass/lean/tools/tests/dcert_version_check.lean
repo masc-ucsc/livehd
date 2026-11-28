@@ -12,8 +12,9 @@ Checks, each a `FAIL <name>: ...` line when it does not hold:
   names with a space, a newline and multi-byte characters renders to bytes that start with
   `DCERT4\n` and parses back to the same record;
 - the base re-renders to its own bytes (lhd writes what `renderCert` writes), and admits;
-- the versions and inputs below, through `parseCert` and `readCertChecked`, each admitted or
-  refused with its own message, as the table `cases` states;
+- the versions and inputs below, through `parseCert` and `readCertChecked` (the one admission:
+  every driver loads with it, through `CertIO.loadCert` = `CertLoadAny.admitFile`), each admitted
+  or refused with its own message, as the table `cases` states;
 - one trailing newline is admitted; a truncated file and a trailing byte are refused.
 A run with no admitted and no refused case fails (`control`).
 
@@ -35,7 +36,6 @@ every driver on:
 Prints `PASS dcert_version_check: <n> cases` and exits 0, or exits 1.
 -/
 import LeanSemanticPrimitives.Compiler.CertIOCodec
-import LeanSemanticPrimitives.Compiler.CertIORoute
 
 open Compiler Compiler.CertIO
 
@@ -137,13 +137,6 @@ where
   /-- One input, one synchronous flop on it, one output reading the flop. -/
   v1flopText : String := "DCERT1\n2\n0 0 1\n2 0 1\n0\n1\n1 1\n1\n1 0 0 0 0 0 0 0\n0\n"
 
-/-- What `CertIO.admitAny` (every driver's admission today) does with the version inputs:
-DCERT4 and DCERT3 through `readCertChecked`, DCERT1 through `admitV1`. -/
-def admitAnyCases (D : DesignCert) (b : ByteArray) : List (String × ByteArray × Want) :=
-  [ ("ok4", b, .ok), ("ok3", render3 D, .ok), ("v2", withByte b 5 50, .err "unrecognised"),
-    ("v1min", str "DCERT1\n0\n0\n0\n0\n0\n", .ok), ("v1flop", str (cases.v1flopText), .ok),
-    ("junk", str "not a certificate\n", .err "unrecognised") ]
-
 def main (args : List String) : IO UInt32 := do
   let some base := args.head? | IO.eprintln "usage: dcert_version_check <base.dcert> [write:<dir>]"; return 2
   let b ← IO.FS.readBinFile base
@@ -172,11 +165,6 @@ def main (args : List String) : IO UInt32 := do
       match w with | .ok => nok := nok + 1 | .err _ => nerr := nerr + 1
       if let some why := judge w r then
         fail s!"{c.name}: {nm}: want {w.show}, got {why}"; fails := fails + 1
-  for (nm, bs, w) in admitAnyCases D b do
-    n := n + 1
-    match w with | .ok => nok := nok + 1 | .err _ => nerr := nerr + 1
-    if let some why := judge w ((admitAny bs).map (fun _ => ())) then
-      fail s!"{nm}: admitAny: want {w.show}, got {why}"; fails := fails + 1
   -- control: the table has both kinds
   unless nok > 0 && nerr > 0 do fail s!"control: {nok} admitted and {nerr} refused expectations"; fails := fails + 1
   -- the driver test's certificates

@@ -97,7 +97,7 @@ def main (args : List String) : IO UInt32 := do
     let var := rest.contains "route:var"
     let fused := rest.contains "route:fused"
     let mem := rest.contains "route:mem" || var || fused
-    let (_, D) ← Projection.CertLoadAny.loadAny cert
+    let D ← Projection.CertLoadAny.admitFile cert
     IO.println s!"{cert}"
     IO.println s!"  shape: sources {D.sources.size} nodes {D.nodes.size} outputs {D.outputs.size} \
 flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"

@@ -70,7 +70,7 @@ import HDLProof.Run.Engine
 import HDLProof.Run.Kit
 import HDLProof.Run.Vcd
 import LeanSemanticPrimitives.Compiler.Ckpt
-import LeanSemanticPrimitives.Compiler.CertIORoute
+import LeanSemanticPrimitives.Compiler.CertIOCodec
 
 open Compiler Compiler.Direct HDLProof HDLProof.Run
 
@@ -405,8 +405,8 @@ def main (args : List String) : IO UInt32 := do
     | .ok o => pure o
     | .error e => do IO.eprintln s!"{e}\n{usage}"; return 2
   try
-    let D ← match CertIO.admitAny (← IO.FS.readBinFile cert) with
-      | .ok (_, D) => pure D
+    let D ← match CertIO.readCertChecked (← IO.FS.readBinFile cert) with
+      | .ok D => pure D
       | .error e => do IO.eprintln s!"{cert}: {e}"; say "RESULT: refused"; return 3
     let io ← IoMeta.load cert
     let inW (k : Nat) : Nat := inputWidth D k

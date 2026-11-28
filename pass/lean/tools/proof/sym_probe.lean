@@ -83,7 +83,7 @@ def main (args : List String) : IO UInt32 := do
       | s => [s]
     let census := rest.contains "census"
     let diag := rest.contains "diag"
-    let (_, D) ← Projection.CertLoadAny.admitFile cert
+    let D ← Projection.CertLoadAny.admitFile cert
     say s!"{cert}"
     say s!"  shape: sources {D.sources.size} nodes {D.nodes.size} outputs {D.outputs.size} \
 flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"

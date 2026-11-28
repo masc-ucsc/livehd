@@ -47,14 +47,14 @@ FX="$OUT/fx"
 declare -A WANT=(
   [ok4]=ok
   [ok3]=admitted
-  [v2]='bad magic|unrecognised certificate'
-  [v1min]=admitted
-  [v1flop]=admitted
-  [fpfix]='refused: a flopQAsync source names a flop'
+  [v2]='parse: bad magic'
+  [v1min]='parse: bad magic'
+  [v1flop]='parse: bad magic'
+  [fpfix]='parse: bad magic'
   [depth0]='refused: memory 0 declares depth 0'
   [noclk]='refused: no clock domains'
   [badout]='refused: output 0 reads slot'
-  [junk]='bad magic|unrecognised certificate'
+  [junk]='parse: bad magic'
 )
 CERTS="ok4 ok3 v2 v1min v1flop fpfix depth0 noclk badout junk"
 
@@ -104,7 +104,7 @@ drive() { # <driver> <certificate>
 }
 
 # a refusal at load: `<file>: ` then the admission's reason
-refused_at_load() { grep -qE "$(basename "$1"): (parse: |refused: |unrecognised certificate)" "$2"; }
+refused_at_load() { grep -qE "$(basename "$1"): (parse: |refused: )" "$2"; }
 
 fails=0; nok=0; nref=0; nadm=0
 for d in $DRIVERS; do
@@ -118,13 +118,13 @@ for d in $DRIVERS; do
         else echo "FAIL $d $c: want a run that exits 0, got exit $rc ($(tail -2 "$log" | tr '\n' ' ' | cut -c1-160))"; fails=$((fails + 1)); fi ;;
       admitted)
         if ! refused_at_load "$f" "$log"; then nadm=$((nadm + 1))
-        else echo "FAIL $d $c: want it admitted, got $(grep -m1 -E 'parse: |refused: |unrecognised' "$log" | cut -c1-160)"; fails=$((fails + 1)); fi ;;
+        else echo "FAIL $d $c: want it admitted, got $(grep -m1 -E 'parse: |refused: ' "$log" | cut -c1-160)"; fails=$((fails + 1)); fi ;;
       *)
         if [[ $rc -ne 0 ]] && refused_at_load "$f" "$log" && grep -qE "$want" "$log" \
            && ! grep -qE '^STEP |RESULT: (INVARIANT|REFINEMENT|REACHABLE|OK)|^PROBE .* OK' "$log"; then
           nref=$((nref + 1))
         else
-          echo "FAIL $d $c: want a refusal at load matching '$want', got exit $rc ($(grep -m1 -E 'parse: |refused: |unrecognised|RESULT' "$log" | cut -c1-160))"
+          echo "FAIL $d $c: want a refusal at load matching '$want', got exit $rc ($(grep -m1 -E 'parse: |refused: |RESULT' "$log" | cut -c1-160))"
           fails=$((fails + 1))
         fi ;;
     esac

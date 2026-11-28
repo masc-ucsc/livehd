@@ -59,19 +59,13 @@ requested budget.
 -/
 import LeanSemanticPrimitives.Projection.Proto.RunnerSupport
 import LeanSemanticPrimitives.Projection.CertLoad
-import LeanSemanticPrimitives.Compiler.CertIORoute   -- DCERT2 + DCERT1, routed by magic (Mathlib-free)
+import LeanSemanticPrimitives.Projection.CertLoadAny   -- admitFile (DCERT4, readCertChecked)
 import LeanSemanticPrimitives.Compiler.RunAdmission   -- C3 edges / C4 reset polarity
 import LeanSemanticPrimitives.Projection.ResidualIO   -- load:<file> (B10)
 
 open Compiler Projection Projection.Hw Projection.Runner Projection.ProtoVar
 
 def szOf (R : Program) : Nat := (R.funs.map (fun fd => CertLoad.tsize fd.body)).foldl (·+·) 0
-
-def loadAny (p : System.FilePath) : IO (CertIO.Format × DesignCert) := do
-  let b ← IO.FS.readBinFile p
-  match CertIO.admitAny b with
-  | .ok fd   => pure fd
-  | .error e => throw (IO.userError s!"{p}: {e}")
 
 /-- One cycle through the CHECKED simulator, at `sim.bound`. -/
 def runStep (sim : ProjectedSimulator) (D : DesignCert) (e : ClockEdges)
@@ -112,14 +106,14 @@ def main (args : List String) : IO UInt32 := do
         IO.eprintln "REFUSING: cycles must be POSITIVE. Zero cycles executes no residual step, so a `READINESS OK` would be a pass earned by doing nothing."
         return 2
       let t0 ← IO.monoMsNow
-      let (fmt, D) ← loadAny path
+      let D ← CertLoadAny.admitFile path
       if let some rc := (← RunAdmission.refuseDesign? D) then return rc
       let t1 ← IO.monoMsNow
       let sr := CertLoad.supportReport D
       let okAll := sr.wf && sr.memFree && sr.sources && sr.ops && sr.arities && sr.flopClocks
       let t2 ← IO.monoMsNow
       IO.println s!"{path}"
-      IO.println s!"  format {repr fmt} (routed by magic; admitted under that format's own policy)"
+      IO.println s!"  format DCERT4 (admitted by readCertChecked)"
       IO.println s!"  sources {D.sources.size} nodes {D.nodes.size} \
 flops {D.flops.size} outputs {D.outputs.size} clocks {D.clocks.size} \
 memories {D.memories.size}"
