@@ -2,7 +2,10 @@
 # run_tier.sh quick|full: the Lean tools' tests, by tier, in one run.
 #
 #   quick  every commit (about 30 min): .build-proj.sh (every module, DirectTests' guards, the axiom
-#          gate), the Lean-only checks, the operator corpus on every engine against ref
+#          gate), the Lean-only checks (image_check: program images; engine_examples: every engine
+#          on lgraph-sim's in-Lean examples, and the ir route's refusal of the malformed ones), the
+#          drivers that need no lhd (quick_selftest.sh: dcert2_memroute's self-test and fixtures,
+#          lgraph-sim's command line), the operator corpus on every engine against ref
 #          (opcorpus_test.sh, interpreted), reach_selftest and judge_selftest.
 #   full   nightly (about 3 h): quick, then the sym, refmap, run, ckpt and lhd_ckpt_import
 #          self-tests, xpatch, the lake side (CompileOpt, LgraphSim), the census traces, the
@@ -81,9 +84,11 @@ else
   record build_proj SKIP 0 "BUILD=0: formal/lean/.olean-dev reused"
 fi
 for c in native_symbolic fp_symbolic mem_addr_check getmask_fast_check wide_fast_check residual_opt_check \
-         residual_inc_check stim_tab_check ckpt_check; do
+         residual_inc_check stim_tab_check ckpt_check image_check; do
   run_test "$c" '^PASS' lean_check "$c"
 done
+run_test engine_examples '^PASS engine: [1-9][0-9]* runs$' lean_check engine_check 64 --examples
+run_test quick_selftest '^PASS quick_selftest' env OUT="$OUT/out_quick" bash "$SCRIPT_DIR/quick_selftest.sh"
 run_test opcorpus '^PASS opcorpus_test' env OUT="$OUT/out_opcorpus" bash "$SCRIPT_DIR/opcorpus_test.sh"
 if [[ -x "$LHD" ]]; then
   run_test reach_selftest '^PASS reach_selftest' env LHD="$LHD" OUT="$OUT/out_reach" bash "$SCRIPT_DIR/reach_selftest.sh"

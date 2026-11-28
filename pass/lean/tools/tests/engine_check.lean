@@ -25,12 +25,22 @@ the drivers' options as the module header's table says. A control: `ref` with ev
 firing on every cycle must differ from `ref` on at least one certificate, or the ticks do not
 exercise the edges and the comparison proves little.
 
+With `--examples` in place of the certificates, the certificates are the in-Lean examples
+lgraph-sim carries (`Compiler.Direct.Examples.registry`, all but the 200,000-node chain), so the
+check needs no lhd. There a route may refuse an example only where `exampleRefusals` lists it,
+with the start of the refusal's message (none today: every route, fp included, builds all 9);
+every other combination must build, and the run count is the combinations built x 4 modes
+(today 13 x 4 x 9 = 468). And each of the 14 malformed examples (`Examples.rejectRegistry`)
+must be refused by `EngineSelector` on the ir route, with the direct simulator's message: one
+that builds is a failure.
+
 Prints `PASS engine: <n> runs` or one `FAIL` line per run or option list that went wrong.
 -/
 import HDLProof.Run.Engine
 import HDLProof.Run.Stim
 import LeanSemanticPrimitives.Compiler.CertIORoute
 import LeanSemanticPrimitives.Compiler.Ckpt
+import LeanSemanticPrimitives.Compiler.DirectExamples
 
 open Compiler HDLProof HDLProof.Run
 
@@ -135,9 +145,25 @@ def parseCases : List (List String × Option (Knobs × List String)) :=
    (["compact:x"], none),
    (["route:zz"], none)]
 
+/-- `--examples`: the routes that may refuse an example, as (example, combination, the start of
+the message `EngineSelector` gives); every other combination must build. None today. -/
+def exampleRefusals : List (String × String × String) := []
+
+/-- The certificates of a run: the files given, or the in-Lean examples (`--examples`). -/
+def certsOf (args : List String) : IO (Except String (List (String × DesignCert))) := do
+  if args == ["--examples"] then
+    return .ok (Compiler.Direct.Examples.registry.filter (·.1 != "chain-200k"))
+  let mut out := []
+  for cert in args do
+    match CertIO.admitAny (← IO.FS.readBinFile cert) with
+    | .ok (_, D) => out := out ++ [(cert, D)]
+    | .error e => return .error s!"{cert}: {e}"
+  return .ok out
+
 def main (args : List String) : IO UInt32 := do
   let mut fails := 0
   let mut runs := 0
+  let mut wantRuns := 0
   let mut controlHit := false
   for (opts, want) in parseCases do
     let got := (Knobs.parse {} opts).toOption.map fun (k, r) => (knobKey k, r)
@@ -146,12 +172,13 @@ def main (args : List String) : IO UInt32 := do
       IO.println s!"FAIL parse {opts}: got {got}, want {want'}"
       fails := fails + 1
   match args with
-  | cyc :: certs@(_ :: _) =>
+  | cyc :: certArgs@(_ :: _) =>
     let some n := cyc.toNat? | IO.eprintln s!"cycles {repr cyc} is not a number"; return 2
-    for cert in certs do
-      let D ← match CertIO.admitAny (← IO.FS.readBinFile cert) with
-        | .ok (_, D) => pure D
-        | .error e => do IO.println s!"FAIL {cert}: {e}"; return 1
+    let examples := certArgs == ["--examples"]
+    let certs ← match ← certsOf certArgs with
+      | .ok cs => pure cs
+      | .error e => do IO.println s!"FAIL {e}"; return 1
+    for (cert, D) in certs do
       let ticks := (Array.range n).map (tick D 12345)
       let s0 := Direct.resetState D
       let ref ← match EngineSelector D { route := .ref } with
@@ -160,12 +187,22 @@ def main (args : List String) : IO UInt32 := do
           | .ok r => pure r
           | .error e => do IO.println s!"FAIL {cert}: ref: {e}"; return 1
       for (name, k) in combos do
+        let allowed := if examples then
+            exampleRefusals.find? fun (c, r, _) => c == cert && r == name
+          else none
         match EngineSelector D k with
         | .error e =>
           -- every route and knob combination must build on these certificates: a route that is
           -- not built would otherwise drop out of the run count and the run still pass
-          IO.println s!"FAIL {cert}: {name}: not built: {e.message}"; fails := fails + 1
+          match allowed with
+          | some (_, _, msg) =>
+            unless e.message.startsWith msg do
+              IO.println s!"FAIL {cert}: {name}: refused for another reason: {e.message}"; fails := fails + 1
+          | none => IO.println s!"FAIL {cert}: {name}: not built: {e.message}"; fails := fails + 1
         | .ok b =>
+          if allowed.isSome then
+            IO.println s!"FAIL {cert}: {name}: built, but the list says the route refuses it"; fails := fails + 1
+          wantRuns := wantRuns + 4
           for m in [Mode.plain, .twice, .peeked, .reloaded] do
             runs := runs + 1
             match runE D b.engine s0 n ticks m ref.outs with
@@ -188,16 +225,25 @@ def main (args : List String) : IO UInt32 := do
       | .error _ => controlHit := true
       let distinct := (ref.outs.foldl (fun (acc : Std.HashSet String) o => acc.insert o) {}).size
       IO.println s!"ok {cert}: {n} cycles, {distinct} distinct output vectors"
+    -- the malformed examples: the ir route refuses each, with the direct simulator's message
+    if examples then
+      for (name, D) in Compiler.Direct.Examples.rejectRegistry do
+        match EngineSelector D { route := .ir } with
+        | .ok _ => IO.println s!"FAIL {name}: the ir route built a malformed certificate"; fails := fails + 1
+        | .error e =>
+          unless e.message.startsWith "ir: the direct simulator refuses the certificate:" do
+            IO.println s!"FAIL {name}: refused with another message: {e.message}"; fails := fails + 1
+      IO.println s!"ok: the ir route refuses all {Compiler.Direct.Examples.rejectRegistry.length} malformed examples"
+    -- every combination, in every mode, on every certificate (less the listed refusals)
+    if !examples then wantRuns := combos.length * 4 * certs.length
   | _ =>
-    IO.eprintln "usage: engine_check <cycles> <cert.dcert> [<cert.dcert> ...]"
+    IO.eprintln "usage: engine_check <cycles> (<cert.dcert> [<cert.dcert> ...] | --examples)"
     return 2
   unless controlHit do
     IO.println "FAIL control: firing every clock changed nothing on any certificate"
     fails := fails + 1
-  -- every combination, in every mode, on every certificate
-  let want := combos.length * 4 * (args.length - 1)
-  unless runs == want do
-    IO.println s!"FAIL engine: {runs} runs, expected {want} ({combos.length} combinations x 4 modes x {args.length - 1} certificates)"
+  unless runs == wantRuns do
+    IO.println s!"FAIL engine: {runs} runs, expected {wantRuns} ({combos.length} combinations x 4 modes per certificate, less the listed refusals)"
     fails := fails + 1
   if fails == 0 then
     IO.println s!"PASS engine: {runs} runs"

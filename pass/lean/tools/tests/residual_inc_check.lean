@@ -16,6 +16,10 @@ table must read as its image after random writes, byte-enable writes and loads, 
 and out of the table, for several chunk sizes. The pass that skips chunks of 16 bindings with
 nothing pending (`ResidualWork`, `evEnvFW`) runs them as well, and a program of 8 independent
 chains of 12 bindings, one chain's input changing per step, makes it skip.
+The engine `EngineSelector` builds for vc (`Run/Engine.vcEngineOf`) on a program that is not
+well-ordered must be the full step (`vcFullEngine`: its note says `off (not well-ordered)`, it
+keeps no tables, and 10 of its steps are `denoteResidual`'s), and on a well-ordered one the
+event-driven step on tables (the control).
 
 Prints `PASS residual_inc: <n> cases` or one `FAIL` line per case that went wrong.
 -/
@@ -24,6 +28,7 @@ import LeanSemanticPrimitives.Compiler.ResidualEv
 import LeanSemanticPrimitives.Compiler.ResidualFlat
 import LeanSemanticPrimitives.Compiler.ResidualWork
 import LeanSemanticPrimitives.Compiler.CompileDesignDefs
+import HDLProof.Run.Engine
 
 open Compiler Compiler.ResidualOpt Compiler.ResidualInc Compiler.ResidualFlat
 
@@ -172,6 +177,17 @@ def chainsProg : ResidualProgram := Id.run do
            flopUpdates := #[]
            memoryUpdates := #[] }
 
+/-- The outputs of `n` steps of an engine from `s0`, or `none` when a step is refused. -/
+def engineOuts {σ : Type} (E : Engine σ) (s0 : RuntimeState) (ticks : List (ClockEdges × RuntimeInput)) :
+    Option (List (Array BV)) := Id.run do
+  let mut q := E.load s0
+  let mut outs : List (Array BV) := []
+  for (e, i) in ticks do
+    match E.step e i q with
+    | .ok (o, q') => outs := outs ++ [o]; q := q'
+    | .error _ => return none
+  return some outs
+
 def sameRuns (a b : List RuntimeResult) : Bool :=
   a.length == b.length && (a.zip b).all fun (x, y) => sameRes x y
 
@@ -264,6 +280,25 @@ def main : IO UInt32 := do
   -- 5. a binding that reads a later slot is refused
   n := n + 1
   fails := check "a forward reference is not well-ordered" (!wellOrdered forwardProg) fails
+  -- 6. the vc engine EngineSelector builds: the full step for a program that is not
+  -- well-ordered, the event-driven step on tables for one that is (the control)
+  let noD : DesignCert := { sources := #[], nodes := #[], outputs := #[], flops := #[], memories := #[] }
+  let knobs : HDLProof.Run.Knobs := { route := .vc }
+  let tickF : List (ClockEdges × RuntimeInput) := (List.range 10).map fun k =>
+    (#[true], #[mk_bv 8 (k * 13 + 1 : Nat)])
+  let sF : RuntimeState := { flops := #[], mems := #[] }
+  let selF := HDLProof.Run.vcEngineOf noD knobs forwardProg
+  n := n + 3
+  fails := check "a forward reference: vc's note says the full step"
+    ((HDLProof.Run.vcNotes knobs forwardProg forwardProg false)[1]? == some "vc incremental: off (not well-ordered)") fails
+  fails := check "a forward reference: vc's engine keeps no tables" selF.autoCompact fails
+  fails := check "a forward reference: 10 steps of vc's engine are denoteResidual's"
+    (engineOuts selF.engine sF tickF == some ((runFull forwardProg sF tickF).map (·.outputs))) fails
+  let selP := HDLProof.Run.vcEngineOf noD knobs prog
+  n := n + 2
+  fails := check "control: a well-ordered program gets the event-driven step on tables (note)"
+    ((HDLProof.Run.vcNotes knobs prog prog false)[1]? == some "vc incremental: on (event-driven, memories as tables)") fails
+  fails := check "control: a well-ordered program gets the event-driven step on tables (engine)" (!selP.autoCompact) fails
   for f in fails do IO.println s!"FAIL {f}"
   if fails.isEmpty then
     IO.println s!"PASS residual_inc: {n} cases"
