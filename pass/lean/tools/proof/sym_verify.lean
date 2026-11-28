@@ -423,60 +423,16 @@ def conjMain (cert specPath : String) (rest : List String) : IO UInt32 := do
   let propOfTok (tok : String) : IO (Option PropSpec) := do
     let (nz, name) := if tok.startsWith "!" then (false, (tok.drop 1).toString) else (true, tok)
     return (← resolvePort cert "outputs" name).map fun n => { out := n, nz }
-  -- every line becomes a group of conjuncts
-  let mut conjs : Array ConjK := #[]
-  let mut cname : Array String := #[]
-  let mut groups : Std.HashMap String (List Nat) := {}
-  for l in lines do
-    let mut ks : List ConjK := []
-    match l.kind with
-    | ["eq", a, b] =>
-        let some ba := resolveReg fidx a | IO.eprintln s!"{l.name}: no register {repr a}"; return 2
-        let some bb := resolveReg fidx b | IO.eprintln s!"{l.name}: no register {repr b}"; return 2
-        unless ba.length == bb.length do IO.eprintln s!"{l.name}: {a} and {b} differ in width"; return 2
-        ks := (ba.zip bb).map fun (f, g) => .eq f g
-    | ["eqif", c, a, b] =>
-        let cas ← match parseCase fidx L.fws c with
-          | .ok x => pure x
-          | .error e => do IO.eprintln s!"{l.name}: {e}"; return 2
-        let some ba := resolveReg fidx a | IO.eprintln s!"{l.name}: no register {repr a}"; return 2
-        let some bb := resolveReg fidx b | IO.eprintln s!"{l.name}: no register {repr b}"; return 2
-        unless ba.length == bb.length do IO.eprintln s!"{l.name}: {a} and {b} differ in width"; return 2
-        ks := (ba.zip bb).map fun (f, g) => .eqIf cas f g
-    | ["oneof", cs] =>
-        let mut cases : List Case := []
-        for c in (cs.splitOn ";").filter (fun w => !w.isEmpty) do
-          match parseCase fidx L.fws c with
-          | .ok x => cases := cases ++ [x]
-          | .error e => do IO.eprintln s!"{l.name}: {e}"; return 2
-        ks := [.oneOf cases]
-    | [tok] =>
-        let some p ← propOfTok tok | IO.eprintln s!"{l.name}: no output {repr tok}"; return 2
-        ks := [.out p]
-    | k => IO.eprintln s!"{l.name}: cannot read {k}"; return 2
-    let start := conjs.size
-    for (k, i) in ks.zipIdx do
-      conjs := conjs.push k
-      cname := cname.push (if ks.length == 1 then l.name else s!"{l.name}[{i}]")
-    groups := groups.insert l.name ((List.range ks.length).map (start + ·))
+  -- the conjuncts (Kit.ConjRun.buildConj: the builder sym_refmap reads its `inv` file with)
+  let C ← match ← buildConj lines fidx L.fws (fun tok => do
+      return match ← propOfTok tok with
+        | some p => .ok p
+        | none => .error s!"no output {repr tok}") with
+    | .ok C => pure C
+    | .error e => do IO.eprintln e; return 2
+  let conjs := C.conjs
+  let cname := C.names
   let n := conjs.size
-  let mut hyps : Array (Option (List Nat)) := Array.replicate n none
-  let mut split : Array (Option Nat) := Array.replicate n none
-  for l in lines do
-    let some mine := groups[l.name]? | continue
-    if let some hs := l.hyps then
-      let mut idx : List Nat := []
-      for h in hs do
-        let some g := groups[h]? | IO.eprintln s!"{l.name}: no conjunct named {repr h}"; return 2
-        idx := idx ++ g
-      for t in mine do hyps := hyps.set! t (some idx)
-    if let some sname := l.split then
-      match groups[sname]? with
-      | some [s] =>
-          match conjs[s]? with
-          | some (.oneOf _) => for t in mine do split := split.set! t (some s)
-          | _ => IO.eprintln s!"{l.name}: split {sname} is not a oneof"; return 2
-      | _ => IO.eprintln s!"{l.name}: split {sname} is not a oneof"; return 2
   let asmOut ← match opt "asm" with
     | none => pure none
     | some a => do
@@ -505,7 +461,7 @@ flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
   say s!"  route sim:{sim}{simWhy (opt "sim") fpOnly}: {rt.name}, set up in {t1 - t0} ms"
   say s!"  [time] setup {t1 - t0}"
   let s0 := zeroState D
-  let sp : ConjTSpec := { conjs := conjs.toList, hyps := hyps.toList, split := split.toList, asmOut, asmIn,
+  let sp : ConjTSpec := { conjs := conjs.toList, hyps := C.hyps.toList, split := C.split.toList, asmOut, asmIn,
                           fuel := rt.fuel, inW := inputWidths D (inputCount D), L }
   let allC := sp.allCases
   let nObl := (List.range n).foldl (fun acc t => acc + (sp.casesOf t).length) 0

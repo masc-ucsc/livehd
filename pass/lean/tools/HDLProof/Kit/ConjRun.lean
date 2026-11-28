@@ -1,8 +1,10 @@
 /-
-`Kit.ConjRun` -- a conjunctive invariant (`Sym.ConjT`) from its spec to its proofs, ONE loop for
-`sym_verify conj:` and the `inv` phase of `sym_refmap refmap`: build the symbolic runs (the base
-run, the plain step run, one run per case), solve the base obligation and every (target, case)
-step obligation, and write a counterexample report for each target that is not preserved.
+`Kit.ConjRun` -- a conjunctive invariant (`Sym.ConjT`) from its spec to its proofs, for
+`sym_verify conj:` and the `inv` phase of `sym_refmap refmap`: ONE builder that reads the spec's
+lines into conjuncts (`buildConj`), and ONE loop that builds the symbolic runs (the base run, the
+plain step run, one run per case), solves the base obligation and every (target, case) step
+obligation, and writes a counterexample report for each target that is not preserved
+(`proveConj`).
 Untrusted: the verdict is the caller's check over what this returns (`sideOKC && checkT` over the
 runs, which is `runConjTOf` by definition, or `runConjTOf` itself). No theorems.
 -/
@@ -206,5 +208,82 @@ state at cycle 0:\n{"\n".intercalate (regs0.map fun (r, v) => s!"  {r} = {v}")}\
     say s!"  steps: {items.size} obligations, {totalC} clauses in total, largest {maxC}; {t3 - t2} ms"
   unless failing.isEmpty do return .notInductive failing
   return .proved pfB (pfs.toList.map (·.toList)) rb r0 runList (ncB + totalC)
+
+/-! ## The conj spec
+
+`sym_verify conj:<spec>` and a `.refmap`'s `inv <file>` read one format (`sym_verify.lean`, M8):
+one conjunct (or one group) per line, `<name> [!]<output>`, `<name> eq <reg> <reg>`, `<name> eqif
+<case> <reg> <reg>`, `<name> oneof <case>;<case>;...`, each with optional `hyps: <name> ...` and
+`split: <name of a oneof>`. `buildConj` turns its lines (`parseSpec`) into the conjuncts, ONE
+builder for both tools. -/
+
+/-- A conj spec's conjuncts: their names (`<line>` or `<line>[<bit>]` for a register pair), the
+conjuncts each target's step assumes (`none`: all), and the `oneof` it is split on. -/
+structure ConjParts where
+  conjs : Array ConjK := #[]
+  names : Array String := #[]
+  hyps  : Array (Option (List Nat)) := #[]
+  split : Array (Option Nat) := #[]
+
+/-- The conjuncts of a conj spec's lines. `fidx` names the design's flops (`resolveReg`), `fws`
+their widths; `outProp` reads an output token `[!]<output>` (each tool names outputs its own
+way). An error names the line it is about. -/
+def buildConj (lines : List SpecLine) (fidx : Std.HashMap String Nat) (fws : List Nat)
+    (outProp : String → IO (Except String PropSpec)) : IO (Except String ConjParts) := do
+  let mut conjs : Array ConjK := #[]
+  let mut cname : Array String := #[]
+  let mut groups : Std.HashMap String (List Nat) := {}
+  for l in lines do
+    let mut ks : List ConjK := []
+    match l.kind with
+    | ["eq", a, b] =>
+        let some ba := resolveReg fidx a | return .error s!"{l.name}: no register {repr a}"
+        let some bb := resolveReg fidx b | return .error s!"{l.name}: no register {repr b}"
+        unless ba.length == bb.length do return .error s!"{l.name}: {a} and {b} differ in width"
+        ks := (ba.zip bb).map fun (f, g) => .eq f g
+    | ["eqif", c, a, b] =>
+        let cas ← match parseCase fidx fws c with
+          | .ok x => pure x
+          | .error e => return .error s!"{l.name}: {e}"
+        let some ba := resolveReg fidx a | return .error s!"{l.name}: no register {repr a}"
+        let some bb := resolveReg fidx b | return .error s!"{l.name}: no register {repr b}"
+        unless ba.length == bb.length do return .error s!"{l.name}: {a} and {b} differ in width"
+        ks := (ba.zip bb).map fun (f, g) => .eqIf cas f g
+    | ["oneof", cs] =>
+        let mut cases : List Case := []
+        for c in (cs.splitOn ";").filter (fun w => !w.isEmpty) do
+          match parseCase fidx fws c with
+          | .ok x => cases := cases ++ [x]
+          | .error e => return .error s!"{l.name}: {e}"
+        ks := [.oneOf cases]
+    | [tok] =>
+        match ← outProp tok with
+        | .ok p => ks := [.out p]
+        | .error e => return .error s!"{l.name}: {e}"
+    | k => return .error s!"{l.name}: cannot read {k}"
+    let start := conjs.size
+    for (k, i) in ks.zipIdx do
+      conjs := conjs.push k
+      cname := cname.push (if ks.length == 1 then l.name else s!"{l.name}[{i}]")
+    groups := groups.insert l.name ((List.range ks.length).map (start + ·))
+  let n := conjs.size
+  let mut hyps : Array (Option (List Nat)) := Array.replicate n none
+  let mut split : Array (Option Nat) := Array.replicate n none
+  for l in lines do
+    let some mine := groups[l.name]? | continue
+    if let some hs := l.hyps then
+      let mut idx : List Nat := []
+      for h in hs do
+        let some g := groups[h]? | return .error s!"{l.name}: no conjunct named {repr h}"
+        idx := idx ++ g
+      for t in mine do hyps := hyps.set! t (some idx)
+    if let some sname := l.split then
+      match groups[sname]? with
+      | some [s] =>
+          match conjs[s]? with
+          | some (.oneOf _) => for t in mine do split := split.set! t (some s)
+          | _ => return .error s!"{l.name}: split {sname} is not a oneof"
+      | _ => return .error s!"{l.name}: split {sname} is not a oneof"
+  return .ok { conjs, names := cname, hyps, split }
 
 end HDLProof.Driver

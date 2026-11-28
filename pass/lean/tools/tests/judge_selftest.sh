@@ -46,6 +46,9 @@ set -euo pipefail
 #                                           trace's end (random inputs keeping asm): VALUE
 #                                           DIFFERENCE (the trace alone cannot tell it from a delay)
 #     product, @next with period 2          refused
+#   one contract                            the judge (Kit/RefMapFile) and mk_product.py read every
+#                                           contract here, and one with every corner of the
+#                                           grammar, identically (both print a canonical form)
 #
 # The judge's default route is vc (fp for a certificate with memories); two cases also run on fp.
 # SYM_NAT=<dir with native sym_refmap and sym_verify> uses them; otherwise the drivers run
@@ -217,6 +220,33 @@ drv() { # <driver> args...
   if [[ -n "$SYM_NAT" ]]; then "$SYM_NAT/$d" "$@"
   else (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/proof/$d.lean" "$@"); fi
 }
+
+# one contract to the judge and the product search: mk_product.py --dump (Python) and
+# tests/refmap_contract_dump.lean (the judge's parser, Kit/RefMapFile) print every contract above,
+# and one that uses every corner of the grammar, in one canonical form, which must be equal
+printf '%s\n' '# every corner of the grammar: comments, tabs, Booleans, slices, guards, @next, asm !' \
+  "impl	rD_lean/rD.dcert   # the implementation" 'spec rS_lean/rS.dcert' \
+  'chan step allow:ok resp:vin,x obs:v,yg,req' \
+  'slot step (out:v@next|!in:vin)&(in:x==3|!(out:req&1)) resp:in:vin,in:x obs:out:v@next,out:y@next[2:4]?out:v@next.0,out:req' \
+  'xfer out:v@next&!0|in:vin==1' 'xfer (out:y@next==255)' 'maxstall 2' 'asm !env_ok' > "$OUT/grammar.refmap"
+contracts=()
+: > "$OUT/contracts_py.txt"
+for e in acc2:accS:acc2 acc2b:accS:acc2b acc2_r0:accS:acc2 acc2_slot:accS:acc2 pv1:pv0:pv1 pv1b:pv0:pv1b \
+         r_same:rS:rD r_late:rS:rD rb_late:rS:rDb r_lint:rS:rD r_lint2:rS:rD r_env:rS:rD r_same_env:rS:rD \
+         r_dead:rS:rD r_blind:rS:rD r_quiet:rS:rD grammar:rS:rD; do
+  IFS=: read -r rm d0 d1 <<< "$e"
+  contracts+=("$OUT/$rm.refmap")
+  echo "== $OUT/$rm.refmap" >> "$OUT/contracts_py.txt"
+  "$PY" "$ROOT/pass/lean/tools/scripts/mk_product.py" --dump "$OUT/$rm.refmap" "$OUT/$d0.v" "$OUT/$d1.v" "$d0" "$d1" \
+    >> "$OUT/contracts_py.txt" 2>&1 || { tail -3 "$OUT/contracts_py.txt"; echo "FAIL: mk_product.py --dump $rm"; exit 1; }
+done
+(cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/tests/refmap_contract_dump.lean" \
+  "${contracts[@]}") > "$OUT/contracts_lean.txt" 2>&1 || { tail -3 "$OUT/contracts_lean.txt"; echo "FAIL: refmap_contract_dump"; exit 1; }
+canon() { grep -E '^(== |chan |slot |xfer |maxstall |period |asm )' "$1"; }
+diff <(canon "$OUT/contracts_lean.txt") <(canon "$OUT/contracts_py.txt") > "$OUT/contracts.diff" \
+  && [[ $(canon "$OUT/contracts_lean.txt" | grep -c '^slot ') == "${#contracts[@]}" ]] \
+  || { head -20 "$OUT/contracts.diff"; echo "FAIL: the judge and mk_product.py read a contract differently"; exit 1; }
+echo "ok: the judge and mk_product.py read the ${#contracts[@]} contracts identically"
 N=0
 judge() { # <expect> <refmap> args...
   local expect=$1 rm=$2; shift 2

@@ -124,6 +124,8 @@ import HDLProof.Check.RefMapCompose
 import HDLProof.Check.RefMapRef
 import HDLProof.Kit.Driver
 import HDLProof.Kit.ConjRun
+-- the .refmap file: ports, Booleans, words, chan and slot lines, the judge's contract
+import HDLProof.Kit.RefMapFile
 import HDLProof.Kit.Judge
 import HDLProof.Kit.SymRoute
 -- the judge's ir and vc routes: EngineSelector's engines whose state is the runtime state
@@ -136,163 +138,9 @@ import LeanSemanticPrimitives.Compiler.ResidualFast
 open Compiler Projection HDLProof HDLProof.Sym HDLProof.Kit HDLProof.Check HDLProof.Driver
 open Projection.MemProjection Projection.HwMem Std.Tactic.BVDecide
 
-/-! ## The file -/
-
-structure RMLine where
-  key  : String
-  args : List String
-
-def parseRM (text : String) : List RMLine := Id.run do
-  let mut out := []
-  for raw in text.splitOn "\n" do
-    let line := ((raw.splitOn "#").headD "").replace "\t" " " |>.trimAscii |>.toString
-    if line.isEmpty then continue
-    match (line.splitOn " ").filter (fun w => !w.isEmpty) with
-    | [] => continue
-    | k :: as => out := out ++ [{ key := k, args := as }]
-  return out
-
-/-- A name → ordinal index of a sidecar kind. -/
-def nameIdx (ports : Array (String × Nat)) : Std.HashMap String Nat := Id.run do
-  let mut m := {}
-  for ((n, _), k) in ports.toList.zipIdx do
-    unless n.isEmpty do m := m.insert n k
-  return m
-
-structure Names where
-  ins   : Std.HashMap String Nat
-  outs  : Std.HashMap String Nat
-  outW  : Array (String × Nat)
-  inW   : Array (String × Nat)
-  flops : Std.HashMap String Nat
-  flopN : Array (String × Nat)
-
-def loadNames (cert : String) : IO Names := do
-  let i ← ioPorts cert "inputs"
-  let o ← ioPorts cert "outputs"
-  let f ← ioPorts cert "flops"
-  return { ins := nameIdx i, outs := nameIdx o, outW := o, inW := i, flops := nameIdx f, flopN := f }
-
-/-! ## Port words, Booleans and observed words -/
-
-def parsePort (N : Names) (tok : String) : Except String PortW := do
-  if let some r := tok.dropPrefix? "out:" then
-    let r := r.toString
-    let (nm, nxt) := match r.dropSuffix? "@next" with
-      | some b => (b.toString, true)
-      | none => (r, false)
-    match N.outs[nm]? with
-    | some o => pure (.out o nxt)
-    | none => throw s!"no implementation output {repr nm}"
-  else if let some r := tok.dropPrefix? "in:" then
-    match N.ins[r.toString]? with
-    | some k => pure (.inp k)
-    | none => throw s!"no implementation input {repr r.toString}"
-  else throw s!"a port is out:<name>[@next] or in:<name>, got {repr tok}"
-
-def portWidth (N : Names) : PortW → Nat
-  | .out o _ => (N.outW.getD o ("", 0)).2
-  | .inp k => (N.inW.getD k ("", 0)).2
-
-mutual
-/-- A Boolean over ports: `!`, `&`, `|`, parentheses; atoms `<port>`, `<port>==<n>`, `1`, `0`. -/
-partial def bitExpr (N : Names) (cs : Array Char) (i : Nat) : Except String (BitE × Nat) := do
-  let (a, i) ← bitTerm N cs i
-  let mut acc := a
-  let mut j := i
-  while j < cs.size && cs[j]! == '|' do
-    let (b, k) ← bitTerm N cs (j + 1)
-    acc := .or acc b
-    j := k
-  pure (acc, j)
-
-partial def bitTerm (N : Names) (cs : Array Char) (i : Nat) : Except String (BitE × Nat) := do
-  let (a, i) ← bitFactor N cs i
-  let mut acc := a
-  let mut j := i
-  while j < cs.size && cs[j]! == '&' do
-    let (b, k) ← bitFactor N cs (j + 1)
-    acc := .and acc b
-    j := k
-  pure (acc, j)
-
-partial def bitFactor (N : Names) (cs : Array Char) (i : Nat) : Except String (BitE × Nat) := do
-  if i < cs.size && cs[i]! == '!' then
-    let (a, j) ← bitFactor N cs (i + 1)
-    pure (.not a, j)
-  else if i < cs.size && cs[i]! == '(' then
-    let (a, j) ← bitExpr N cs (i + 1)
-    unless j < cs.size && cs[j]! == ')' do throw "missing ')'"
-    pure (a, j + 1)
-  else
-    let mut j := i
-    while j < cs.size && !"&|()!".contains cs[j]! do j := j + 1
-    let atom := String.ofList (cs.extract i j).toList
-    if atom == "1" then pure (.tt, j)
-    else if atom == "0" then pure (.ff, j)
-    else match atom.splitOn "==" with
-      | [p] => pure (.nz (← parsePort N p), j)
-      | [p, v] =>
-          let some n := v.toNat? | throw s!"bad constant in {repr atom}"
-          pure (.eqc (← parsePort N p) n, j)
-      | _ => throw s!"cannot read {repr atom}"
-end
-
-def parseBitE (N : Names) (s : String) : Except String BitE := do
-  let cs := s.toList.toArray
-  let (e, j) ← (bitExpr N cs 0).mapError (s!"{repr s}: " ++ ·)
-  unless j == cs.size do throw s!"trailing text in {repr s}"
-  pure e
-
-/-- An observed word: `<port>`, `<port>[lo:len]`, optionally `?<port>.<bit>`. -/
-def parseObsW (N : Names) (tok : String) : Except String ObsW := do
-  let (body, guardTxt) := match tok.splitOn "?" with
-    | [b, g] => (b, some g)
-    | _ => (tok, none)
-  let (pTxt, slice) := match body.splitOn "[" with
-    | [p, r] => (p, some (r.dropEnd 1).toString)
-    | _ => (body, none)
-  let port ← parsePort N pTxt
-  let (lo, len) ← match slice with
-    | none => pure (0, portWidth N port)
-    | some sl => match sl.splitOn ":" with
-      | [a, b] => match a.toNat?, b.toNat? with
-        | some x, some y => pure (x, y)
-        | _, _ => throw s!"bad slice in {repr tok}"
-      | _ => throw s!"a slice is [lo:len], got {repr tok}"
-  let guard ← match guardTxt with
-    | none => pure none
-    | some g => match g.splitOn "." with
-      | [p, b] => match b.toNat? with
-        | some k => pure (some (← parsePort N p, k))
-        | none => throw s!"bad guard bit in {repr tok}"
-      | _ => throw s!"a guard is <port>.<bit>, got {repr tok}"
-  pure { port, lo, len, guard }
-
-/-! ## Building the spec -/
-
-def argOf (args : List String) (k : String) : Option String :=
-  args.findSome? fun t => (t.dropPrefix? (k ++ ":")).map (·.toString)
-
-def listArg (args : List String) (k : String) : List String :=
-  match argOf args k with
-  | some s => (s.splitOn ",").filter (!·.isEmpty)
-  | none => []
-
-def specProp (NS : Names) (tok : String) : Except String PropSpec := do
-  let (nz, nm) := if tok.startsWith "!" then (false, (tok.drop 1).toString) else (true, tok)
-  match NS.outs[nm]? with
-  | some o => pure { out := o, nz }
-  | none => throw s!"no spec output {repr nm}"
-
-def implProp (NI : Names) (tok : String) : Except String PropSpec := do
-  let (nz, nm) := if tok.startsWith "!" then (false, (tok.drop 1).toString) else (true, tok)
-  match NI.outs[nm]? with
-  | some o => pure { out := o, nz }
-  | none => throw s!"no implementation output {repr nm}"
-
-/-- The implementation's invariant from a conj spec file (the `sym_verify conj:` format). -/
-def buildInv (implCert : String) (NI : Names) (path : Option String) (asmOut : Option PropSpec)
+/-- The implementation's invariant from a conj spec file (the `sym_verify conj:` format, read by
+`Kit.ConjRun.buildConj`, as `sym_verify` reads it). -/
+def buildInv (NI : Names) (path : Option String) (asmOut : Option PropSpec)
     (asmIn : List (Nat × Int)) (fuel : Nat) (inW : List Nat) (L : Shape) :
     IO (Except String (ConjTSpec × Array String)) := do
   let base : ConjTSpec := { conjs := [], asmOut, asmIn, fuel, inW, L }
@@ -300,61 +148,9 @@ def buildInv (implCert : String) (NI : Names) (path : Option String) (asmOut : O
   let lines ← match parseSpec (← IO.FS.readFile p) with
     | .ok l => pure l
     | .error e => return .error s!"{p}: {e}"
-  let mut conjs : Array ConjK := #[]
-  let mut cname : Array String := #[]
-  let mut groups : Std.HashMap String (List Nat) := {}
-  for l in lines do
-    let mut ks : List ConjK := []
-    match l.kind with
-    | ["eq", a, b] =>
-        let some ba := resolveReg NI.flops a | return .error s!"{l.name}: no register {repr a}"
-        let some bb := resolveReg NI.flops b | return .error s!"{l.name}: no register {repr b}"
-        unless ba.length == bb.length do return .error s!"{l.name}: {a} and {b} differ in width"
-        ks := (ba.zip bb).map fun (f, g) => .eq f g
-    | ["eqif", c, a, b] =>
-        let cas ← match parseCase NI.flops L.fws c with
-          | .ok x => pure x
-          | .error e => return .error s!"{l.name}: {e}"
-        let some ba := resolveReg NI.flops a | return .error s!"{l.name}: no register {repr a}"
-        let some bb := resolveReg NI.flops b | return .error s!"{l.name}: no register {repr b}"
-        unless ba.length == bb.length do return .error s!"{l.name}: {a} and {b} differ in width"
-        ks := (ba.zip bb).map fun (f, g) => .eqIf cas f g
-    | ["oneof", cs] =>
-        let mut cases : List Case := []
-        for c in (cs.splitOn ";").filter (fun w => !w.isEmpty) do
-          match parseCase NI.flops L.fws c with
-          | .ok x => cases := cases ++ [x]
-          | .error e => return .error s!"{l.name}: {e}"
-        ks := [.oneOf cases]
-    | [tok] =>
-        match implProp NI tok with
-        | .ok p => ks := [.out p]
-        | .error e => return .error s!"{l.name}: {e}"
-    | k => return .error s!"{l.name}: cannot read {k}"
-    let start := conjs.size
-    for (k, i) in ks.zipIdx do
-      conjs := conjs.push k
-      cname := cname.push (if ks.length == 1 then l.name else s!"{l.name}[{i}]")
-    groups := groups.insert l.name ((List.range ks.length).map (start + ·))
-  let n := conjs.size
-  let mut hyps : Array (Option (List Nat)) := Array.replicate n none
-  let mut split : Array (Option Nat) := Array.replicate n none
-  for l in lines do
-    let some mine := groups[l.name]? | continue
-    if let some hs := l.hyps then
-      let mut idx : List Nat := []
-      for h in hs do
-        let some g := groups[h]? | return .error s!"{l.name}: no conjunct named {repr h}"
-        idx := idx ++ g
-      for t in mine do hyps := hyps.set! t (some idx)
-    if let some sname := l.split then
-      match groups[sname]? with
-      | some [s] =>
-          match conjs[s]? with
-          | some (.oneOf _) => for t in mine do split := split.set! t (some s)
-          | _ => return .error s!"{l.name}: split {sname} is not a oneof"
-      | _ => return .error s!"{l.name}: split {sname} is not a oneof"
-  return .ok ({ base with conjs := conjs.toList, hyps := hyps.toList, split := split.toList }, cname)
+  match ← buildConj lines NI.flops L.fws (fun tok => pure (implProp NI tok)) with
+  | .error e => return .error e
+  | .ok C => return .ok ({ base with conjs := C.conjs.toList, hyps := C.hyps.toList, split := C.split.toList }, C.names)
 
 structure Built where
   sp       : RefMapSpec
@@ -389,7 +185,7 @@ def buildRM (lines : List RMLine) (implCert specCert : String) (invPath : Option
     | _ => return .error "in <input>=<value>"
   let LI := shapeOf DI
   let inWI := inputWidths DI (inputCount DI)
-  let inv ← match ← buildInv implCert NI invPath asmOut asmIn fuelI inWI LI with
+  let inv ← match ← buildInv NI invPath asmOut asmIn fuelI inWI LI with
     | .ok x => pure x
     | .error e => return .error e
   let (invSp, conjName) := inv
@@ -431,63 +227,20 @@ def buildRM (lines : List RMLine) (implCert specCert : String) (invPath : Option
           let some z := v.toInt? | return .error s!"init {sf}: bad value {repr v}"
           init := init.set! k (.cnst z)
     | _ => return .error "init <spec-register> <int>|out0:<implementation-output>|free"
-  -- channels
+  -- channels and slots (`Kit.RefMapFile`: the parser the judge uses too)
   let mut chans : Array ChanS := #[]
   let mut chanName : Array String := #[]
   for a in get "chan" do
-    match a with
-    | nm :: rest =>
-        let some al := argOf rest "allow" | return .error s!"chan {nm}: no allow:"
-        let allow ← match specProp NS al with | .ok p => pure p | .error e => return .error e
-        let mut sel : List (Nat × Int) := []
-        for s in listArg rest "sel" do
-          match s.splitOn "=" with
-          | [i, v] =>
-              let some k := NS.ins[i]? | return .error s!"chan {nm}: no spec input {repr i}"
-              let some z := v.toInt? | return .error s!"chan {nm}: bad value {repr v}"
-              sel := sel ++ [(k, z)]
-          | _ => return .error s!"chan {nm}: sel:<input>=<value>,..."
-        let mut respIn : List Nat := []
-        for i in listArg rest "resp" do
-          let some k := NS.ins[i]? | return .error s!"chan {nm}: no spec input {repr i}"
-          respIn := respIn ++ [k]
-        let mut obsOut : List Nat := []
-        for o in listArg rest "obs" do
-          let some k := NS.outs[o]? | return .error s!"chan {nm}: no spec output {repr o}"
-          obsOut := obsOut ++ [k]
-        let rank ← match argOf rest "rank" with
-          | none => pure none
-          | some r => match r.splitOn "/" with
-            | [ro, so] =>
-                let some a := NI.outs[ro]? | return .error s!"chan {nm}: no implementation output {repr ro}"
-                let some b := NI.outs[so]? | return .error s!"chan {nm}: no implementation output {repr so}"
-                pure (some (a, b))
-            | _ => return .error s!"chan {nm}: rank:<rank-output>/<selector-output>"
-        chans := chans.push { sel, respIn, allow, obsOut, rank }
-        chanName := chanName.push nm
-    | _ => return .error "chan <name> allow:<out> ..."
+    match parseChan NS (some NI) a with
+    | .ok (nm, c) => chans := chans.push c; chanName := chanName.push nm
+    | .error e => return .error e
   let chanIdx := nameIdx (chanName.map (·, 0))
-  -- slots and requirements
   let mut slots : Array SlotS := #[]
   let mut slotName : Array String := #[]
   for a in get "slot" do
-    match a with
-    | cn :: kindTxt :: rest =>
-        let some c := chanIdx[cn]? | return .error s!"slot: no channel {repr cn}"
-        let kind ← match parseBitE NI kindTxt with | .ok k => pure k | .error e => return .error s!"slot {cn}: {e}"
-        let mut resp : List PortW := []
-        for p in listArg rest "resp" do
-          match parsePort NI p with
-          | .ok w => resp := resp ++ [w]
-          | .error e => return .error s!"slot {cn}: {e}"
-        let mut obs : List ObsW := []
-        for w in listArg rest "obs" do
-          match parseObsW NI w with
-          | .ok x => obs := obs ++ [x]
-          | .error e => return .error s!"slot {cn}: {e}"
-        slots := slots.push { chan := c, kind, resp, obs }
-        slotName := slotName.push s!"{cn}#{slots.size - 1}"
-    | _ => return .error "slot <chan> <kind> [resp:..] [obs:..]"
+    match parseSlot NI chanIdx none a with
+    | .ok sl => slots := slots.push sl; slotName := slotName.push s!"{a.headD ""}#{slots.size - 1}"
+    | .error e => return .error e
   let mut reqs : List ReqS := []
   for a in get "req" do
     match a with
@@ -965,64 +718,6 @@ def judgeSimOf {σ : Type} (D : DesignCert) (E : Engine σ) : Judge.Sim := fun i
   match E.step (edgesAll D) i (E.load (StateM.denote st)) with
   | .ok (o, q') => some { nextState := { flops := (E.view q').flops, mems := #[] }, outputs := o }
   | .error _ => none
-
-/-- The judge's contract from a `.refmap`: the one channel, the one slot, `xfer`, `maxstall`.
-`NI` names the implementation's ports. A control (`ctrl`) runs D0 as the implementation: its
-slot fires always (a stall choice reads D1's own observers, and the verdict does not depend on
-it), and it reads no `asm` (its inputs are drawn on D1, which holds the environment monitor). -/
-def buildJudge (lines : List RMLine) (NI NS : Names) (DS : DesignCert) (ctrl : Bool := false) :
-    Except String (Judge.JSpec × Option PropSpec) := do
-  let get (k : String) : List (List String) := (lines.filter (·.key == k)).map (·.args)
-  let chanLines := get "chan"
-  let slotLines := get "slot"
-  unless chanLines.length == 1 && slotLines.length == 1 do
-    throw s!"judge: exactly one chan and one slot (got {chanLines.length} and {slotLines.length})"
-  let chan ← match chanLines.head! with
-    | nm :: rest => do
-        let some al := argOf rest "allow" | throw s!"chan {nm}: no allow:"
-        let allow ← specProp NS al
-        let mut sel : List (Nat × Int) := []
-        for x in listArg rest "sel" do
-          match x.splitOn "=" with
-          | [i, v] =>
-              let some k := NS.ins[i]? | throw s!"chan {nm}: no spec input {repr i}"
-              let some z := v.toInt? | throw s!"chan {nm}: bad value {repr v}"
-              sel := sel ++ [(k, z)]
-          | _ => throw s!"chan {nm}: sel:<input>=<value>,..."
-        let mut respIn : List Nat := []
-        for i in listArg rest "resp" do
-          let some k := NS.ins[i]? | throw s!"chan {nm}: no spec input {repr i}"
-          respIn := respIn ++ [k]
-        let mut obsOut : List Nat := []
-        for o in listArg rest "obs" do
-          let some k := NS.outs[o]? | throw s!"chan {nm}: no spec output {repr o}"
-          obsOut := obsOut ++ [k]
-        pure ({ sel, respIn, allow, obsOut } : ChanS)
-    | _ => throw "chan <name> allow:<out> ..."
-  let (slot, obsTxt) ← match slotLines.head! with
-    | _ :: kindTxt :: rest => do
-        let kind ← if ctrl then pure BitE.tt else parseBitE NI kindTxt
-        let mut resp : List PortW := []
-        for x in listArg rest "resp" do resp := resp ++ [← parsePort NI x]
-        let mut obs : List ObsW := []
-        for w in listArg rest "obs" do obs := obs ++ [← parseObsW NI w]
-        pure (({ chan := 0, kind, resp, obs } : SlotS), listArg rest "obs")
-    | _ => throw "slot <chan> <kind> [resp:..] [obs:..]"
-  let xferTxt := (get "xfer").map (" ".intercalate ·)
-  let mut xfer : List BitE := []
-  for x in xferTxt do xfer := xfer ++ [← parseBitE NI x]
-  let natLine (k : String) (d : Nat) : Except String Nat :=
-    match (get k).head? with
-    | none => pure d
-    | some [v] => match v.toNat? with | some n => pure n | none => throw s!"{k}: bad value {repr v}"
-    | some _ => throw s!"{k} <n>"
-  let maxStall ← natLine "maxstall" 0
-  let asm ← if ctrl then pure none else match (get "asm").head? with
-    | some [tok] => pure (some (← implProp NI tok))
-    | none => pure none
-    | some _ => throw "asm <implementation-output>"
-  pure ({ chan, slot, xfer, maxStall, specInW := inputWidths DS (inputCount DS)
-        , obsName := obsTxt.toArray, xferName := xferTxt.toArray }, asm)
 
 /-- The outputs a Boolean reads, with their cycle (`true`: n+1). -/
 def bitOuts : BitE → List (Nat × Bool)
@@ -1814,10 +1509,7 @@ def judgeMain (path : String) (rest : List String) : IO UInt32 := do
     | .ok x => pure x | .error e => do IO.eprintln s!"{path}: {e}"; return 2
   let asmTxt := match (lines.find? (·.key == "asm")).bind (·.args.head?) with
     | some a => s!"asm {a}" | none => "asm"
-  let (period, phase) : Nat × Nat := match (lines.find? (·.key == "period")).map (·.args) with
-    | some [p] => let P := p.toNat?.getD 1; (P, if P > 1 then 1 else 0)
-    | some [p, k] => (p.toNat?.getD 1, k.toNat?.getD 0)
-    | _ => (1, 0)
+  let (period, phase) := judgePeriod lines
   let K := ((opt "classify").bind (·.toNat?)).getD 2
   let H := ((opt "horizon").bind (·.toNat?)).getD 20
   let tries := ((opt "tries").bind (·.toNat?)).getD 64

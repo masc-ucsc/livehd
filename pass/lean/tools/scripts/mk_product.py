@@ -34,9 +34,22 @@ step m-1 (its TSV has rows 0..m: the judge reads row m for the `@next` words). N
 counterexample TSV is a run for `sym_refmap judge ... trace:`. The product decides nothing: with
 the slot's stall choice a failure is "this run breaks the contract or the stall choice", and the
 judge decides which.
+
+  mk_product.py --dump <file.refmap> <d0.v> <d1.v> [<d0 top> <d1 top>]
+
+prints the contract as this script reads it (the chan's response inputs and observed outputs, the
+slot, every xfer, maxstall, period, asm) in the canonical form of
+`pass/lean/tools/tests/refmap_contract_dump.lean`, which prints the judge's reading of the same
+file (`HDLProof.Kit.RefMapFile.buildJudge`); judge_selftest.sh compares the two on its contracts.
+The grammar is the judge's: a Boolean is `!`, `&`, `|` and parentheses over atoms `<port>`,
+`<port>==<n>`, `1`, `0` (`|` binds loosest); a word is `<port>[<lo>:<len>]?<port>.<bit>`, the
+slice and the guard optional.
 """
 import re, sys
 
+
+def fail(msg):
+    raise SystemExit(msg)
 
 
 def parse_refmap(path):
@@ -60,6 +73,209 @@ def lst(args, k):
     v = arg(args, k)
     return [x for x in v.split(',') if x] if v else []
 
+
+def nat(s):
+    return int(s) if re.fullmatch(r'[0-9]+', s) else None
+
+
+# ---- the contract, parsed as the judge parses it (HDLProof/Kit/RefMapFile.lean)
+
+def parse_port(tok):
+    """('in', name) or ('out', name, next): `in:<name>`, `out:<name>`, `out:<name>@next`."""
+    if tok.startswith('in:'):
+        return ('in', tok[3:])
+    if tok.startswith('out:'):
+        n = tok[4:]
+        nxt = n.endswith('@next')
+        return ('out', n[:-len('@next')] if nxt else n, nxt)
+    fail(f'a port is out:<name>, out:<name>@next or in:<name>, got {tok}')
+
+
+def parse_bool(s):
+    """A Boolean as a tree: ('or'|'and', a, b), ('not', a), ('paren', a), ('tt',), ('ff',),
+    ('nz', port), ('eq', port, n). `|` binds loosest, then `&`, then `!`."""
+    def expr(i):
+        a, i = term(i)
+        while i < len(s) and s[i] == '|':
+            b, i = term(i + 1)
+            a = ('or', a, b)
+        return a, i
+
+    def term(i):
+        a, i = factor(i)
+        while i < len(s) and s[i] == '&':
+            b, i = factor(i + 1)
+            a = ('and', a, b)
+        return a, i
+
+    def factor(i):
+        if i < len(s) and s[i] == '!':
+            a, j = factor(i + 1)
+            return ('not', a), j
+        if i < len(s) and s[i] == '(':
+            a, j = expr(i + 1)
+            if not (j < len(s) and s[j] == ')'):
+                fail(f"{s!r}: missing ')'")
+            return ('paren', a), j + 1
+        j = i
+        while j < len(s) and s[j] not in '&|()!':
+            j += 1
+        atom = s[i:j]
+        if atom == '1':
+            return ('tt',), j
+        if atom == '0':
+            return ('ff',), j
+        parts = atom.split('==')
+        if len(parts) == 1:
+            return ('nz', parse_port(atom)), j
+        if len(parts) == 2:
+            v = nat(parts[1])
+            if v is None:
+                fail(f'{s!r}: bad constant in {atom!r}')
+            return ('eq', parse_port(parts[0]), v), j
+        fail(f'{s!r}: cannot read {atom!r}')
+
+    e, j = expr(0)
+    if j != len(s):
+        fail(f'trailing text in {s!r}')
+    return e
+
+
+def parse_word(tok):
+    """An observed word: (port, lo, len or None for the whole port, guard (port, bit) or None)."""
+    parts = tok.split('?')
+    body, guard = (parts[0], parts[1]) if len(parts) == 2 else (tok, None)
+    bp = body.split('[')
+    ptxt, sl = (bp[0], bp[1][:-1]) if len(bp) == 2 else (body, None)
+    port = parse_port(ptxt)
+    lo, ln = 0, None
+    if sl is not None:
+        ab = sl.split(':')
+        if len(ab) != 2:
+            fail(f'a slice is [lo:len], got {tok}')
+        lo, ln = nat(ab[0]), nat(ab[1])
+        if lo is None or ln is None:
+            fail(f'bad slice in {tok}')
+    g = None
+    if guard is not None:
+        gp = guard.split('.')
+        if len(gp) != 2:
+            fail(f'a guard is <port>.<bit>, got {tok}')
+        b = nat(gp[1])
+        if b is None:
+            fail(f'bad guard bit in {tok}')
+        g = (parse_port(gp[0]), b)
+    return (port, lo, ln, g)
+
+
+def one_nat(L, k, d):
+    """`<k> <n>` (the first such line), or `d` when there is none."""
+    vs = [a for (kk, a) in L if kk == k]
+    if not vs:
+        return d
+    if len(vs[0]) != 1 or nat(vs[0][0]) is None:
+        fail(f'{k} <n>, got {" ".join(vs[0])!r}')
+    return nat(vs[0][0])
+
+
+class Contract:
+    """The one chan, the one slot, xfer, maxstall, period and asm of a .refmap."""
+
+    def __init__(self, L):
+        get = lambda k: [a for (kk, a) in L if kk == k]
+        chans, slots = get('chan'), get('slot')
+        if not (len(chans) == 1 and len(slots) == 1):
+            fail(f'judge: exactly one chan and one slot (got {len(chans)} and {len(slots)})')
+        ch, sl = chans[0], slots[0]
+        if not ch:
+            fail('chan <name> allow:<out> ...')
+        if len(sl) < 2:
+            fail('slot <chan> <kind> [resp:..] [obs:..]')
+        self.chan = ch[0]
+        if sl[0] != self.chan:
+            fail(f'slot: no channel {sl[0]!r}')
+        self.resp_in, self.obs0 = lst(ch[1:], 'resp'), lst(ch[1:], 'obs')
+        self.kind = parse_bool(sl[1])
+        self.resp = [parse_port(t) for t in lst(sl[2:], 'resp')]
+        self.obs_txt = lst(sl[2:], 'obs')
+        self.obs = [parse_word(t) for t in self.obs_txt]
+        self.xfer_txt = [' '.join(a) for a in get('xfer')]
+        self.xfer = [parse_bool(x) for x in self.xfer_txt]
+        self.maxstall = one_nat(L, 'maxstall', 0)
+        self.period = int((get('period') or [['1']])[0][0])
+        asm = get('asm')
+        self.asm = None
+        if asm:
+            if len(asm[0]) != 1:
+                fail('asm <implementation-output>')
+            t = asm[0][0]
+            self.asm = (t[1:], False) if t.startswith('!') else (t, True)
+        late = lambda p: p[0] == 'out' and p[2]
+        self.late = (any(late(p) for p in ports_of_bool(self.kind)) or any(late(p) for p in self.resp)
+                     or any(late(w[0]) or (w[3] is not None and late(w[3][0])) for w in self.obs)
+                     or any(late(p) for x in self.xfer for p in ports_of_bool(x)))
+
+
+def ports_of_bool(e):
+    if e[0] in ('nz', 'eq'):
+        return [e[1]]
+    return [p for a in e[1:] if isinstance(a, tuple) for p in ports_of_bool(a)]
+
+
+# ---- the canonical form (refmap_contract_dump.lean prints the judge's reading the same way)
+
+def canon_port(p):
+    return f'in:{p[1]}' if p[0] == 'in' else f'out:{p[1]}{"@next" if p[2] else ""}'
+
+
+def canon_bool(e):
+    t = e[0]
+    if t == 'tt':
+        return 'tt'
+    if t == 'ff':
+        return 'ff'
+    if t == 'nz':
+        return f'nz({canon_port(e[1])})'
+    if t == 'eq':
+        return f'eq({canon_port(e[1])},{e[2]})'
+    if t == 'not':
+        return f'not({canon_bool(e[1])})'
+    if t == 'paren':
+        return canon_bool(e[1])
+    return f'{t}({canon_bool(e[1])},{canon_bool(e[2])})'
+
+
+def dump(C, P, in0, out0):
+    def width(p):
+        return port_expr(p, P)[1]
+    def word(w):
+        port, lo, ln, g = w
+        s = f'{canon_port(port)}[{lo}:{width(port) if ln is None else ln}]'
+        if g is not None:
+            width(g[0])
+            s += f'?{canon_port(g[0])}.{g[1]}'
+        return s
+    for d in C.resp_in:
+        assert d in in0, f'no spec input {d}'
+    for o in C.obs0:
+        assert o in out0, f'no spec output {o}'
+    for p in C.resp:
+        width(p)
+    for p in ports_of_bool(C.kind) + [p for x in C.xfer for p in ports_of_bool(x)]:
+        width(p)
+    if C.asm is not None:
+        assert C.asm[0] in P.outs, f'no implementation output {C.asm[0]}'
+    print(f'chan {C.chan} resp={",".join(C.resp_in)} obs={",".join(C.obs0)}')
+    print(f'slot {C.chan} kind={canon_bool(C.kind)} resp={",".join(canon_port(p) for p in C.resp)} '
+          f'obs={";".join(word(w) for w in C.obs)}')
+    for x in C.xfer:
+        print(f'xfer {canon_bool(x)}')
+    print(f'maxstall {C.maxstall}')
+    print(f'period {C.period}')
+    print(f'asm {"-" if C.asm is None else ("" if C.asm[1] else "!") + C.asm[0]}')
+
+
+# ---- the product
 
 def ports_of(path, top):
     """(module source, [(dir, name, width)]) of the bound netlist's top module (a non-ANSI header,
@@ -96,103 +312,85 @@ class Ports:
         return r
 
 
-def port_expr(tok, P):
-    """(Verilog, width) for a .refmap port token over D1 (in:<n> -> the product input,
-    out:<n> -> D1's output wire, out:<n>@next -> D1's output one step later)."""
-    if tok.startswith('in:'):
-        n = tok[3:]
+def port_expr(p, P):
+    """(Verilog, width) for a parsed port over D1 (in:<n> -> the product input, out:<n> -> D1's
+    output wire, out:<n>@next -> D1's output one step later)."""
+    if p[0] == 'in':
+        n = p[1]
         assert n in P.ins, f'no implementation input {n}'
         return (P.prev(n, P.ins[n]) if P.late else n), P.ins[n]
-    if tok.startswith('out:'):
-        n = tok[4:]
-        nxt = n.endswith('@next')
-        n = n[:-len('@next')] if nxt else n
-        assert n in P.outs, f'no implementation output {n}'
-        if nxt:
-            assert P.late
-            return f'd1_{n}', P.outs[n]
-        return (P.prev(f'd1_{n}', P.outs[n]) if P.late else f'd1_{n}'), P.outs[n]
-    raise SystemExit(f'a port is out:<name>, out:<name>@next or in:<name>, got {tok}')
+    n, nxt = p[1], p[2]
+    assert n in P.outs, f'no implementation output {n}'
+    if nxt:
+        assert P.late
+        return f'd1_{n}', P.outs[n]
+    return (P.prev(f'd1_{n}', P.outs[n]) if P.late else f'd1_{n}'), P.outs[n]
 
 
-def bit_expr(s, P):
-    """A .refmap Boolean (`!`, `&`, `|`, parentheses; atoms <port>, <port>==<n>, 1, 0)."""
-    out, i = [], 0
-    while i < len(s):
-        c = s[i]
-        if c in '!&|()':
-            out.append({'!': '!', '&': ' && ', '|': ' || ', '(': '(', ')': ')'}[c]); i += 1; continue
-        j = i
-        while j < len(s) and s[j] not in '!&|()':
-            j += 1
-        atom = s[i:j]; i = j
-        if atom in ('1', '0'):
-            out.append("1'b" + atom); continue
-        if '==' in atom:
-            p, v = atom.split('==')
-            e, _ = port_expr(p, P)
-            out.append(f'({e} == {int(v)})'); continue
-        e, _ = port_expr(atom, P)
-        out.append(f'(|{e})')
-    return ''.join(out)
+def bit_expr(e, P):
+    """Verilog for a parsed Boolean: the operators and parentheses as written."""
+    t = e[0]
+    if t in ('tt', 'ff'):
+        return "1'b" + ('1' if t == 'tt' else '0')
+    if t == 'eq':
+        return f'({port_expr(e[1], P)[0]} == {e[2]})'
+    if t == 'nz':
+        return f'(|{port_expr(e[1], P)[0]})'
+    if t == 'not':
+        return '!' + bit_expr(e[1], P)
+    if t == 'paren':
+        return '(' + bit_expr(e[1], P) + ')'
+    return bit_expr(e[1], P) + (' && ' if t == 'and' else ' || ') + bit_expr(e[2], P)
 
 
-def obs_expr(tok, P):
-    body, guard = (tok.split('?') + [None])[:2]
-    if '[' in body:
-        p, sl = body.split('[', 1)
-        lo, ln = map(int, sl.rstrip(']').split(':'))
-    else:
-        p, lo, ln = body, 0, None
-    e, w = port_expr(p, P)
-    ln = w if ln is None else ln
-    v = f'{e}[{lo + ln - 1}:{lo}]' if (lo, ln) != (0, w) else e
+def obs_expr(w, P):
+    port, lo, ln, guard = w
+    e, wd = port_expr(port, P)
+    ln = wd if ln is None else ln
+    v = f'{e}[{lo + ln - 1}:{lo}]' if (lo, ln) != (0, wd) else e
     if guard:
-        gp, gb = guard.rsplit('.', 1)
-        ge, gw = port_expr(gp, P)
-        b = int(gb)
-        assert b < gw, f'guard {guard}: bit {b} of a {gw}-bit port'
+        ge, gw = port_expr(guard[0], P)
+        b = guard[1]
+        assert b < gw, f'guard {canon_port(guard[0])}.{b}: bit {b} of a {gw}-bit port'
         v = f'({ge if gw == 1 else f"{ge}[{b}]"} ? {v} : {ln}\'d0)'
     return v, ln
 
 
-def main(refmap, d0p, d1p, outp, top0='uc_b03', top1='uc_b03'):
+def main(refmap, d0p, d1p, outp, top0='uc_b03', top1='uc_b03', show=False):
     L = parse_refmap(refmap)
-    get = lambda k: [a for (kk, a) in L if kk == k]
-    chans, slots = get('chan'), get('slot')
-    assert len(chans) == 1 and len(slots) == 1, 'exactly one chan and one slot'
-    ch, sl = chans[0], slots[0]
-    xfers = [' '.join(a) for a in get('xfer')]
-    R = int((get('maxstall') or [['0']])[0][0])
-    P = int((get('period') or [['1']])[0][0])
-    asm = (get('asm') or [[None]])[0][0]
+    C = Contract(L)
+    R, P, asm = C.maxstall, C.period, C.asm
     s0, p0 = ports_of(d0p, top0)
     s1, p1 = ports_of(d1p, top1)
     ins = {n: w for (d, n, w) in p1 if d == 'input'}
     outs = {n: w for (d, n, w) in p1 if d == 'output'}
     in0 = {n: w for (d, n, w) in p0 if d == 'input'}
     out0 = {n: w for (d, n, w) in p0 if d == 'output'}
+    if show:
+        dump(C, Ports(ins, outs, C.late), in0, out0)
+        return
     clk = next((c for c in ('clk_i', 'clk') if c in ins), None)
     assert clk and clk in in0, 'both designs need the clock input clk_i (or clk)'
-    late = any('@next' in a for (k, args) in L if k in ('slot', 'xfer') for a in args)
+    late = C.late
     if late and P != 1:
         raise SystemExit(f'@next with period {P}: one step is not one clock there; read the channel '
                          'late through delay registers in D0\'s observers instead')
     PX = Ports(ins, outs, late)
-    resp_in, resp_w = lst(ch[1:], 'resp'), lst(sl[2:], 'resp')
+    resp_in, resp_w = C.resp_in, C.resp
     assert len(resp_in) == len(resp_w), 'chan resp: and slot resp: differ in length'
     d0_in = {n: f"{w}'d0" for n, w in in0.items()}
-    for di, tok in zip(resp_in, resp_w):
+    for di, p in zip(resp_in, resp_w):
         assert di in in0, f'no spec input {di}'
-        d0_in[di] = port_expr(tok, PX)[0]
-    obs0, obs1 = lst(ch[1:], 'obs'), lst(sl[2:], 'obs')
+        d0_in[di] = port_expr(p, PX)[0]
+    obs0, obs1 = C.obs0, C.obs
     assert len(obs0) == len(obs1), 'chan obs: and slot obs: differ in length'
-    fire = bit_expr(sl[1], PX)
+    fire = bit_expr(C.kind, PX)
     words = []
     for o0, w1 in zip(obs0, obs1):
         assert o0 in out0, f'no spec output {o0}'
         words.append((o0,) + obs_expr(w1, PX))
-    xf = ' || '.join(f'({bit_expr(x, PX)})' for x in xfers) or "1'b0"
+    xfers = C.xfer_txt
+    xf = ' || '.join(f'({bit_expr(x, PX)})' for x in C.xfer) or "1'b0"
     T = []
     T.append('// Generated by mk_product.py: the product of D0 and D1 for a bounded search.')
     T.append(re.sub(r'^module\s+' + top0 + r'\b', 'module d0_core', s0, count=1, flags=re.M))
@@ -239,7 +437,9 @@ def main(refmap, d0p, d1p, outp, top0='uc_b03', top1='uc_b03'):
     else:
         T.append(f'  always @(posedge {clk}) holds <= fire ? 16\'d0 : holds + 16\'d1;')
         T.append(f'  assign ok = (fire ? all_eq : !any_xfer) && (holds <= 16\'d{R});')
-    env = [f'd1_{asm}' if asm else "1'b1"]
+    if asm is not None:
+        assert asm[0] in outs, f'no implementation output {asm[0]}'
+    env = [(f'd1_{asm[0]}' if asm[1] else f'!d1_{asm[0]}') if asm else "1'b1"]
     if P == 2:
         allin = '{' + ', '.join(n for n in ins if n != clk) + '}'
         win = sum(w for n, w in ins.items() if n != clk)
@@ -261,4 +461,8 @@ def main(refmap, d0p, d1p, outp, top0='uc_b03', top1='uc_b03'):
 
 
 if __name__ == '__main__':
-    main(*sys.argv[1:7])
+    if sys.argv[1:2] == ['--dump']:
+        a = sys.argv[2:]
+        main(a[0], a[1], a[2], None, *a[3:5], show=True)
+    else:
+        main(*sys.argv[1:7])

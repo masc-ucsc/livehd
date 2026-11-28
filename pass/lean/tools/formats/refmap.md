@@ -85,6 +85,10 @@ reads 0 unless that bit is set.
 alignment of the spec match the implementation?) and `scripts/mk_product.py` (the product model
 for a bounded search) read them, with `impl`, `spec`, the one `chan`, the one `slot` and `asm`.
 They need no `alpha`, `init`, `group` or `inv`.
+Both read the `chan` and `slot` lines with the grammar above, the judge with the parser `refmap`
+uses (`HDLProof/Kit/RefMapFile.lean`); `mk_product.py --dump` prints how the product reads a file
+and `tests/refmap_contract_dump.lean` how the judge does, and `tests/judge_selftest.sh` checks that
+the two agree on its contracts.
 
 | directive | meaning |
 |---|---|
