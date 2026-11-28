@@ -2,7 +2,8 @@
 # run_tier.sh quick|full: the Lean tools' tests, by tier, in one run.
 #
 #   quick  every commit (about 30 min): .build-proj.sh (every module, DirectTests' guards, the axiom
-#          gate), the Lean-only checks (image_check: program images; engine_examples: every engine
+#          gate), a check that .olean-dev is a build of these sources (check_fresh.sh), the axiom
+#          gate's own controls, the Lean-only checks (image_check: program images; engine_examples: every engine
 #          on lgraph-sim's in-Lean examples, and the ir route's refusal of the malformed ones), the
 #          certificate format (dcert_version_check: the codec on every version; cert_admit_selftest.sh:
 #          every driver admits DCERT4 and refuses the rest, on certificates built from the committed
@@ -20,7 +21,10 @@
 #   FAIL <test> (<what failed>; log <file>)
 #   SKIP <test> (<why>)
 # The exit code is 0 only when every test passed. A SKIP is counted as a failure under STRICT=1,
-# which a CI sets, so nothing passes by not running.
+# which a CI sets, so nothing passes by not running. ROUTES must be unset (a tier runs every
+# route), and the sym and refmap self-tests must say they ran fp, ir and vc. Each self-test checks
+# that the build it runs on is a build of the current sources (check_fresh.sh), so BUILD=0 on a
+# stale .olean-dev fails.
 #
 # Environment:
 #   OUT          results folder (default generated/run_tier/<tier>)
@@ -36,6 +40,8 @@
 set -uo pipefail
 TIER="${1:-}"
 [[ "$TIER" == quick || "$TIER" == full ]] || { echo "usage: run_tier.sh quick|full" >&2; exit 2; }
+# a tier runs every route: ROUTES (which the sym and refmap self-tests read) would drop some
+[[ -z "${ROUTES:-}" ]] || { echo "run_tier: ROUTES is set ($ROUTES); a tier runs every route, unset it" >&2; exit 2; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 L="$ROOT/formal/lean"
@@ -86,6 +92,9 @@ if [[ "${BUILD:-1}" != 0 ]]; then
 else
   record build_proj SKIP 0 "BUILD=0: formal/lean/.olean-dev reused"
 fi
+# every test below runs on formal/lean/.olean-dev: it must be a build of these sources
+run_test fresh_build - bash "$SCRIPT_DIR/check_fresh.sh" "$ROOT"
+run_test axiom_gate_controls '^axiom_gate_controls: PASS' bash "$ROOT/pass/lean/specialization/tests/axiom_gate_controls.sh"
 for c in native_symbolic fp_symbolic mem_addr_check getmask_fast_check wide_fast_check residual_opt_check \
          residual_inc_check stim_tab_check ckpt_check image_check; do
   run_test "$c" '^PASS' lean_check "$c"
@@ -110,8 +119,11 @@ fi
 # ---- full
 if [[ "$TIER" == full ]]; then
   if [[ -x "$LHD" ]]; then
-    run_test sym_selftest '^PASS: sym_selftest' env LHD="$LHD" OUT="$OUT/out_sym" bash "$SCRIPT_DIR/sym_selftest.sh"
-    run_test refmap_selftest '^PASS: refmap_selftest' env LHD="$LHD" OUT="$OUT/out_refmap" bash "$SCRIPT_DIR/refmap_selftest.sh"
+    # each names the routes it ran: all three, or the test did less than it claims
+    run_test sym_selftest '^PASS: sym_selftest \(routes: fp ir vc\)$' env LHD="$LHD" OUT="$OUT/out_sym" \
+      bash "$SCRIPT_DIR/sym_selftest.sh"
+    run_test refmap_selftest '^PASS: refmap_selftest \(routes: fp ir vc\)$' env LHD="$LHD" OUT="$OUT/out_refmap" \
+      bash "$SCRIPT_DIR/refmap_selftest.sh"
     run_test run_selftest '^PASS run_selftest' env LHD="$LHD" OUT="$OUT/out_run" bash "$SCRIPT_DIR/run_selftest.sh"
     run_test ckpt_selftest '^PASS ckpt_selftest' env LHD="$LHD" OUT="$OUT/out_ckpt" bash "$SCRIPT_DIR/ckpt_selftest.sh"
     run_test lhd_ckpt_import_test '^PASS lhd_ckpt_import_test' env LHD="$LHD" OUT="$OUT/out_import" \

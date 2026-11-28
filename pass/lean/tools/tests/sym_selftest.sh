@@ -78,6 +78,9 @@ OUT="${OUT:-$ROOT/generated/master_port/sym_selftest}"
 LHD="${LHD:-$ROOT/bazel-bin/lhd/lhd}"
 SYM_NAT="${SYM_NAT:-}"
 [[ -x "$LHD" ]] || { echo "build //lhd:lhd first" >&2; exit 2; }
+# the drivers run on a build of these sources: .olean-dev (and the natives under SYM_NAT), or the test would pass on old code
+bash "$SCRIPT_DIR/check_fresh.sh" "$ROOT" || exit 1
+[[ -z "$SYM_NAT" ]] || bash "$SCRIPT_DIR/check_fresh.sh" "$ROOT" "$SYM_NAT" sym_verify sym_probe || exit 1
 rm -rf -- "$OUT"
 mkdir -p "$OUT"
 
@@ -528,4 +531,4 @@ probe 0 '^PROBE fp OK' "$C" sim:fp route:plain
 # control: fp out of fuel refuses (exit 4)
 probe 4 '^PROBE fp REFUSED ' "$MU" sim:fp sf:1 wf:1
 probe 2 '^usage: sym_probe'
-echo "PASS: sym_selftest"
+echo "PASS: sym_selftest (routes: $ROUTES)"

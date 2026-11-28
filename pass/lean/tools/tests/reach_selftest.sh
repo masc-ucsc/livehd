@@ -42,6 +42,9 @@ OUT="${OUT:-$ROOT/generated/master_port/reach_selftest}"
 LHD="${LHD:-$ROOT/bazel-bin/lhd/lhd}"
 CK_NAT="${CK_NAT:-}"
 [[ -x "$LHD" ]] || { echo "build //lhd:lhd first" >&2; exit 2; }
+# the drivers run on a build of these sources: .olean-dev (and the natives under CK_NAT), or the test would pass on old code
+bash "$SCRIPT_DIR/check_fresh.sh" "$ROOT" || exit 1
+[[ -z "$CK_NAT" ]] || bash "$SCRIPT_DIR/check_fresh.sh" "$ROOT" "$CK_NAT" ckpt_reach lhd_ckpt cert_trace sym_verify || exit 1
 rm -rf -- "$OUT"
 mkdir -p "$OUT"
 

@@ -72,6 +72,9 @@ OUT="${OUT:-$ROOT/generated/master_port/refmap_selftest}"
 LHD="${LHD:-$ROOT/bazel-bin/lhd/lhd}"
 SYM_NAT="${SYM_NAT:-}"
 [[ -x "$LHD" ]] || { echo "build //lhd:lhd first" >&2; exit 2; }
+# the drivers run on a build of these sources: .olean-dev (and the natives under SYM_NAT), or the test would pass on old code
+bash "$SCRIPT_DIR/check_fresh.sh" "$ROOT" || exit 1
+[[ -z "$SYM_NAT" ]] || bash "$SCRIPT_DIR/check_fresh.sh" "$ROOT" "$SYM_NAT" sym_refmap || exit 1
 rm -rf -- "$OUT"
 mkdir -p "$OUT"
 
@@ -618,4 +621,4 @@ ax_of() { tr '\n' ' ' < "$1" | grep -o "'$2' depends on axioms: \[[^]]*\]" | tr 
 [[ "$(ax_of "$T/ComposeAny.out" RefMapDemoAny.same_streams_mixed)" == "'RefMapDemoAny.same_streams_mixed' depends on axioms: [propext, Classical.choice, Quot.sound, RefMapF2.F2par.verdict._native.native_decide.ax_1_1, RefMapF2.F2two.verdict._native.native_decide.ax_1_1, RefMapF2.M2alt.verdict._native.native_decide.ax_1_1]" ]] \
   || { cat "$T/ComposeAny.out"; echo "FAIL: same_streams_mixed axioms"; exit 1; }
 echo "ok: composition across routes (vc, vc+fp, ir) and statement forms kernel-checked; axioms: standard + the verdicts' native_decide"
-echo "PASS: refmap_selftest"
+echo "PASS: refmap_selftest (routes: $ROUTES)"

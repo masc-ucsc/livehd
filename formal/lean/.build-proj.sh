@@ -134,4 +134,23 @@ done
 for m in "${TOOL_MODULES[@]}"; do
   build_one "$m" "$TOOLS" "$TOOLS/$m.lean" "$OUT/$m.olean"
 done
+# The sources this .olean-dev was built from, one `sha256sum` line each (paths from the repository
+# root), so a test can check that it runs on a build of the current sources
+# (pass/lean/tools/tests/check_fresh.sh). A full build writes the list; a build of named modules
+# updates their lines; a failed build removes it, since nothing then vouches for the .olean files.
+SRCS="$OUT/SOURCES.sha256"
+built=()
+for m in "${MODULES[@]}"; do built+=("formal/lean/LeanSemanticPrimitives/$m.lean"); done
+for m in "${TOOL_MODULES[@]}"; do built+=("pass/lean/tools/$m.lean"); done
+if [ $rc -ne 0 ]; then
+  rm -f "$SRCS"
+elif [ ${#built[@]} -gt 0 ]; then
+  new=$(cd ../.. && sha256sum "${built[@]}") || { rm -f "$SRCS"; exit 1; }
+  if [ $# -eq 0 ]; then
+    echo "$new" > "$SRCS"
+  elif [ -f "$SRCS" ]; then
+    { awk 'NR == FNR { skip[$0] = 1; next } !(substr($0, 67) in skip)' <(printf '%s\n' "${built[@]}") "$SRCS"
+      echo "$new"; } > "$SRCS.tmp" && mv -f "$SRCS.tmp" "$SRCS"
+  fi
+fi
 exit $rc

@@ -161,4 +161,18 @@ done
 wait
 [ -z "$(ls -A "$FAILS")" ] || { echo "failed: $(ls "$FAILS" | tr '\n' ' ')" >&2; exit 1; }
 echo "$WANT" > "$STAMP"
+# The sources each probe was built from (every module linked into it, and its own source), one
+# `sha256sum` line each, paths from the repository root: $NAT/<probe>.sources.sha256, so a test
+# can check that a native runs a build of the current sources (pass/lean/tools/tests/check_fresh.sh).
+# Per probe: a later build-opt.sh for other probes relinks only those.
+srcs=()
+for m in "${MODULES[@]}"; do srcs+=("formal/lean/LeanSemanticPrimitives/$m.lean"); done
+for m in "${TOOL_MODULES[@]}"; do srcs+=("pass/lean/tools/$m.lean"); done
+for PROBE in "$@"; do
+  pb=$(basename "$PROBE" .lean)
+  rel=$(realpath --relative-to=../.. "$PROBE")
+  (cd ../.. && sha256sum "${srcs[@]}" "$rel") > "$NAT/$pb.sources.sha256.tmp" \
+    && mv -f "$NAT/$pb.sources.sha256.tmp" "$NAT/$pb.sources.sha256" \
+    || { echo "could not hash the sources of $pb" >&2; rm -f "$NAT/$pb.sources.sha256"*; exit 1; }
+done
 echo "done in $((SECONDS - T0)) s"
