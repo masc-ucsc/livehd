@@ -20,7 +20,8 @@ observed words), `asm` (the environment's protocol) and three lines the other mo
 and `period <P> [<k>]` (random runs only: a P-slot certificate's inputs change only at steps n
 with n % P = k, default k = 1 when P > 1, the real clock's input timing; default P = 1).
 Inputs: a `trace:` TSV (`cycle` then one column per implementation input, as `sym_verify` writes
-for a counterexample; `#` lines skipped; a missing input reads 0), or `random:` runs (1-bit
+for a counterexample; `#` lines skipped; a missing input reads 0; a column that names no input is
+refused, exit 2), or `random:` runs (1-bit
 inputs fair coins; wider inputs drawn from 4 values per input, 0 always one of them, so addresses
 repeat and configuration words often take their default; a line
 `drive <input> <v0> <n> <v1>` fixes an input of random runs to v0 before step n and v1 from step
@@ -746,6 +747,9 @@ def readTrace (path : String) (NI : Names) (inW : List Nat) : IO (Except String 
   let rows := ((← IO.FS.readFile path).splitOn "\n").filter fun l => !l.isEmpty && !l.startsWith "#"
   let some hdr := rows.head? | return .error s!"{path}: empty"
   let cols := (hdr.splitOn "\t").drop 1
+  -- every column names an implementation input: a misspelled one would read as all-zero input
+  if let some nm := cols.find? fun nm => (NI.ins[nm]?).isNone then
+    return .error s!"{path}: column {repr nm}: no implementation input {repr nm}"
   let idx := cols.map fun nm => NI.ins[nm]?
   let mut out : Array RuntimeInput := #[]
   for r in rows.drop 1 do

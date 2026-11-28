@@ -46,6 +46,14 @@ set -euo pipefail
 #                                           trace's end (random inputs keeping asm): VALUE
 #                                           DIFFERENCE (the trace alone cannot tell it from a delay)
 #     product, @next with period 2          refused
+#   options                                 sim:ir with check:7 (MATCH FOUND, the cross-check
+#                                           named; NO MATCH), a seed and label: (the report and
+#                                           the run's trace named), certificates with memories
+#                                           (ramS: MATCH FOUND on fp by default; ramB, storing
+#                                           wd + 1 when wd[1:0] = 3: NO MATCH), a full slice
+#                                           (MATCH FOUND, and the product's search finds none); a
+#                                           trace column that names no input refused (exit 2)
+#   exit codes                              every verdict comes with its own exit code
 #   one contract                            the judge (Kit/RefMapFile) and mk_product.py read every
 #                                           contract here, and one with every corner of the
 #                                           grammar, identically (both print a canonical form)
@@ -170,7 +178,18 @@ cert() { # <design> <top> <src> : compile [-> single_edge] -> certificate in <de
     mv "$OUT/${d}_lean/${top}_io.json" "$OUT/${d}_lean/${d}_io.json"
   fi
 }
-for d in accS acc2 acc2b pv0 pv1 pv1b rS rD rDb; do cert "$d" "$d" "$OUT/$d.v"; done
+# a RAM, and the same RAM storing wd + 1 when wd[1:0] = 3: certificates with memories, which the
+# judge runs on fp
+cat > "$OUT/ramS.v" <<'EOF'
+module ramS(clk, we, wa, wd, ra, ok, rd_o);
+  input clk; input we; input [1:0] wa; input [7:0] wd; input [1:0] ra; output ok; output [7:0] rd_o;
+  reg [7:0] m [0:3];
+  always @(posedge clk) if (we) m[wa] <= wd;
+  assign ok = 1'b1; assign rd_o = m[ra];
+endmodule
+EOF
+sed 's/module ramS/module ramB/; s/m\[wa\] <= wd;/m[wa] <= wd + {7'"'"'d0, wd[0] \& wd[1]};/' "$OUT/ramS.v" > "$OUT/ramB.v"
+for d in accS acc2 acc2b pv0 pv1 pv1b rS rD rDb ramS ramB; do cert "$d" "$d" "$OUT/$d.v"; done
 # the falling-edge capture makes pv* two slots per clock: single_edge then adds its 1-bit phase
 # divider, the flop `single_edge_phase` (created only when P > 1), which the certificate's
 # _io.json lists; accS (one edge, P = 1) gets none
@@ -214,6 +233,11 @@ r_map r_same_env rD v,yg,req 'out:v,out:y?out:v.0,out:req' 'asm env_ok'
 r_map r_dead    rD  v,z,req  'out:v@next,out:y@next?out:v@next.1,out:req' 'xfer out:v@next'
 r_map r_blind   rD  v,req    'out:v@next,out:req' 'xfer out:v@next'
 r_map r_quiet   rD  v,yg,req "$LATE" 'xfer out:v@next' 'drive vin 0 0 0'
+r_map r_slice   rD  v,yg,req 'out:v@next,out:y@next[0:8]?out:v@next.0,out:req' 'xfer out:v@next'
+for v in ramS ramB; do
+  printf '%s\n' "impl ${v}_lean/$v.dcert" "spec ramS_lean/ramS.dcert" "chan step allow:ok resp:we,wa,wd,ra obs:rd_o" \
+    "slot step 1 resp:in:we,in:wa,in:wd,in:ra obs:out:rd_o" "maxstall 0" > "$OUT/m_$v.refmap"
+done
 
 drv() { # <driver> args...
   local d=$1; shift
@@ -233,7 +257,7 @@ contracts=()
 : > "$OUT/contracts_py.txt"
 for e in acc2:accS:acc2 acc2b:accS:acc2b acc2_r0:accS:acc2 acc2_slot:accS:acc2 pv1:pv0:pv1 pv1b:pv0:pv1b \
          r_same:rS:rD r_late:rS:rD rb_late:rS:rDb r_lint:rS:rD r_lint2:rS:rD r_env:rS:rD r_same_env:rS:rD \
-         r_dead:rS:rD r_blind:rS:rD r_quiet:rS:rD grammar:rS:rD; do
+         r_dead:rS:rD r_blind:rS:rD r_quiet:rS:rD r_slice:rS:rD m_ramS:ramS:ramS m_ramB:ramS:ramB grammar:rS:rD; do
   IFS=: read -r rm d0 d1 <<< "$e"
   contracts+=("$OUT/$rm.refmap")
   echo "== $OUT/$rm.refmap" >> "$OUT/contracts_py.txt"
@@ -248,14 +272,27 @@ diff <(canon "$OUT/contracts_lean.txt") <(canon "$OUT/contracts_py.txt") > "$OUT
   || { head -20 "$OUT/contracts.diff"; echo "FAIL: the judge and mk_product.py read a contract differently"; exit 1; }
 echo "ok: the judge and mk_product.py read the ${#contracts[@]} contracts identically"
 N=0
-judge() { # <expect> <refmap> args...
+rc_of() { # the exit code a judge or product-search verdict promises (sym_refmap.lean, sym_verify.lean)
+  case "$1" in
+    "MATCH FOUND"|"CONTROLS PASS") echo 0 ;;
+    "NO MATCH"|"CONTROLS FAIL"|"COUNTEREXAMPLE") echo 1 ;;
+    "ENVIRONMENT VIOLATED") echo 3 ;;
+    "REFUSED") echo 4 ;;
+    "ROUTE DISAGREES") echo 5 ;;
+    "NO COUNTEREXAMPLE UP TO") echo 8 ;;
+    *) echo x ;;
+  esac
+}
+judge() { # <expect> <refmap> args...: the last RESULT is exactly <expect>, with its exit code
   local expect=$1 rm=$2; shift 2
-  local log="$OUT/judge_$(( ++N )).log"
-  drv sym_refmap judge "$OUT/$rm.refmap" "$@" "work:$OUT/jw_$N" > "$log" 2>&1 || true
+  local log="$OUT/judge_$(( ++N )).log" rc
+  drv sym_refmap judge "$OUT/$rm.refmap" "$@" "work:$OUT/jw_$N" > "$log" 2>&1 && rc=0 || rc=$?
   local got
   got=$(grep -o 'RESULT: [A-Z -]*' "$log" | tail -1 | sed 's/RESULT: //; s/[ -]*$//')
-  if [[ "$got" != "$expect" ]]; then tail -8 "$log"; echo "FAIL: judge $rm $* -- expected $expect, got '$got'"; exit 1; fi
-  echo "ok: judge $rm $* -> $got"
+  if [[ "$got" != "$expect" || "$rc" != "$(rc_of "$expect")" ]]; then
+    tail -8 "$log"; echo "FAIL: judge $rm $* -- expected '$expect' exit $(rc_of "$expect"), got '$got' exit $rc"; exit 1
+  fi
+  echo "ok: judge $rm $* -> $got (exit $rc)"
 }
 judge "MATCH FOUND" acc2      random:40,8
 grep -q 'route sim:vc (the default)' "$OUT/judge_$N.log" || { tail -4 "$OUT/judge_$N.log"; echo "FAIL: the judge's default route is not vc"; exit 1; }
@@ -334,17 +371,41 @@ printf 'cycle\tvin\tx\n0\t0\t0\n1\t0\t5\n' > "$OUT/quiet.tsv"
 judge "CONTROLS PASS" r_late  "trace:$OUT/quiet.tsv" control:pos delay:v=1,y=1
 has 'transactions on the positive control.s runs, per channel: out:v@next.0 0' "a control on a trace reports its counts and does not fail on them"
 
+# options: sim:ir with check: (the cross-check against fp), a seed, label: (the report and the
+# trace files), certificates with memories (fp by default), a slice
+judge "MATCH FOUND" acc2      random:40,8 sim:ir check:7
+has 'route ir built in [0-9]+ ms; cross-checked against fp on the first 7 steps' "sim:ir with check:7"
+judge "NO MATCH"    acc2b     random:40,8 sim:ir
+judge "NO MATCH"    acc2b     random:40,2,5 label:seeded
+has '\[random seed 5\]' "a seed names the first run"
+[[ -s "$OUT/jw_$N/seeded.txt" ]] && ls "$OUT/jw_$N"/seeded_run*.tsv > /dev/null 2>&1 \
+  || { ls "$OUT/jw_$N"; echo "FAIL: label: names neither the report nor the trace"; exit 1; }
+echo "ok:   label: names the report and the run's trace"
+judge "MATCH FOUND" m_ramS    random:40,8
+has 'route sim:fp \(a certificate has memories' "a certificate with memories runs on fp"
+judge "NO MATCH"    m_ramB    random:40,8
+judge "MATCH FOUND" r_slice   random:40,8
+# a trace column that names no implementation input is refused, not read as all-zero
+printf 'cycle\tvin\tX_TYPO\n0\t1\t3\n' > "$OUT/typo.tsv"
+drv sym_refmap judge "$OUT/r_same.refmap" "trace:$OUT/typo.tsv" "work:$OUT/jw_typo" > "$OUT/judge_typo.log" 2>&1 && rc=0 || rc=$?
+[[ $rc == 2 ]] && grep -q 'no implementation input "X_TYPO"' "$OUT/judge_typo.log" \
+  || { tail -4 "$OUT/judge_typo.log"; echo "FAIL: a misspelled trace column was not refused (exit $rc)"; exit 1; }
+echo "ok: judge: a trace column that names no input -> refused, exit 2"
+
 product() { # <name> <refmap> <d0> <d1> <k list> <expect>
   local nm=$1 rm=$2 d0=$3 d1=$4 ks=$5 expect=$6
   "$PY" "$ROOT/pass/lean/tools/scripts/mk_product.py" "$OUT/$rm.refmap" "$OUT/$d0.v" "$OUT/$d1.v" \
     "$OUT/$nm.sv" "$d0" "$d1" > "$OUT/$nm.gen.log" 2>&1 || { cat "$OUT/$nm.gen.log"; echo "FAIL: mk_product $nm"; exit 1; }
   cert "$nm" prod "$OUT/$nm.sv"
   local log="$OUT/$nm.search.log"
-  drv sym_verify "$OUT/${nm}_lean/$nm.dcert" ok asm:env_ok base "k:$ks" "work:$OUT/${nm}_sw2" > "$log" 2>&1 || true
+  local rc
+  drv sym_verify "$OUT/${nm}_lean/$nm.dcert" ok asm:env_ok base "k:$ks" "work:$OUT/${nm}_sw2" > "$log" 2>&1 && rc=0 || rc=$?
   local got
   got=$(grep -o 'RESULT: [A-Z -]*' "$log" | tail -1 | sed 's/RESULT: //; s/[ -]*$//')
-  if [[ "$got" != "$expect" ]]; then tail -8 "$log"; echo "FAIL: product search $nm -- expected $expect, got '$got'"; exit 1; fi
-  echo "ok: product search $nm -> $got"
+  if [[ "$got" != "$expect" || "$rc" != "$(rc_of "$expect")" ]]; then
+    tail -8 "$log"; echo "FAIL: product search $nm -- expected '$expect' exit $(rc_of "$expect"), got '$got' exit $rc"; exit 1
+  fi
+  echo "ok: product search $nm -> $got (exit $rc)"
 }
 product prod_acc2b acc2b accS acc2b 2,4,8 "COUNTEREXAMPLE"
 judge "NO MATCH" acc2b "trace:$(ls "$OUT"/prod_acc2b_sw2/*cex_inputs.tsv | head -1)"
@@ -360,6 +421,8 @@ has 'the trace ends at step [0-9]+: the classification reads on past it with ran
 # @next: the product runs D0 one step behind; a counterexample at cycle m is the judge's step m-1
 product prod_r_late r_late rS rD 2,4,8 "NO COUNTEREXAMPLE UP TO"
 grep -q 'D0 one step behind' "$OUT/prod_r_late.gen.log" || { cat "$OUT/prod_r_late.gen.log"; echo "FAIL: @next product mode not reported"; exit 1; }
+# the product reads a slice as the judge does
+product prod_r_slice r_slice rS rD 2,4,8 "NO COUNTEREXAMPLE UP TO"
 product prod_rb_late rb_late rS rDb 2,4,8 "COUNTEREXAMPLE"
 m=$(grep -o 'fails the property at cycle [0-9]*' "$OUT/prod_rb_late.search.log" | tail -1 | grep -o '[0-9]*$' || true)
 [[ -n "$m" && "$m" -ge 1 ]] || { tail -4 "$OUT/prod_rb_late.search.log"; echo "FAIL: no counterexample cycle >= 1"; exit 1; }
