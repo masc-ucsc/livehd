@@ -68,7 +68,8 @@ Warnings when the file is read: an observed word whose payload and guard are rea
 cycles, and an `xfer` that reads an output at a cycle the slot never observes it at.
 
 The simulator route (`sim:`), each with its theorem relating it to `interpretDesign`:
-`fp` the projection's specialized residual (`runMemSim`, `runMemSim_correct`); `ir` and `vc`
+`fp` the projection's specialized residual, the one the proofs' fp step uses
+(`Kit.SymRoute.fpResidual`; `runMemSim`, `runMemSim_correct`); `ir` and `vc`
 are the engines `HDLProof/Run/Engine`'s `EngineSelector` builds with `inc:off`, whose state is
 the runtime state itself, since the search steps from many states: `ir` the post-lowering IR
 stepped directly (the staged step after one `checkDesign`, `EngineSelector_ir_sound`), `vc` the
@@ -312,14 +313,6 @@ def symRouteOf (sim : String) (D : DesignCert) (sf wf : Nat) : IO (Except String
   match ← IO.lazyPure (fun _ => mkSymRoute sim "fused" sf wf D) with
   | .ok rt => return .ok (rt.S, rt.fuel + 16, rt.name)
   | .error e => return .error e
-
-def specialize (D : DesignCert) (sf wf : Nat) : IO (Except String (Program × Nat)) := do
-  let res ← IO.lazyPure (fun _ => MemFused.projectMemFDesignAt sf wf D)
-  match res with
-  | .error e => return .error s!"specialization failed: {repr e}"
-  | .ok R => match Hw.checkResidual R with
-    | some b => return .ok (R, b + 16)
-    | none => return .error "checkResidual rejected the residual"
 
 /-! ## Theorem files -/
 
@@ -1493,10 +1486,11 @@ def judgeMain (path : String) (rest : List String) : IO UInt32 := do
   unless HwMem.admitsWB DS && HwMem.admitsWB DI do
     say "  RESULT: REFUSED (the memory route does not admit a certificate)"; return 4
   let t0 ← IO.monoMsNow
-  let (RS, _) ← match ← specialize DS sf wf with
-    | .ok x => pure x | .error e => do say s!"  RESULT: REFUSED (spec: {e})"; return 4
-  let (RI, _) ← match ← specialize DI sf wf with
-    | .ok x => pure x | .error e => do say s!"  RESULT: REFUSED (implementation: {e})"; return 4
+  -- fp's residual of each design, as the proofs' symbolic step builds it (Kit.SymRoute)
+  let RS ← match ← IO.lazyPure (fun _ => fpResidual sf wf DS) with
+    | .ok R => pure R | .error e => do say s!"  RESULT: REFUSED (spec: {e})"; return 4
+  let RI ← match ← IO.lazyPure (fun _ => fpResidual sf wf DI) with
+    | .ok R => pure R | .error e => do say s!"  RESULT: REFUSED (implementation: {e})"; return 4
   let some simS := mkMemSimOfW DS RS | say "  RESULT: REFUSED (no simulator for the spec)"; return 4
   let some simI := mkMemSimOfW DI RI | say "  RESULT: REFUSED (no simulator for the implementation)"; return 4
   let t1 ← IO.monoMsNow

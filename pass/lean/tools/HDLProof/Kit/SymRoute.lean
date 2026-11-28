@@ -72,6 +72,17 @@ def mkSymRoute (sim route : String) (sf wf : Nat) (D : DesignCert) : Except Stri
                        name := s!"vc (compileDesign, {R.bindings.size} bindings)" }
   | s => .error s!"sim:{s} is not one of fp | ir | vc"
 
+/-- fp's residual of `D`: the fused variant, built by `mkSymRoute "fp"` exactly as the symbolic
+step of `sym_verify` and `sym_refmap` builds it (`projectMemFDesignAt`, then `Hw.checkResidual`).
+The judge steps its designs concretely on this residual (`runMemSim`), so the judge's fp step and
+the proofs' fp step come from one residual. -/
+def fpResidual (sf wf : Nat) (D : DesignCert) : Except String Program :=
+  match mkSymRoute "fp" "fused" sf wf D with
+  | .ok rt => match rt.fp with
+    | some R => .ok R
+    | none => .error "the fp route built no residual"
+  | .error e => .error e
+
 /-- An fp residual for concrete replay: the route's own, else specialized now
 (fuel `sf`, `wf`); the error says why fp could not specialize `D`. -/
 def SymRoute.fpProgramE (rt : SymRoute) (sf wf : Nat) (D : DesignCert) : Except String Program :=
