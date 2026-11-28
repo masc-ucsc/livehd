@@ -18,7 +18,9 @@ generator, so every engine sees the same ticks) three ways:
   what it stands for (compaction; vc keeps its environment).
 Each run's outputs must be `ref`'s, cycle by cycle, and its final checkpoint `ref`'s, byte for
 byte (fp's state agrees with `ref`'s below every memory's depth, which is all a checkpoint
-reads). A route the certificate is refused on is reported, not failed. `Knobs.parse` must map
+reads). Every combination must build on every certificate given (a route that is not built is a
+failure, so none drops out silently), and the run count must be combinations x 4 modes x
+certificates. `Knobs.parse` must map
 the drivers' options as the module header's table says. A control: `ref` with every clock
 firing on every cycle must differ from `ref` on at least one certificate, or the ticks do not
 exercise the edges and the comparison proves little.
@@ -159,7 +161,10 @@ def main (args : List String) : IO UInt32 := do
           | .error e => do IO.println s!"FAIL {cert}: ref: {e}"; return 1
       for (name, k) in combos do
         match EngineSelector D k with
-        | .error e => IO.println s!"note {cert}: {name}: not built: {e.message}"
+        | .error e =>
+          -- every route and knob combination must build on these certificates: a route that is
+          -- not built would otherwise drop out of the run count and the run still pass
+          IO.println s!"FAIL {cert}: {name}: not built: {e.message}"; fails := fails + 1
         | .ok b =>
           for m in [Mode.plain, .twice, .peeked, .reloaded] do
             runs := runs + 1
@@ -188,6 +193,11 @@ def main (args : List String) : IO UInt32 := do
     return 2
   unless controlHit do
     IO.println "FAIL control: firing every clock changed nothing on any certificate"
+    fails := fails + 1
+  -- every combination, in every mode, on every certificate
+  let want := combos.length * 4 * (args.length - 1)
+  unless runs == want do
+    IO.println s!"FAIL engine: {runs} runs, expected {want} ({combos.length} combinations x 4 modes x {args.length - 1} certificates)"
     fails := fails + 1
   if fails == 0 then
     IO.println s!"PASS engine: {runs} runs"
