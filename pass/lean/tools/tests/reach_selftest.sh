@@ -24,6 +24,13 @@ set -euo pipefail
 #   unreach the invariant excludes a checkpoint (sym_verify unreach:, not_reachable_of_verdict): c = 3
 #          is UNREACHABLE from all-zero ("c is even"), c = 4 from power-on ("c is odd"), both
 #          theorem files prove `unreachable`; c = 4 from all-zero is not concluded
+#   routes the ram and even witnesses give the same REACHABLE and NOT MATCHED on route:vc, route:ref,
+#          ir:raw, and vc with opt:off, inc:off, inc:scan, mem:fun; a checkpoint cert_trace wrote
+#          with edges:third is REACHABLE with edges:third; theorem files from a checkpoint
+#          (init:ckpt:) and from all-zero (init:zero) compile; route:fp and an unknown option are
+#          refused (exit 2), a start checkpoint of another design too (exit 4)
+#   unreach side conditions: not concluded with an output assumption (asm:), nor for another
+#          design's checkpoint
 #
 # CK_NAT=<dir with native ckpt_reach, lhd_ckpt, cert_trace and sym_verify (with cadical beside
 # it)> uses them; otherwise the drivers run interpreted against formal/lean/.olean-dev (build it
@@ -141,6 +148,29 @@ handmade "$OUT/ram7.ckpt" "$OUT/ram7w.ckpt" '/^mem /{h=NR} NR==h+1 && h{$2="ee"}
 expect 1 "RESULT: NOT MATCHED: memory 0 word 0x3 is 0x5a after the witness, the checkpoint says 0xee" \
   reach check "$RAM" "$OUT/ram7w.ckpt" "$OUT/ram.stim"
 expect 0 "RESULT: REACHABLE (cycle 14, 7 steps" reach check "$RAM" "$OUT/ram14.ckpt" "$OUT/ram.stim" init:ckpt:"$OUT/ram7.ckpt"
+# every route and knob of the engine gives the same answers as the default (ir, staged)
+for r in route:vc route:ref ir:raw "route:vc opt:off" "route:vc inc:off" "route:vc inc:scan" "route:vc mem:fun"; do
+  rn=$(echo "$r" | grep -o 'route:[a-z]*' | sed 's/route://' || true); rn=${rn:-ir}
+  # shellcheck disable=SC2086
+  expect 0 "checkReachOn_sound, route $rn)" reach check "$RAM" "$OUT/ram7.ckpt" "$OUT/ram.stim" $r
+  # shellcheck disable=SC2086
+  expect 1 "RESULT: NOT MATCHED: memory 0 word 0x3 is 0x5a after the witness, the checkpoint says 0xee" \
+    reach check "$RAM" "$OUT/ram7w.ckpt" "$OUT/ram.stim" $r
+  # shellcheck disable=SC2086
+  expect 0 "RESULT: REACHABLE (cycle 3, 3 steps" reach check "$EVEN" "$OUT/even6at3.ckpt" "$OUT/en1.stim" $r
+done
+# edges: a checkpoint cert_trace wrote with edges:third is reached with edges:third
+expect 0 "" ct "$RAM" 9 "$OUT/ram.stim" edges:third ckpt-out:"$OUT/ram9t.ckpt"
+expect 0 "RESULT: REACHABLE (cycle 9, 9 steps" reach check "$RAM" "$OUT/ram9t.ckpt" "$OUT/ram.stim" edges:third
+# a theorem file from another checkpoint (init:ckpt:)
+expect 0 "RESULT: REACHABLE (cycle 14, 7 steps" reach check "$RAM" "$OUT/ram14.ckpt" "$OUT/ram.stim" \
+  init:ckpt:"$OUT/ram7.ckpt" emit:"$OUT/RamFrom7.lean"
+# refusals: fp's state agrees only below each memory's depth; an unknown option; a start
+# checkpoint of another design
+expect 2 "route:fp: ckpt_reach decides" reach check "$EVEN" "$OUT/even6at3.ckpt" "$OUT/en1.stim" route:fp
+expect 2 "unknown option bogus:1" reach check "$EVEN" "$OUT/even6at3.ckpt" "$OUT/en1.stim" bogus:1
+expect 4 "RESULT: CHECKPOINT REFUSED (start)" reach check "$RAM" "$OUT/ram14.ckpt" "$OUT/ram.stim" \
+  init:ckpt:"$OUT/even6at3.ckpt"
 
 # errors
 expect 4 "RESULT: CHECKPOINT REFUSED" reach check "$RAM" "$OUT/even6at3.ckpt" "$OUT/ram.stim"
@@ -164,7 +194,8 @@ expect 2 "" sv "$EP" odd_o k:1 init:ckpt:"$OUT/ram7.ckpt" work:"$OUT/w7"
 # the start is part of the question: c = 4 at cycle 2 is reachable from all-zero, and the same
 # witness misses it from power-on (where c stays odd, PROVED above)
 handmade "$OUT/ep0.ckpt" "$OUT/ep4c2.ckpt" '/^cycle /{print "cycle 2"; next} /^flops /{f=NR} NR==f+1 && f{$2="4"} 1'
-expect 0 "RESULT: REACHABLE (cycle 2, 2 steps" reach check "$EP" "$OUT/ep4c2.ckpt" "$OUT/en1.stim" init:zero
+expect 0 "RESULT: REACHABLE (cycle 2, 2 steps" reach check "$EP" "$OUT/ep4c2.ckpt" "$OUT/en1.stim" init:zero \
+  emit:"$OUT/EpZero.lean"
 expect 1 "RESULT: NOT MATCHED: flop 0 is 0x5" reach check "$EP" "$OUT/ep4c2.ckpt" "$OUT/en1.stim" init:reset
 # unreach: the proved invariant excludes a checkpoint (not_reachable_of_verdict)
 expect 0 "UNREACHABLE: $OUT/ep3.ckpt -- not_reachable_of_verdict: no run from the all-zero state" \
@@ -174,6 +205,15 @@ expect 0 "UNREACHABLE: $OUT/ep4.ckpt -- not_reachable_of_verdict: no run from th
 expect 0 "UNREACHABLE NOT CONCLUDED ($OUT/ep4.ckpt): the checkpoint's own state satisfies the property" \
   sv "$EP" '!odd_o' k:1 unreach:"$OUT/ep4.ckpt" work:"$OUT/w10"
 grep -q '^  UNREACHABLE:' "$LOG" && { cat "$LOG"; echo "FAIL: a reachable checkpoint was called unreachable"; exit 1; }
+# unreach: concludes nothing without its side conditions: a property with an output assumption
+# (c stays even from all-zero, so the property is PROVED with or without c != 5), and a
+# checkpoint of another design
+expect 0 "UNREACHABLE NOT CONCLUDED ($OUT/ep3.ckpt): the property has an output assumption (asm:); unreach: needs none" \
+  sv "$EP" '!odd_o' 'asm:!is5_o' k:1 unreach:"$OUT/ep3.ckpt" work:"$OUT/w11"
+grep -q '^  UNREACHABLE:' "$LOG" && { cat "$LOG"; echo "FAIL: concluded with an output assumption"; exit 1; }
+expect 0 "UNREACHABLE NOT CONCLUDED ($OUT/ram7.ckpt): the checkpoint does not validate" \
+  sv "$EP" '!odd_o' k:1 unreach:"$OUT/ram7.ckpt" work:"$OUT/w12"
+grep -q '^  UNREACHABLE:' "$LOG" && { cat "$LOG"; echo "FAIL: concluded on another design's checkpoint"; exit 1; }
 for f in UnreachC3 UnreachC4; do
   (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean "$OUT/$f.lean") > "$OUT/$f.log" 2>&1 \
     || { cat "$OUT/$f.log"; echo "FAIL: $f.lean does not compile"; exit 1; }
@@ -184,6 +224,13 @@ for f in EvenC4 OddReset; do
   (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean "$OUT/$f.lean") > "$OUT/$f.log" 2>&1 \
     || { cat "$OUT/$f.log"; echo "FAIL: $f.lean does not compile"; exit 1; }
   grep -q "'SymF2.$f.invariant' depends on axioms" "$OUT/$f.log" && ! grep -q sorryAx "$OUT/$f.log" \
+    || { cat "$OUT/$f.log"; echo "FAIL: $f.lean axioms"; exit 1; }
+done
+# ckpt_reach's theorem files from another checkpoint (init:ckpt:) and from all-zero (init:zero)
+for f in RamFrom7 EpZero; do
+  (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean "$OUT/$f.lean") > "$OUT/$f.log" 2>&1 \
+    || { cat "$OUT/$f.log"; echo "FAIL: $f.lean does not compile"; exit 1; }
+  grep -q "'CkptReach.$f.reachable' depends on axioms" "$OUT/$f.log" && ! grep -q sorryAx "$OUT/$f.log" \
     || { cat "$OUT/$f.log"; echo "FAIL: $f.lean axioms"; exit 1; }
 done
 

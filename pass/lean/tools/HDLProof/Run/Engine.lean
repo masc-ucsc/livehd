@@ -350,5 +350,7 @@ end HDLProof
 
 #audit_axioms HDLProof.Run.EngineSelector_ir_sound
 #audit_axioms HDLProof.Run.EngineSelector_vc_sound
+-- the ref route: ckpt_reach route:ref and cert_run route:ref rest on it
+#audit_axioms HDLProof.Run.EngineSelector_ref_sound
 #audit_axioms HDLProof.Run.EngineSelector_fp_agree
 #audit_axioms HDLProof.Run.EngineSelector_runCycles_fp
