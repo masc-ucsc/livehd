@@ -6,8 +6,9 @@
                   [--only <regex>] [--sizes <census.tsv>]
 
 `census_inputs.txt` lists `family=<path>/<Top>_Lgraph.lean` lines (the census list); the
-certificate is the `<Top>.dcert` beside the (symlink-resolved) `_Lgraph.lean`. Each probe runs
-under a cgroup memory cap and a timeout, strictly one at a time, and appends one row to
+certificate is the `<Top>.dcert` beside the (symlink-resolved) `_Lgraph.lean`. A line may also
+name the certificate itself, `family=<path>/<Top>.dcert` (a converted copy kept elsewhere). Each
+probe runs under a memory cap and a timeout, strictly one at a time, and appends one row to
 `<out>/survey.tsv` (rows already there are skipped, so a stopped survey resumes):
 
     family block nodes route status class seconds peak_mb defs diag message
@@ -21,8 +22,14 @@ row is kept in `<out>/logs/`.
 
 `--sizes` is a census TSV with `family`, `block` and `nodes` columns: certificates run smallest
 first, and fp skips any above `--fp-max-nodes`. Without it every certificate counts as 0 nodes.
+
+The cap is `memcap.py`'s (next to this script): a systemd user scope (`MemoryMax`, no swap) where
+the user's manager answers, from cron too; otherwise a watchdog on the probe's resident memory.
+The way used is printed first and written to `<out>/memcap.txt`.
 """
 import argparse, csv, os, re, subprocess, time
+
+import memcap
 
 TRACKED = ("mulI", "divI", "modI", "eqV", "mkCtorP", "ctorTagP", "ctorFieldsP", "bvBit", "bvGetMask")
 HDR = ["family", "block", "nodes", "route", "status", "class", "seconds", "peak_mb", "defs", "diag", "message"]
@@ -35,9 +42,12 @@ def certs(inputs):
         if not line or line.startswith("#"):
             continue
         fam, path = line.split("=", 1)
-        real = os.path.realpath(path)
-        top = os.path.basename(real).replace("_Lgraph.lean", "")
-        dcert = os.path.join(os.path.dirname(real), top + ".dcert")
+        if path.endswith(".dcert"):
+            top, dcert = os.path.basename(path)[:-len(".dcert")], path
+        else:
+            real = os.path.realpath(path)
+            top = os.path.basename(real).replace("_Lgraph.lean", "")
+            dcert = os.path.join(os.path.dirname(real), top + ".dcert")
         seen[(fam, top)] = dcert          # a repeated family/block keeps its last entry
     return seen
 
@@ -51,14 +61,13 @@ def sizes(path):
 
 
 def probe(args, dcert, route, log):
-    cmd = ["systemd-run", "--user", "--scope", "-q", "-p", f"MemoryMax={args.mem}", "-p", "MemorySwapMax=0",
-           "/usr/bin/time", "-f", "TIME %e %M", "timeout", str(args.timeout), "nice", "-n19",
+    cmd = ["/usr/bin/time", "-f", "TIME %e %M", "timeout", str(args.timeout), "nice", "-n19",
            args.probe, dcert, f"sim:{route}", "sf:20000000", "wf:500000"]
     if route == "fp":
         cmd += ["diag", "census"]
     t0 = time.time()
     with open(log, "w") as fh:
-        rc = subprocess.run(cmd, stdout=fh, stderr=subprocess.STDOUT).returncode
+        rc = memcap.run(cmd, args.mem, stdout=fh, stderr=subprocess.STDOUT)
     text = open(log, errors="replace").read()
     m = re.search(r"TIME ([\d.]+) (\d+)", text)
     secs, peak = (float(m.group(1)), int(m.group(2)) // 1024) if m else (time.time() - t0, 0)
@@ -103,6 +112,9 @@ def main():
     ap.add_argument("--sizes", default="")
     args = ap.parse_args()
     os.makedirs(os.path.join(args.out, "logs"), exist_ok=True)
+    how = memcap.method()
+    print(f"memory cap {args.mem}: {how} (memcap.py)", flush=True)
+    open(os.path.join(args.out, "memcap.txt"), "w").write(f"{how} {args.mem}\n")
     tsv = os.path.join(args.out, "survey.tsv")
     done = set()
     if os.path.exists(tsv):
