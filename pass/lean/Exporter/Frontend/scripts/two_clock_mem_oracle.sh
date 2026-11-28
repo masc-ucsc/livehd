@@ -41,7 +41,8 @@ command -v iverilog >/dev/null && command -v vvp >/dev/null || { echo "iverilog/
 rm -rf -- "$OUT"
 mkdir -p "$OUT"
 STEPS=60
-LP=$(cd "$ROOT/formal/lean" && lake env printenv LEAN_PATH)
+source "$SCRIPT_DIR/oracle_lean.sh"   # LP: .olean-dev, then lake's path
+oracle_lean "$OUT" legacy d3
 
 cat > "$OUT/ram2c.v" <<'EOF'
 module ram2c(input clk_a, input clk_b,

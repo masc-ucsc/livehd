@@ -40,7 +40,8 @@ command -v iverilog >/dev/null && command -v vvp >/dev/null || { echo "iverilog/
 rm -rf -- "$OUT"
 mkdir -p "$OUT"
 cd "$ROOT/formal/lean"
-LP=$(lake env printenv LEAN_PATH)
+source "$SCRIPT_DIR/oracle_lean.sh"   # LP: .olean-dev, then lake's path
+oracle_lean "$OUT" legacy d3
 EQ="$ROOT/inou/prp/tests/equiv"
 
 ct() { # <dcert> <stim> <out> <cert_trace options...>

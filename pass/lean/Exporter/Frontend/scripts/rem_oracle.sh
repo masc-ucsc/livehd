@@ -96,7 +96,8 @@ with open(f'{out}/tb.v', 'w') as f:
     f.write('  $finish;\n end\nendmodule\n')
 PY
 
-LP=$(cd "$ROOT/formal/lean" && lake env printenv LEAN_PATH)
+source "$SCRIPT_DIR/oracle_lean.sh"   # LP: .olean-dev, then lake's path
+oracle_lean "$OUT"
 rtl() { # <source.sv> <out>
   iverilog -g2012 -o "$OUT/$2.vvp" "$1" "$OUT/tb.v" && vvp "$OUT/$2.vvp" | grep '^STEP' > "$OUT/$2.txt"
 }

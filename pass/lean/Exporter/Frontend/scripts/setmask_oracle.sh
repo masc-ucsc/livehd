@@ -96,7 +96,8 @@ PY
 rtl() { # <verilog> <out>
   iverilog -g2012 -o "$OUT/$2.vvp" "$1" "$OUT/tb.v" && vvp "$OUT/$2.vvp" | grep '^STEP' > "$OUT/$2.txt"
 }
-LP=$(cd "$ROOT/formal/lean" && lake env printenv LEAN_PATH)
+source "$SCRIPT_DIR/oracle_lean.sh"   # LP: .olean-dev, then lake's path
+oracle_lean "$OUT"
 (cd "$ROOT/formal/lean" && ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run Futamura_Projection_Scripts/cert_trace.lean \
    "$OUT/lean/smk.dcert" "$CYCLES" "$OUT/stim.txt" edges:all > "$OUT/cert.txt" 2> "$OUT/cert.err") \
   || { cat "$OUT/cert.err"; echo "FAIL: cert_trace"; exit 1; }

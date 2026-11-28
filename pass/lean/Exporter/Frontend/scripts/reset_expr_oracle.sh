@@ -84,7 +84,8 @@ for mode in ('all', 'third'):
         f.write('  $finish;\n end\nendmodule\n')
 PY
 
-LP=$(cd "$ROOT/formal/lean" && lake env printenv LEAN_PATH)
+source "$SCRIPT_DIR/oracle_lean.sh"   # LP: .olean-dev, then lake's path
+oracle_lean "$OUT"
 rtl() { # <source.sv> <mode> <out>
   iverilog -g2012 -o "$OUT/$3.vvp" "$1" "$OUT/tb_$2.v" && vvp "$OUT/$3.vvp" | grep '^STEP' > "$OUT/$3.txt"
 }

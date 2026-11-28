@@ -66,11 +66,9 @@ command -v iverilog >/dev/null && command -v vvp >/dev/null || { echo "iverilog/
 rm -rf -- "$OUT"
 mkdir -p "$OUT"
 cd "$ROOT/formal/lean"
-LP=$(lake env printenv LEAN_PATH)
+source "$SCRIPT_DIR/oracle_lean.sh"   # LP: .olean-dev, then lake's path
+oracle_lean "$OUT" legacy d3
 EQ="$ROOT/inou/prp/tests/equiv"
-# the legacy bridge's lemmas are not in the package root
-lake build LeanSemanticPrimitives.Translation.WholeArrayBridge > "$OUT/lake.log" 2>&1 \
-  || { tail -5 "$OUT/lake.log"; echo "FAIL: lake build WholeArrayBridge"; exit 1; }
 
 ct() { # <dcert> <stim> <out> <cert_trace options...>
   local dc=$1 st=$2 o=$3; shift 3

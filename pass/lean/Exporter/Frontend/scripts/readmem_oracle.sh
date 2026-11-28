@@ -36,7 +36,8 @@ command -v iverilog >/dev/null && command -v vvp >/dev/null || { echo "iverilog/
 rm -rf -- "$OUT"
 mkdir -p "$OUT"
 STEPS=40
-LP=$(cd "$ROOT/formal/lean" && lake env printenv LEAN_PATH)
+source "$SCRIPT_DIR/oracle_lean.sh"   # LP: .olean-dev, then lake's path
+oracle_lean "$OUT" legacy
 
 cat > "$OUT/rom_file.v" <<'EOF'
 module rom_file(input clk, input [3:0] ra, output reg [7:0] q, output [7:0] qa);
