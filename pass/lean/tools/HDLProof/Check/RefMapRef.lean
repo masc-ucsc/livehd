@@ -223,6 +223,15 @@ def certOf (text : String) : DesignCert :=
   | .ok d => d
   | .error _ => default
 
+/-- Whether a certificate text reads, so that `certOf` is the certificate it describes and not
+`default` (the empty design). Every emitted theorem file proves it for each certificate it
+embeds (`native_decide`), so a file whose text does not read does not compile; the tools refuse
+`emit:` for such a certificate before they start. -/
+def certReads (text : String) : Bool :=
+  match CertIO.readCertChecked text.toUTF8 with
+  | .ok _ => true
+  | .error _ => false
+
 
 /-- Some proofs pass the refinement-map check: the statement an emitted F2 theorem proves
 (`native_decide`) and an emitted F1 axiom assumes. -/

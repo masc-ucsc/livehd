@@ -181,6 +181,10 @@ def D : DesignCert := match CertIO.readCertChecked certText.toUTF8 with
   | .ok d => d
   | .error _ => default
 
+/-- The text reads: `D` is the certificate it describes, not the empty design. -/
+theorem certText_reads : (match CertIO.readCertChecked certText.toUTF8 with
+    | .ok _ => true | .error _ => false) = true := by native_decide
+
 {s0Def}
 
 def spec : InvSpec := {leanSpec sp}
@@ -407,6 +411,13 @@ def conjMain (cert specPath : String) (rest : List String) : IO UInt32 := do
   let work := System.FilePath.mk ((opt "work").getD "sym_work")
   IO.FS.createDirAll work
   let (_, D) ← Projection.CertLoadAny.admitFile cert
+  -- a theorem file embeds the certificate and reads it with `readCertChecked`
+  if (opt "emit").isSome then
+    match CertIO.readCertChecked (← IO.FS.readBinFile cert) with
+    | .ok _ => pure ()
+    | .error e =>
+      say s!"  RESULT: REFUSED (emit: a theorem file reads its certificate with readCertChecked, which refuses {cert}: {e})"
+      return 4
   let lines ← match parseSpec (← IO.FS.readFile specPath) with
     | .ok l => pure l
     | .error e => do IO.eprintln s!"{specPath}: {e}"; return 2
@@ -667,6 +678,13 @@ def main (args : List String) : IO UInt32 := do
     let work := System.FilePath.mk ((opt "work").getD "sym_work")
     IO.FS.createDirAll work
     let (_, D) ← Projection.CertLoadAny.admitFile cert
+    -- a theorem file embeds the certificate and reads it with `readCertChecked`
+    if (opt "emit").isSome then
+      match CertIO.readCertChecked (← IO.FS.readBinFile cert) with
+      | .ok _ => pure ()
+      | .error e =>
+        say s!"  RESULT: REFUSED (emit: a theorem file reads its certificate with readCertChecked, which refuses {cert}: {e})"
+        return 4
     let propOfTok (tok : String) : IO (Option PropSpec) := do
       let (nz, name) := if tok.startsWith "!" then (false, (tok.drop 1).toString) else (true, tok)
       return (← resolvePort cert "outputs" name).map fun n => { out := n, nz }

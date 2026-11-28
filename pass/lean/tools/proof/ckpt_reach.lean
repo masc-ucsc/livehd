@@ -99,6 +99,10 @@ def D : DesignCert := match CertIO.admitAny certText.toUTF8 with
   | .ok (_, d) => d
   | .error _ => default
 
+/-- The text admits: `D` is the certificate it describes, not the empty design. -/
+theorem certText_reads : (match CertIO.admitAny certText.toUTF8 with
+    | .ok _ => true | .error _ => false) = true := by native_decide
+
 def ckptText : String := {leanStr ckText}
 
 def c : Ckpt := match parse ckptText.toUTF8 with
