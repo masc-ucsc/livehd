@@ -53,6 +53,16 @@ set -euo pipefail
 #          is COUNTEREXAMPLE NOT REPLAYED and names that reason (not "did not reproduce")
 #   tests/fp_symbolic.lean checks fp's symbolic primitives and terms against evalPrim / evalFuel.
 #   tests/mem_addr_check.lean checks DCERT4's memory depth and the load-time address check.
+# Every verdict is compared whole, with the exit code it promises (0 PROVED, 1 COUNTEREXAMPLE /
+# NOT K-INDUCTIVE / NOT INDUCTIVE, 4 REFUSED, 5 SOLVER FAILED, 6 CHECK REJECTED, 7 NOT REPLAYED, 8
+# NO COUNTEREXAMPLE UP TO); control: the not-replayed run expected as a counterexample fails.
+# Options: route:var and route:plain (closed, and emitted: runInvKV, runInvK), theorem files with
+# an output (asm:) and an input (in:) assumption, an assumed input value out of range (REFUSED),
+# usage and option errors (exit 2, no RESULT), conj: with emit: (refused, exit 2, no file).
+# A lying solver (UNSAT with an empty proof) gives CHECK REJECTED on every route, closed, and
+# conj:, also on a true property; a solver that answers nothing SOLVER FAILED; solver: naming the
+# toolchain's cadical PROVED. sym_probe: every route built (sim:all), census and diag with no
+# drift on fp, census on ir, fp's route:var and route:plain; out of fuel refused (exit 4); usage.
 # The default route is vc (`sim:` absent); a run naming closed / emit: / route: and no sim: uses fp.
 # ROUTES (default "fp ir vc"): every sym_verify case that names no `emit:` or `route:` also
 # runs on the IR and VC symbolic routes (`sim:ir`, `sim:vc`) and must give the same verdict
@@ -288,21 +298,33 @@ echo "ok: $(tail -1 "$OUT/stim_tab_check.log")"
 # certificates no Verilog front end emits (symbolic masks, whole-memory load)
 (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/tests/gen_gap_certs.lean" "$OUT/gap") \
   > "$OUT/gen_gap_certs.log" 2>&1 || { tail -5 "$OUT/gen_gap_certs.log"; echo "FAIL: gen_gap_certs"; exit 1; }
-run1() { # <driver> <expect> args...
+rc_of() { # the exit code a sym_verify verdict promises (sym_verify.lean: its header and `attempt`)
+  case "$1" in
+    "INVARIANT PROVED") echo 0 ;;
+    "COUNTEREXAMPLE"|"NOT K-INDUCTIVE"|"NOT INDUCTIVE") echo 1 ;;
+    "REFUSED") echo 4 ;;
+    "SOLVER FAILED") echo 5 ;;
+    "CHECK REJECTED") echo 6 ;;
+    "COUNTEREXAMPLE NOT REPLAYED") echo 7 ;;
+    "NO COUNTEREXAMPLE UP TO") echo 8 ;;
+    *) echo x ;;
+  esac
+}
+drv1() { # <driver> args... > log: the native driver under SYM_NAT, else interpreted
+  local drv=$1; shift
+  if [[ -n "$SYM_NAT" ]]; then "$SYM_NAT/$drv" "$@"
+  else (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/proof/$drv.lean" "$@"); fi
+}
+run1() { # <driver> <expect> args...: the last RESULT is exactly <expect>, and the exit code is its own
   local drv=$1 expect=$2; shift 2
-  local log="$OUT/run_$(( ++N )).log"
-  if [[ -n "$SYM_NAT" ]]; then
-    "$SYM_NAT/$drv" "$@" "work:$OUT/work" > "$log" 2>&1 || true
-  else
-    (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/proof/$drv.lean" "$@" "work:$OUT/work") \
-      > "$log" 2>&1 || true
-  fi
+  local log="$OUT/run_$(( ++N )).log" rc
+  drv1 "$drv" "$@" "work:$OUT/work" > "$log" 2>&1 && rc=0 || rc=$?
   local got
   got=$(grep -o 'RESULT: [A-Z -]*' "$log" | tail -1 | sed 's/RESULT: //; s/ *$//')
-  if [[ "$got" != "$expect" ]]; then
-    tail -6 "$log"; echo "FAIL: $drv $* -- expected $expect, got '$got'"; exit 1
+  if [[ "$got" != "$expect" || "$rc" != "$(rc_of "$expect")" ]]; then
+    tail -6 "$log"; echo "FAIL: $drv $* -- expected '$expect' exit $(rc_of "$expect"), got '$got' exit $rc"; exit 1
   fi
-  echo "ok: $drv ${*##*/} -> $got"
+  echo "ok: $drv ${*##*/} -> $got (exit $rc)"
 }
 fponly() { [[ " $* " == *" emit:"* || " $* " == *" route:"* ]]; }
 run() { # <driver> <expect> args... : on fp, and on the other ROUTES where the case allows
@@ -356,6 +378,43 @@ f2_on() { # <sim> <cert> <name> args...
 }
 f2_on vc "$C" V2cnt10 ok_good k:1
 f2_on ir "$C" I2cnt10 ok_good k:1
+# fp's other variants (route:var: runInvKV; route:plain: runInvK), checked closed and emitted
+run  sym_verify "INVARIANT PROVED"    "$C" ok_good k:1 route:var
+run  sym_verify "INVARIANT PROVED"    "$C" ok_good k:1 route:var closed
+run  sym_verify "INVARIANT PROVED"    "$C" ok_good k:1 route:plain closed
+f2_fp() { # <name> <statement head> args...: emitted on fp, compiled, axioms
+  local name=$1 head=$2; shift 2
+  run1 sym_verify "INVARIANT PROVED" "$@" "emit:$OUT/$name.lean"
+  grep -q "^theorem verdict : $head D spec s0 pfB pfS = true := by native_decide" "$OUT/$name.lean" \
+    || { echo "FAIL: $name verdict line"; exit 1; }
+  (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean "$OUT/$name.lean") > "$OUT/$name.out" 2>&1 \
+    || { tail -5 "$OUT/$name.out"; echo "FAIL: theorem file $name"; exit 1; }
+  tr '\n' ' ' < "$OUT/$name.out" | grep -Eq "'SymF2.$name.invariant' depends on axioms: \[propext, +Classical.choice, +Quot.sound, +[^],]*native_decide[^],]*\]" \
+    || { cat "$OUT/$name.out"; echo "FAIL: $name axioms"; exit 1; }
+  echo "ok: $name theorem file compiles; axioms: standard + one native_decide"
+}
+f2_fp F2var   'runInvKV 20000 200' "$C" ok_good k:1 route:var
+f2_fp F2plain 'runInvK 20000 200'  "$C" ok_good k:1 route:plain
+# theorem files with assumptions: an output assumption (eq_ok is 1-inductive given a_ok: an
+# enabled step takes (a, b) from (0, 0) to (1, 9), from (a, 10 - a) to (a + 1, 9 - a), from (9, 1)
+# to (0, 0)) and an input assumption (reset held)
+f2_on vc "$P" V2asm eq_ok asm:a_ok k:1
+grep -q 'asmOut := some { out := ' "$OUT/V2asm.lean" || { echo "FAIL: V2asm states no output assumption"; exit 1; }
+f2_on vc "$C" V2in '!c_o' in:rst=1 k:1
+grep -q 'asmIn := \[(' "$OUT/V2in.lean" || { echo "FAIL: V2in states no input assumption"; exit 1; }
+# an assumed input value its width cannot hold is refused (inAsmRangeOK)
+run1 sym_verify "REFUSED"             "$C" ok_good k:1 in:rst=2
+grep -q 'RESULT: REFUSED (side checks:' "$OUT/run_$N.log" || { tail -3 "$OUT/run_$N.log"; echo "FAIL: in:rst=2 not refused by the side checks"; exit 1; }
+# usage and option errors: exit 2, no RESULT line
+usage_err() { # <what> args...: exit 2 and no RESULT line
+  local what=$1 rc; shift
+  drv1 sym_verify "$@" > "$OUT/usage.log" 2>&1 && rc=0 || rc=$?
+  [[ $rc == 2 ]] && ! grep -q 'RESULT:' "$OUT/usage.log" || { cat "$OUT/usage.log"; echo "FAIL: $what: exit $rc"; exit 1; }
+  echo "ok: sym_verify $what -> exit 2, no RESULT"
+}
+usage_err "with no arguments"
+usage_err "route:bogus" "$C" ok_good k:1 route:bogus "work:$OUT/work"
+usage_err "init:bogus"  "$C" ok_good k:1 init:bogus "work:$OUT/work"
 run sym_verify "NOT K-INDUCTIVE"     "$C" ok_bad k:1
 run sym_verify "COUNTEREXAMPLE"      "$C" ok_bad k:10
 run sym_verify "INVARIANT PROVED"    "$C" '!c_o' in:rst=1 k:1
@@ -380,6 +439,30 @@ run sym_verify "INVARIANT PROVED"    "$TC" "conj:$OUT/tc_split.spec" jobs:4
 grep -q '\[d_eq | sA=2,sB=3\] .*UNSAT' "$OUT/run_$N.log" || { echo "FAIL: per-case obligation not reported"; exit 1; }
 run sym_verify "NOT INDUCTIVE"       "$TC" "conj:$OUT/tc_bad.spec" jobs:4
 grep -q '\[d_eq | sA=2,sB=2\] counterexample: false at cycle 0 \[\], at cycle 1 \[.*d_eq' "$OUT/run_$N.log" || { tail -5 "$OUT/run_$N.log"; echo "FAIL: case counterexample not evaluated"; exit 1; }
+# conj: has no theorem form: emit: is refused (exit 2), and no file is written
+(drv1 sym_verify "$P" "conj:$OUT/pair_all.spec" "emit:$OUT/conj.lean" "work:$OUT/work") > "$OUT/conj_emit.log" 2>&1 && rc=0 || rc=$?
+[[ $rc == 2 ]] && grep -q 'emit: is not supported with conj:' "$OUT/conj_emit.log" && [[ ! -e "$OUT/conj.lean" ]] \
+  || { tail -4 "$OUT/conj_emit.log"; echo "FAIL: conj: with emit: was not refused (exit $rc)"; exit 1; }
+echo "ok: conj: with emit: -> refused, exit 2, no file"
+# the verified checkers refuse proofs from a lying solver: liar.sh answers UNSAT to everything
+# and writes an empty LRAT file (a proof of nothing); `false` gives no answer
+cat > "$OUT/liar.sh" <<'EOF2'
+#!/usr/bin/env bash
+# claims UNSAT and leaves an empty LRAT file: a proof of nothing ($2 is the LRAT path)
+printf 's UNSATISFIABLE\n'; : > "$2"; exit 20
+EOF2
+chmod +x "$OUT/liar.sh"
+LIAR="solver:$OUT/liar.sh"
+run  sym_verify "CHECK REJECTED"      "$C" ok_bad k:1 "$LIAR"
+run  sym_verify "CHECK REJECTED"      "$C" ok_bad k:1 closed "$LIAR"
+run1 sym_verify "CHECK REJECTED"      "$P" "conj:$OUT/pair_missing.spec" jobs:4 "$LIAR"
+# control: an empty proof proves nothing, also of a true property
+run  sym_verify "CHECK REJECTED"      "$C" ok_good k:1 "$LIAR"
+run1 sym_verify "SOLVER FAILED"       "$C" ok_good k:1 "solver:$(command -v false)"
+grep -q 'RESULT: SOLVER FAILED (base): solver exit 1' "$OUT/run_$N.log" || { tail -3 "$OUT/run_$N.log"; echo "FAIL: the solver failure is not named"; exit 1; }
+# solver: naming the cadical the toolchain ships, as the README says
+CADICAL="$(dirname "$(cd "$ROOT/formal/lean" && elan which lean)")/cadical"
+run1 sym_verify "INVARIANT PROVED"    "$C" ok_good k:1 "solver:$CADICAL"
 M4="$OUT/ram4_lean/ram4.dcert"
 M4B="$OUT/ram4b_lean/ram4b.dcert"
 run sym_verify "INVARIANT PROVED"    "$M4" ok k:1
@@ -394,6 +477,12 @@ run sym_verify "INVARIANT PROVED"    "$MU" ok_max k:1
 run1 sym_verify "COUNTEREXAMPLE NOT REPLAYED" "$MU" bad_lsb k:1 base sim:ir sf:1 wf:1
 grep -q 'the replay simulator could not be built (fp specialization failed' "$OUT/run_$N.log" \
   || { tail -3 "$OUT/run_$N.log"; echo "FAIL: the not-replayed result does not name its reason"; exit 1; }
+# control: the same run expected as a replayed counterexample must fail (a verdict is compared
+# whole, with its exit code: NOT REPLAYED, exit 7, is not COUNTEREXAMPLE, exit 1)
+if ( run1 sym_verify "COUNTEREXAMPLE" "$MU" bad_lsb k:1 base sim:ir sf:1 wf:1 ) > "$OUT/control_not_replayed.log" 2>&1; then
+  cat "$OUT/control_not_replayed.log"; echo "FAIL: a counterexample that did not replay passed as a counterexample"; exit 1
+fi
+echo "ok: control: a counterexample that did not replay fails as a counterexample"
 UD="$OUT/udiv4_lean/udiv4.dcert"
 run sym_verify "INVARIANT PROVED"    "$UD" ok_q k:1
 run sym_verify "INVARIANT PROVED"    "$UD" ok_r k:1
@@ -420,4 +509,23 @@ run sym_verify "INVARIANT PROVED"    "$G/setmask_sym.dcert" 0 k:1
 run sym_verify "COUNTEREXAMPLE"      "$G/setmask_sym.dcert" 1 k:1
 run sym_verify "INVARIANT PROVED"    "$G/bulk_ok.dcert" 0 k:1
 run sym_verify "COUNTEREXAMPLE"      "$G/bulk_bad.dcert" 0 k:1
+# sym_probe: one symbolic step on each route without a solver (diagnostics; exit 0 when every
+# requested route built its step, 4 otherwise, 2 on usage)
+probe() { # <exit> <ERE> args...
+  local want=$1 pat=$2; shift 2
+  local log="$OUT/probe_$(( ++N )).log" rc
+  drv1 sym_probe "$@" > "$log" 2>&1 && rc=0 || rc=$?
+  [[ "$rc" == "$want" ]] && grep -Eq -- "$pat" "$log" || { tail -5 "$log"; echo "FAIL: sym_probe $* -- exit $rc, expected $want and /$pat/"; exit 1; }
+  echo "ok: sym_probe ${*##*/} -> exit $rc"
+}
+probe 0 '^PROBE vc OK defs=' "$C"
+grep -q '^PROBE fp OK' "$OUT/probe_$N.log" && grep -q '^PROBE ir OK' "$OUT/probe_$N.log" || { cat "$OUT/probe_$N.log"; echo "FAIL: sim:all does not probe fp, ir and vc"; exit 1; }
+probe 0 '^DRIFT fp ok$' "$M4" sim:fp census diag
+grep -q '^CENSUS fp ' "$OUT/probe_$N.log" && grep -q '^DIAG fp ' "$OUT/probe_$N.log" || { cat "$OUT/probe_$N.log"; echo "FAIL: no census or diag lines"; exit 1; }
+probe 0 '^CENSUS ir ' "$M4" sim:ir census
+probe 0 '^PROBE fp OK' "$C" sim:fp route:var
+probe 0 '^PROBE fp OK' "$C" sim:fp route:plain
+# control: fp out of fuel refuses (exit 4)
+probe 4 '^PROBE fp REFUSED ' "$MU" sim:fp sf:1 wf:1
+probe 2 '^usage: sym_probe'
 echo "PASS: sym_selftest"

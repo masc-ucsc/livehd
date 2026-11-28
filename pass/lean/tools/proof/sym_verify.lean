@@ -73,7 +73,8 @@ RESULT lines: `INVARIANT PROVED (k=…)`, `COUNTEREXAMPLE (base)`,
 `NOT K-INDUCTIVE (step)`, or a refusal with its reason. With several
 candidates or k values each attempt's line is prefixed `[<out> k=<k>]` and a
 `SUMMARY:` line follows. `emit:<file>` writes the F2 theorem form of the
-proved attempt (stated over the route's closed check).
+proved attempt (stated over the route's closed check); `conj:` has no theorem form and refuses
+`emit:` (exit 2).
 -/
 import HDLProof.Sym.ConjT
 import LeanSemanticPrimitives.Projection.CertLoadAny
@@ -401,11 +402,13 @@ def conjMain (cert specPath : String) (rest : List String) : IO UInt32 := do
   let solver ← match opt "solver" with
     | some s => pure s
     | none => do pure ((← IO.appDir) / "cadical").toString
+  -- a conjunctive invariant has no theorem form: emit: is refused, not ignored
+  if (opt "emit").isSome then
+    IO.eprintln "emit: is not supported with conj: (sym_verify writes no theorem file for a conjunctive invariant)"
+    return 2
   let work := System.FilePath.mk ((opt "work").getD "sym_work")
   IO.FS.createDirAll work
   let D ← Projection.CertLoadAny.admitFile cert
-  -- a theorem file embeds the certificate and decodes it with `CertIO.certOf`, the admission
-  -- `admitFile` just passed (`readCertChecked`), so its `certText_reads` theorem holds
   let lines ← match parseSpec (← IO.FS.readFile specPath) with
     | .ok l => pure l
     | .error e => do IO.eprintln s!"{specPath}: {e}"; return 2
@@ -447,7 +450,7 @@ flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
   unless HwMem.admitsWB D do
     say "  RESULT: REFUSED (the memory route does not admit this certificate)"; return 4
   let t0 ← IO.monoMsNow
-  let fpOnly := (opt "emit").isSome || (opt "route").isSome
+  let fpOnly := (opt "route").isSome
   let sim := defaultSim (opt "sim") fpOnly
   let rt ← match ← IO.lazyPure (fun _ => mkSymRoute sim "fused" sf wf D) with
     | .ok rt => pure rt

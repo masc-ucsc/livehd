@@ -17,7 +17,8 @@ One line per route:
 certificate's operators for ir and vc (`Sym.Diag.programCensus`, `nodeCensus`).
 `diag` (fp) re-runs the step counting how each primitive, `ite` and `caseT` was taken
 (`Sym.Diag.diagStepFP`) and prints `DIAG fp <key> <count>`; `DRIFT fp ok|MISMATCH` compares it
-with the real step. Exit 0 when every requested route built its step, 4 otherwise, 2 on usage.
+with the real step. Exit 0 when every requested route built its step (and, with `diag`, the
+counting copy agrees with it), 4 otherwise, 2 on usage.
 -/
 import HDLProof.Sym.Diag
 import HDLProof.Kit.Driver
@@ -67,6 +68,8 @@ def probeRoute (D : DesignCert) (sim route : String) (sf wf : Nat) (census diag 
           | .error m, .error m' => m == m'
           | _, _ => false
         say s!"DRIFT {sim} {if same then "ok" else "MISMATCH"}"
+        -- the counting copy and the real step disagree: the census and diag lines are wrong
+        unless same do return false
     | none => pure ()
   return ok
 

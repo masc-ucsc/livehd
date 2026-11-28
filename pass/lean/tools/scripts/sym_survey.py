@@ -12,7 +12,9 @@ under a cgroup memory cap and a timeout, strictly one at a time, and appends one
 
     family block nodes route status class seconds peak_mb defs diag message
 
-`status` is OK, REFUSED, TIMEOUT or KILLED (memory cap); `class` the refusal class
+`status` is OK, REFUSED, DRIFT (the step was built, but sym_probe's counting copy of fp's step,
+`diag`, disagrees with it: the `diag` column is not to be trusted), TIMEOUT or KILLED (memory
+cap); `class` the refusal class
 (`Sym.Diag.refusalClass`). `diag` (fp only) lists, for the primitives whose symbolic support is
 tracked, how often each was taken symbolically: `mulI:sym=12,...`. The raw probe output of each
 row is kept in `<out>/logs/`.
@@ -64,6 +66,8 @@ def probe(args, dcert, route, log):
     if pl and pl.group(1) == "OK":
         d = re.search(r"defs=(\d+)", pl.group(2))
         status, cls, msg, defs = "OK", "", "", d.group(1) if d else ""
+        if re.search(rf"^DRIFT {route} MISMATCH$", text, re.M):
+            status, cls, msg = "DRIFT", "diag", "the counting copy of the step disagrees with the step"
     elif pl:
         rest = pl.group(2).strip()
         cls, _, msg = rest.partition(":")
