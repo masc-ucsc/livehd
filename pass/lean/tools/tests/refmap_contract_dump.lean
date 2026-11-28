@@ -40,7 +40,7 @@ def main (args : List String) : IO UInt32 := do
         if p.startsWith "/" then p else (dir / p).toString
     let (some specCert, some implCert) := (pathOf "spec", pathOf "impl")
       | IO.eprintln s!"{path}: no spec or impl"; return 1
-    let (_, DS) ← Projection.CertLoadAny.admitFile specCert
+    let DS ← Projection.CertLoadAny.admitFile specCert
     let NI ← loadNames implCert
     let NS ← loadNames specCert
     match buildJudge lines NI NS DS with
