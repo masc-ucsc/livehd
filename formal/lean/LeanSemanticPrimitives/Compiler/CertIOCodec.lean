@@ -593,6 +593,26 @@ def readCertChecked (b : ByteArray) : Except String DesignCert :=
     | some w => .error s!"refused: {w}"
     | none   => .ok D
 
+/-- **The certificate an embedded text describes**: what an emitted theorem file or a generated
+driver defines its design by (`sym_verify`'s and `ckpt_reach`'s theorem files, `sym_refmap`'s,
+the translation-validation drivers of `make_tv_sim.py`), decoded with `readCertChecked`, the
+admission the tools load with. A total function must give something for a text that does not
+admit: `default`, the empty design. So every user GUARDS it with `certReads`: a theorem file
+proves `certReads text = true` (`native_decide`), a generated driver checks it (`#guard`), and a
+file whose text does not admit does not compile. No file can state a theorem about the empty
+design in place of the certificate it embeds. -/
+def certOf (text : String) : DesignCert :=
+  match readCertChecked text.toUTF8 with
+  | .ok d => d
+  | .error _ => default
+
+/-- The guard of `certOf`: the embedded text admits, so `certOf text` is the certificate it
+describes and not `default`. -/
+def certReads (text : String) : Bool :=
+  match readCertChecked text.toUTF8 with
+  | .ok _ => true
+  | .error _ => false
+
 /-- Read a certificate file and admit it: `readCertChecked`, the one admission. A refusal is an
 `IO.userError` naming the file. Every driver and proof tool loads through this function
 (`Projection.CertLoadAny.admitFile` is it under the name the drivers use); it does not parse

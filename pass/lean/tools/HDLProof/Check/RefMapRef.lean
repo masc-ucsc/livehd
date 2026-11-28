@@ -215,22 +215,9 @@ end
 
 /-! ## What an emitted verdict states -/
 
-/-- A certificate from its DCERT text (`default` when it does not read). Emitted theorem files
-define every certificate by it, so two files that include the same text name the same
-certificate by unfolding alone (the texts are equal literals). -/
-def certOf (text : String) : DesignCert :=
-  match CertIO.readCertChecked text.toUTF8 with
-  | .ok d => d
-  | .error _ => default
-
-/-- Whether a certificate text reads, so that `certOf` is the certificate it describes and not
-`default` (the empty design). Every emitted theorem file proves it for each certificate it
-embeds (`native_decide`), so a file whose text does not read does not compile; the tools refuse
-`emit:` for such a certificate before they start. -/
-def certReads (text : String) : Bool :=
-  match CertIO.readCertChecked text.toUTF8 with
-  | .ok _ => true
-  | .error _ => false
+-- An emitted theorem file defines every certificate by `CertIO.certOf` of its text and proves
+-- `CertIO.certReads` of it (`Compiler/CertIOCodec.lean`), so two files that include the same
+-- text name the same certificate by unfolding alone (the texts are equal literals).
 
 
 /-- Some proofs pass the refinement-map check: the statement an emitted F2 theorem proves

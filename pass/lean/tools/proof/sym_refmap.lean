@@ -121,7 +121,6 @@ spec's state after the cycle's events, and the map's state at `n+1`, plus the sl
 and the nonzero inputs. Untrusted diagnostics: no verdict uses it.
 -/
 import HDLProof.Check.RefMapCompose
--- `certReads`: an emitted theorem file needs certificates that `readCertChecked` reads
 import HDLProof.Check.RefMapRef
 import HDLProof.Kit.Driver
 import HDLProof.Kit.Judge
@@ -688,10 +687,10 @@ def proofsHash (work : System.FilePath) (pfs : List ByteArray) : IO String := do
 def certDef (tag path : String) (dir : System.FilePath) : IO String := do
   return s!"def cert{tag} : String := include_str {leanStr (← relPath dir path)}
 
-def D{tag} : DesignCert := certOf cert{tag}
+def D{tag} : DesignCert := CertIO.certOf cert{tag}
 
-/-- The text reads: `D{tag}` is the certificate it describes, not the empty design. -/
-theorem cert{tag}_reads : certReads cert{tag} = true := by native_decide
+/-- The text admits: `D{tag}` is the certificate it describes, not the empty design. -/
+theorem cert{tag}_reads : CertIO.certReads cert{tag} = true := by native_decide
 "
 
 /-- A theorem file for a verdict. `f2`: the proofs are in the file and `verdict` is their
@@ -789,12 +788,8 @@ def refmapMain (path : String) (rest : List String) (facts : Bool) : IO UInt32 :
   let implCert := (pathOf "impl").getD ""
   if !facts && implCert.isEmpty then IO.eprintln "no impl <certificate>"; return 2
   let DS ← Projection.CertLoadAny.admitFile specCert
-  -- a theorem file embeds each certificate and reads it with `readCertChecked` (`certOf`)
-  if (emitOpt rest).isSome then
-    for c in (if facts then [specCert] else [specCert, implCert]) do
-      unless certReads (← IO.FS.readFile c) do
-        say s!"  RESULT: REFUSED (emit: a theorem file reads its certificates with readCertChecked, which refuses {c})"
-        return 4
+  -- a theorem file embeds each certificate and decodes it with `CertIO.certOf`, the admission
+  -- `admitFile` just passed (`readCertChecked`), so its `certReads` theorem holds
   say s!"spec {specCert}: flops {DS.flops.size} outputs {DS.outputs.size} memories {DS.memories.size}"
   unless HwMem.admitsWB DS do say "  RESULT: REFUSED (the memory route does not admit the spec)"; return 4
   let t0 ← IO.monoMsNow

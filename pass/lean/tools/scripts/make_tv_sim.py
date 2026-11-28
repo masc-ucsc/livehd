@@ -81,13 +81,10 @@ set_option compiler.extract_closed false in
 def certText : String := include_str "{name}.dcert"
 
 set_option compiler.extract_closed false in
-def cert : DesignCert :=
-  match CertIO.readCertChecked certText.toUTF8 with
-  | .ok D => D
-  | .error _ => default
+def cert : DesignCert := CertIO.certOf certText
 
--- `readCertChecked` refuses with an error, read here as `default`: rule that out
-#guard cert.nodes.size > 0
+-- `certOf` is `default` (the empty design) for a text admission refuses: rule that out
+#guard CertIO.certReads certText
 
 set_option maxRecDepth 1000000
 set_option maxHeartbeats 0

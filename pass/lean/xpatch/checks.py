@@ -198,13 +198,10 @@ namespace SymF2.@NAME@
 
 def certText : String := "<design>"
 
-def D : DesignCert := match CertIO.readCertChecked certText.toUTF8 with
-  | .ok d => d
-  | .error _ => default
+def D : DesignCert := CertIO.certOf certText
 
-/-- The text reads: `D` is the certificate it describes, not the empty design. -/
-theorem certText_reads : (match CertIO.readCertChecked certText.toUTF8 with
-    | .ok _ => true | .error _ => false) = true := by native_decide
+/-- The text admits: `D` is the certificate it describes, not the empty design. -/
+theorem certText_reads : CertIO.certReads certText = true := by native_decide
 
 def s0 : StateM := Projection.HwMem.initStateOf D
 

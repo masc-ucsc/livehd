@@ -95,13 +95,10 @@ namespace CkptReach.{name}
 
 def certText : String := {leanStr certText}
 
-def D : DesignCert := match CertIO.readCertChecked certText.toUTF8 with
-  | .ok d => d
-  | .error _ => default
+def D : DesignCert := CertIO.certOf certText
 
 /-- The text admits: `D` is the certificate it describes, not the empty design. -/
-theorem certText_reads : (match CertIO.readCertChecked certText.toUTF8 with
-    | .ok _ => true | .error _ => false) = true := by native_decide
+theorem certText_reads : CertIO.certReads certText = true := by native_decide
 
 def ckptText : String := {leanStr ckText}
 
