@@ -9,7 +9,7 @@
 #          fixtures/ram12.dcert; dcert_delta_controls.sh: the one Python certificate reader and its
 #          refusals), the drivers that need no lhd (quick_selftest.sh: dcert2_memroute's self-test and
 #          fixtures, lgraph-sim's command line), the operator corpus on every engine against ref
-#          (opcorpus_test.sh, interpreted), reach_selftest and judge_selftest.
+#          (opcorpus_test.sh, interpreted), sym_observe_test, reach_selftest and judge_selftest.
 #   full   nightly (about 3 h): quick, then the sym, refmap, run, ckpt and lhd_ckpt_import
 #          self-tests, xpatch, the lake side (CompileOpt, LgraphSim), the census traces, the
 #          Verilog designs against Verilator on every route (vref_test.sh, with TV and legacy), and
@@ -98,6 +98,7 @@ run_test dcert_delta_controls '^PASS: dcert_delta_controls' bash \
   "$ROOT/pass/lean/Lgraph_IR_Semantics_Simulator/tests/d4/dcert_delta_controls.sh" "$SCRIPT_DIR/fixtures/ram12.dcert" \
   "$OUT/out_dcert_delta"
 run_test opcorpus '^PASS opcorpus_test' env OUT="$OUT/out_opcorpus" bash "$SCRIPT_DIR/opcorpus_test.sh"
+run_test sym_observe_test '^PASS sym_observe_test' env OUT="$OUT/out_observe" bash "$SCRIPT_DIR/sym_observe_test.sh"
 if [[ -x "$LHD" ]]; then
   run_test reach_selftest '^PASS reach_selftest' env LHD="$LHD" OUT="$OUT/out_reach" bash "$SCRIPT_DIR/reach_selftest.sh"
   run_test judge_selftest 'judge self-test: all passed' env LHD="$LHD" OUT="$OUT/out_judge" bash "$SCRIPT_DIR/judge_selftest.sh"

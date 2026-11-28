@@ -3,7 +3,8 @@
 
     sym_observe.py <in.v> <module> <out.v> name:width=expr ... [--decl 'verilog;'] ...
 
-Each `name:width=expr` adds the output port `name` of `width` bits to `module`
+Each `name:width=expr` adds the output port `name` of `width` bits to `module` (whose header
+must be ANSI-style: a non-ANSI header, `module m(a, b); input a; ...`, is refused)
 and drives it with `assign name = expr;`, so an internal signal -- a stutter
 witness, a piece of architectural state, a property -- becomes an output the
 proof tools can name (`sym_verify` properties and assumptions, `sym_refmap`
@@ -91,6 +92,12 @@ def main(argv: list[str]) -> int:
     if text[i] != "(":
         raise SystemExit(f"module {module}: no ANSI port list")
     close = match_paren(text, i)
+    # a non-ANSI header lists bare names and declares the ports in the body; an output added to
+    # its list would mix the two styles
+    items = re.sub(r"//[^\n]*|/\*.*?\*/", "", text[i + 1:close], flags=re.S).split(",")
+    if any(x.strip() for x in items) and all(re.fullmatch(r"\s*[A-Za-z_][A-Za-z0-9_$]*\s*", x) for x in items):
+        raise SystemExit(f"module {module}: a non-ANSI port list (the ports are declared in the body); "
+                         "write its header ANSI-style")
     end = re.compile(r"\bendmodule\b").search(text, close)
     if not end:
         raise SystemExit(f"module {module}: no endmodule")
