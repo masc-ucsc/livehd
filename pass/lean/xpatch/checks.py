@@ -163,7 +163,7 @@ def cmp_product(p_io, p_dir, a_io, a_dir, b_io, b_dir, tj, lo, hi):
 
 # ---------------------------------------------------------------- the emitted theorem file
 def lean_str_at(text, start):
-    """parse the Lean string literal whose opening quote is text[start]; leanStr (sym_verify.lean)
+    """parse the Lean string literal whose opening quote is text[start]; leanStr (tools/HDLProof/Kit/LeanText.lean)
     escapes exactly ", \\ and newline. Returns (value, index after the closing quote)."""
     assert text[start] == '"'
     out, i = [], start + 1

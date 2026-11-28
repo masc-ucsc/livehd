@@ -128,6 +128,8 @@ import HDLProof.Kit.ConjRun
 import HDLProof.Kit.RefMapFile
 import HDLProof.Kit.Judge
 import HDLProof.Kit.SymRoute
+-- leanStr: the string literals of the theorem files
+import HDLProof.Kit.LeanText
 -- the judge's ir and vc routes: EngineSelector's engines whose state is the runtime state
 import HDLProof.Run.Engine
 import LeanSemanticPrimitives.Compiler.DirectSemantics
@@ -320,10 +322,6 @@ def specialize (D : DesignCert) (sf wf : Nat) : IO (Except String (Program × Na
     | none => return .error "checkResidual rejected the residual"
 
 /-! ## Theorem files -/
-
-def leanStr (s : String) : String :=
-  "\"" ++ (s.toList.map fun c =>
-    if c == '"' then "\\\"" else if c == '\\' then "\\\\" else if c == '\n' then "\\n" else c.toString).foldl (· ++ ·) "" ++ "\""
 
 def hexDigit (n : Nat) : Char := "0123456789abcdef".toList.getD n '0'
 

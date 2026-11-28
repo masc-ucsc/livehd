@@ -42,15 +42,13 @@ import HDLProof.Run.Engine
 import HDLProof.Run.Kit
 import HDLProof.Run.Stim
 import LeanSemanticPrimitives.Compiler.CertIOCodec
+-- leanStr: the string literals of the theorem file
+import HDLProof.Kit.LeanText
 
 open Compiler Compiler.Direct Compiler.Ckpt HDLProof HDLProof.Reach HDLProof.Run
+open HDLProof.Kit (leanStr)
 
 def say (s : String) : IO Unit := do IO.println s; (← IO.getStdout).flush
-
-def leanStr (s : String) : String :=
-  "\"" ++ (s.toList.map fun c =>
-    if c == '"' then "\\\"" else if c == '\\' then "\\\\" else if c == '\n' then "\\n"
-    else c.toString).foldl (· ++ ·) "" ++ "\""
 
 def leanEdges : EdgeSpec → String
   | .all => ".all"

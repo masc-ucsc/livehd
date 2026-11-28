@@ -81,6 +81,8 @@ import Lean.Data.Json
 import HDLProof.Kit.Driver
 import HDLProof.Kit.ConjRun
 import HDLProof.Kit.SymRoute
+-- leanStr: the string literals of the theorem files
+import HDLProof.Kit.LeanText
 import HDLProof.Sym.Closed
 -- init:ckpt: a checkpoint as the start state
 import LeanSemanticPrimitives.Projection.CkptStateM
@@ -88,7 +90,7 @@ import LeanSemanticPrimitives.Projection.CkptStateM
 import HDLProof.Reach.Refute
 
 open Compiler Projection HDLProof HDLProof.Sym HDLProof.Driver Projection.MemProjection Projection.HwMem
-open HDLProof.Kit (SymRoute mkSymRoute defaultSim simWhy)
+open HDLProof.Kit (SymRoute mkSymRoute defaultSim simWhy leanStr)
 open Std.Tactic.BVDecide
 
 /-! ## Counterexample replay -/
@@ -135,10 +137,6 @@ def replay (D : DesignCert) (R : Program) (sp : InvSpec) (s0 : StateM) (ins : Ar
 
 
 /-! ## F2: the theorem form -/
-
-def leanStr (s : String) : String :=
-  "\"" ++ (s.toList.map fun c =>
-    if c == '"' then "\\\"" else if c == '\\' then "\\\\" else if c == '\n' then "\\n" else c.toString).foldl (· ++ ·) "" ++ "\""
 
 def leanBytes (b : ByteArray) : String :=
   "⟨#[" ++ ", ".intercalate (b.toList.map toString) ++ "]⟩"
