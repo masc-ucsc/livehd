@@ -14,8 +14,8 @@ keeps its result.
   `interpretDesign`'s step) and `fp` (`LoopSpec.ofAgree`, `Spec` = agreement below depth).
 
 * `StepSound D step`: the stepper agrees with `interpretDesign` on every step it accepts.
-  `irStep_sound` proves it for the direct simulator (route `ir`), `irStepStaged_sound` for its
-  staged form (the one `mkStepper` builds); `refStep_sound` for `ref`.
+  `irStep_sound` proves it for the direct simulator's step (route `ir`), `refStep_sound` for
+  `ref`; the ir engines' own theorems are `Compiler/Engine`'s.
   For route `vc` it is `compileDesign_correct` / `compileOpt_correct` (on the lake side).
 * `cycleStep_sound`: on an engine sound against `interpretDesign` (`Engine.SoundWith`: ir, ref and
   every vc mode, `EngineSelector_*_sound`), an applied cycle's outputs and next state are
@@ -26,7 +26,7 @@ keeps its result.
 * `compacted_outputs`: a run cut into segments, its state replaced by the restored checkpoint
   of itself after each segment (`cert_run compact:<K>`), prints the outputs of the run that is
   not cut, from power-on, from a restored checkpoint, or from any state whose words fit.
-* Route `fp` (`fpStep_agree`, `mkStepper_fp_agree`): the residual's step, on the state converted
+* Route `fp` (`fpStep_agree`, `EngineSelector_fp_agree`): the residual's step, on the state converted
   to the residual's, gives `interpretDesign`'s outputs and a next state that agrees with
   `interpretDesign`'s on every flop and every memory word below its depth (`StateAgree`), not as
   memory functions everywhere (`EngineAgree`, `ofStep_engineAgree`). `runCycles_agree` /
@@ -60,39 +60,10 @@ theorem irStep_sound (D : DesignCert) (hd : Direct.checkDesign D = .ok ()) :
   · cases h
     exact directStepRaw_correct D (checkDesign_sound hd).depsBounded e i s
 
-/-- The staged `ir` stepper is sound: `Staged.step_eq` and `directStepRaw_correct`. -/
-theorem irStepStaged_sound (D : DesignCert) (hd : Direct.checkDesign D = .ok ()) :
-    StepSound D (irStepStaged (Staged.prepare D)) := by
-  intro e i s r h
-  unfold irStepStaged at h
-  split at h
-  · cases h
-  · cases h
-    have hdb := (checkDesign_sound hd).depsBounded
-    rw [Staged.step_eq D hdb]
-    exact directStepRaw_correct D hdb e i s
-
 theorem refStep_sound (D : DesignCert) :
     StepSound D (fun e i s => .ok (interpretDesign D e i s)) := by
   intro e i s r h
   cases h; rfl
-
-/-- The `ir` stepper `mkStepper` builds is sound. -/
-theorem mkStepper_ir_sound {D : DesignCert} {st : Stepper} {opt : Bool}
-    (h : mkStepper D .ir opt = .ok st) : StepSound D st.step := by
-  simp only [mkStepper] at h
-  cases hc : Direct.checkDesign D with
-  | error e => rw [hc] at h; cases h
-  | ok u =>
-    rw [hc] at h
-    cases h
-    exact irStepStaged_sound D (by cases u; exact hc)
-
-theorem mkStepper_ref_sound {D : DesignCert} {st : Stepper} {opt : Bool}
-    (h : mkStepper D .ref opt = .ok st) : StepSound D st.step := by
-  simp only [mkStepper] at h
-  cases h
-  exact refStep_sound D
 
 /-! ## One cycle -/
 
@@ -482,26 +453,6 @@ theorem fpResidual_ok {D : DesignCert} {R : Program} (h : fpResidual D = .ok R) 
     · cases h
   · cases h
 
-/-- The `fp` stepper `mkStepper` builds agrees with `interpretDesign`. -/
-theorem mkStepper_fp_agree {D : DesignCert} {st : Stepper} {opt : Bool}
-    (h : mkStepper D .fp opt = .ok st) : StepAgree D st.step := by
-  simp only [mkStepper] at h
-  cases hc : fpChecks D with
-  | some e => simp [hc] at h
-  | none =>
-    obtain ⟨hsem, haddr, hdepth, hroot, hword⟩ := fpChecks_none hc
-    cases hr : fpResidual D with
-    | error e => simp [hc, hr] at h
-    | ok R =>
-      obtain ⟨sf, wf, hproj⟩ := fpResidual_ok hr
-      cases hs : mkMemSimOfW D R with
-      | none => simp [hc, hr, hs] at h
-      | some sim =>
-        simp only [hc, hr, hs, Except.ok.injEq] at h
-        subst h
-        exact fpStep_agree hsem haddr hdepth hroot hword hproj hs
-          (by cases opt <;> simp)
-
 /-! ### One cycle and a run, up to agreement -/
 
 /-- An engine that agrees with `interpretDesign` below depth (the `fp` route's form): a loaded or
@@ -610,7 +561,7 @@ theorem runCycles_agree {σ : Type} {ctx : Ctx} {E : Engine σ} {Inv : σ → Pr
         obtain ⟨rfl, rfl, rfl, -⟩ := h
         exact ⟨rfl, by rw [hheld]; exact hag⟩
 
-/-- …in particular on a step that agrees (`fp`'s, `mkStepper_fp_agree`), from the run's own start
+/-- …in particular on a step that agrees (`fp`'s, `fpStep_agree`), from the run's own start
 state: the run prints `refTrace`'s outputs. -/
 theorem runCycles_fp_outputs {ctx : Ctx}
     {step : ClockEdges → RuntimeInput → RuntimeState → Except String RuntimeResult}
@@ -629,11 +580,9 @@ end
 #audit_axioms HDLProof.Run.compacted_outputs
 #audit_axioms HDLProof.Run.runCycles_sound
 #audit_axioms HDLProof.Run.fpStep_agree
-#audit_axioms HDLProof.Run.mkStepper_fp_agree
 #audit_axioms HDLProof.Run.runCycles_agree
 #audit_axioms HDLProof.Run.runCycles_fp_outputs
 #audit_axioms HDLProof.Run.cycleStep_spec
-#audit_axioms HDLProof.Run.mkStepper_ir_sound
 
 end Run
 end HDLProof

@@ -73,7 +73,7 @@ The engines and what proves them:
 - fp: `fpEncEngine` (`Run/FpEngine`): the residual's state kept encoded between steps, the policy's
   size half checked once per sizes, only the outputs decoded; `fpEncEngine_agree`: its outputs are
   `interpretDesign`'s and its state agrees below every memory's depth (a step is exact; a load goes
-  through a checkpoint). OLDER, SLOWER with `loop:full`: `mkStepper`'s step (`fpStep`), which
+  through a checkpoint). OLDER, SLOWER with `loop:full`: the runtime-state step (`fpStep`), which
   converts the whole state to the residual's and back every step; `fpStep_agree`. Both with shared
   tails unless `fpShare := false`.
 Mathlib-free.
@@ -160,7 +160,7 @@ structure SelectedEngine where
   autoCompact : Bool := true
 
 /-- Why `EngineSelector` could not prepare the route for the design: the refusal itself (`detail`:
-a check's rendering, the compiler's error) and the message drivers print (`mkStepper`'s wording). -/
+a check's rendering, the compiler's error) and the message drivers print. -/
 structure SelectError where
   route   : Route
   detail  : String

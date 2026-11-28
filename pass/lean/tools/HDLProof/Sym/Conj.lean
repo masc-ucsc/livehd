@@ -19,9 +19,12 @@ keeps only the cut definitions reachable from its own formula: any subset of
 true definitions is implied by all of them, so this too only weakens what the
 solver is asked to refute. The reachability itself is untrusted.
 
-`runConjOf_sound_ref`: if `runConjOf` answers `true`, then on every run of the
-reference semantics from `s0`, at every cycle whose assumptions up to it all
-held, EVERY conjunct holds. k = 1. Mathlib-free.
+The checker on these obligations is `Sym.ConjT`'s `runConjTOf` (cases by template,
+`runConjTOf_sound_ref`: on every run of the reference semantics from `s0`, at every cycle
+whose assumptions up to it all held, every conjunct holds; k = 1). This module keeps what it
+reuses: the unrolling with the outputs (`unrollO`), the cone of influence, the specification,
+the two symbolic runs (`baseRunC`, `stepRunC`) and the side conditions (`sideOKC`). The first,
+untemplated checker (`runConjOf`) was removed on 2026-11-27: nothing ran it. Mathlib-free.
 -/
 import HDLProof.Sym.KInd
 import LeanSemanticPrimitives.Projection.AxiomGate
@@ -276,45 +279,9 @@ def stepRunC (D : DesignCert) (R : Stepper) (sp : ConjSpec) : Except String (Lis
   unrollO D R sp.fuel sp.asmOut sp.asmIn sp.inW 2 (layoutSize sp.L) (stateVar sp.L 0)
     ⟨layoutSize sp.L + 2 * sp.inW.length, #[]⟩
 
-/-- BASE, from the step `(a0, so0, _)` out of the initial state: the
-assumption holds and some conjunct fails. -/
-def baseOblOf (sp : ConjSpec) (st : SymSt) (s : StepO) : Option BVLogicalExpr :=
-  (propsOf s.2.1 sp.conjs).map fun ps => coi st (.gate .and s.1 (.not (conjE ps)))
-
-/-- STEP(t), from the two steps `s0 s1` out of an arbitrary state. -/
-def stepOblOf (sp : ConjSpec) (st : SymSt) (s0 s1 : StepO) (t : Nat) : Option BVLogicalExpr := do
-  let hp ← sp.select (sp.hypsOf t)
-  let hs ← propsOf s0.2.1 hp
-  let p ← sp.conjs[t]?
-  let g ← propOf s1.2.1 p
-  pure (coi st (conjE [s0.1, conjE hs, s1.1, .not g]))
-
 def sideOKC (D : DesignCert) (sp : ConjSpec) (s0 : StateM) : Bool :=
   stMatchesB sp.L s0 && stateFullOKB D s0 && inputOKB D sp.inW.length
     && flopBoundOKB D sp.L.fws.length && edgesOKB D (edgesAll D) && inAsmRangeOK sp.inW sp.asmIn
-
-/-- The check over the two symbolic runs. A driver that ran them once (to hand
-the obligations to the solver) evaluates THIS on the same values, which is
-`runConjOf` by definition. `pfS` holds one LRAT proof per conjunct, in order. -/
-def checkConj (sp : ConjSpec) (rb rs : Except String (List StepO × SymSt)) (pfB : ByteArray)
-    (pfS : List ByteArray) : Bool :=
-  (match rb with
-    | .ok ([s], st) =>
-        scopedB st && (match baseOblOf sp st s with | some φ => checkUnsat φ pfB | none => false)
-    | _ => false)
-  && (match rs with
-    | .ok ([s0, s1], st) =>
-        scopedB st && decide (stateShapeOf s0.2.2 = some sp.L)
-          && (List.range sp.conjs.length).all fun t =>
-               match stepOblOf sp st s0 s1 t with
-               | some φ => checkUnsat φ (pfS.getD t ByteArray.empty)
-               | none => false
-    | _ => false)
-
-/-- The checker. -/
-def runConjOf (D : DesignCert) (R : Stepper) (sp : ConjSpec) (s0 : StateM) (pfB : ByteArray)
-    (pfS : List ByteArray) : Bool :=
-  sideOKC D sp s0 && checkConj sp (baseRunC D R sp s0) (stepRunC D R sp) pfB pfS
 
 /-! ## Soundness -/
 
@@ -342,168 +309,6 @@ theorem runtime_of_invC (hside : sideOKC D sp s0 = true) {st : StateM} {i : Runt
   simp only [Bool.and_eq_true]
   exact ⟨⟨⟨⟨hf.1, by rw [hsz]; exact hin⟩, by rw [hfs]; exact hfb⟩, hed⟩, hf.2⟩
 
-theorem conj_parts (h : runConjOf D R sp s0 pfB pfS = true) :
-    sideOKC D sp s0 = true
-    ∧ (∃ s st, baseRunC D R sp s0 = .ok ([s], st) ∧ scopedB st = true
-        ∧ ∃ φ, baseOblOf sp st s = some φ ∧ BVLogicalExpr.Unsat φ)
-    ∧ (∃ a b st, stepRunC D R sp = .ok ([a, b], st) ∧ scopedB st = true
-        ∧ stateShapeOf a.2.2 = some sp.L
-        ∧ ∀ t, t < sp.conjs.length → ∃ φ, stepOblOf sp st a b t = some φ ∧ BVLogicalExpr.Unsat φ) := by
-  unfold runConjOf checkConj at h
-  simp only [Bool.and_eq_true] at h
-  obtain ⟨hside, hb, hs⟩ := h
-  refine ⟨hside, ?_, ?_⟩
-  · split at hb
-    · rename_i s st hrun
-      simp only [Bool.and_eq_true] at hb
-      refine ⟨s, st, hrun, hb.1, ?_⟩
-      cases ho : baseOblOf sp st s with
-      | none => rw [ho] at hb; exact absurd hb.2 (by simp)
-      | some φ => rw [ho] at hb; exact ⟨φ, rfl, checkUnsat_sound hb.2⟩
-    · cases hb
-  · split at hs
-    · rename_i a b st hrun
-      simp only [Bool.and_eq_true, decide_eq_true_eq, List.all_eq_true, List.mem_range] at hs
-      obtain ⟨⟨hsc, hsh⟩, hall⟩ := hs
-      refine ⟨a, b, st, hrun, hsc, hsh, fun t ht => ?_⟩
-      have := hall t ht
-      cases ho : stepOblOf sp st a b t with
-      | none => rw [ho] at this; cases this
-      | some φ => rw [ho] at this; exact ⟨φ, rfl, checkUnsat_sound this⟩
-    · cases hs
-
-/-- The layout and the memory route's runtime shape hold at EVERY cycle. -/
-theorem invC_all (hres : MemResidual D R) (hA : admitsWB D = true)
-    (hchk : runConjOf D R sp s0 pfB pfS = true) (hins : ∀ n, (ins n).toList.map BV.width = sp.inW) :
-    ∀ n, StMatches sp.L (traceM D s0 ins n) ∧ stateFullOKB D (traceM D s0 ins n) = true := by
-  obtain ⟨hside, -, ⟨a, b, stS, hrun, hsc, hshape, -⟩⟩ := conj_parts hchk
-  intro n
-  induction n with
-  | zero =>
-      obtain ⟨hm, hf, _⟩ := sideOKC_parts hside
-      exact ⟨stMatchesB_sound hm, hf⟩
-  | succ n ih =>
-      have rt := runtime_of_invC hside ih.1 ih.2 (hins n)
-      refine ⟨?_, (resM_spec hA rt).2.2⟩
-      have hb := (unrollO_extends 2 _ _ _ _ _ hrun).1.1
-      let xs := stateVals (traceM D s0 ins n) ++ insVals ins n 2
-      have hxl : xs.length = stS.base := by
-        rw [← hb, List.length_append, stateVals_length ih.1, insVals_length hins]
-      obtain ⟨hc, hag⟩ := extendSt_agree hxl hsc
-      rw [AgreeAt_append, stateVals_length ih.1, Nat.zero_add] at hag
-      have hS := stateVar_rel ih.1 hag.1
-      have facts := unrollO_sound (sideOKC_parts hside).2.2.2.2.2 hres hA hins hc 2 n _ _ _ _ _
-        hrun (.refl _) (insVals_agree hins 2 hag.2) hS 0 (by simp)
-        (fun i hi => by
-          have : i = 0 := by omega
-          subst this; simpa using rt)
-      exact stateShapeOf_sound facts.2.2 hshape
-
-/-- **Conjunctive induction is sound.** -/
-theorem runConjOf_sound (hres : MemResidual D R) (hA : admitsWB D = true)
-    (hchk : runConjOf D R sp s0 pfB pfS = true) (hins : ∀ n, (ins n).toList.map BV.width = sp.inW) :
-    ∀ n, (∀ j, j ≤ n → asmBit (outM D s0 ins j) (ins j) sp.asmOut sp.asmIn = true) →
-      sp.conjs.all (propBit (outM D s0 ins n)) = true := by
-  obtain ⟨hside, ⟨sB, stB, hrunB, hscB, φB, hφB, hunsB⟩, ⟨a, b, stS, hrunS, hscS, -, hstep⟩⟩ :=
-    conj_parts hchk
-  have hinv := invC_all hres hA hchk hins
-  have rt : ∀ n, runtimeFullOKB D (ins n) (traceM D s0 ins n) (edgesAll D) = true :=
-    fun n => runtime_of_invC hside (hinv n).1 (hinv n).2 (hins n)
-  have hrange := (sideOKC_parts hside).2.2.2.2.2
-  intro n
-  induction n with
-  | zero =>
-    intro hasm
-    cases hall : sp.conjs.all (propBit (outM D s0 ins 0))
-    case true => rfl
-    case false =>
-    exfalso
-    have hbB := (unrollO_extends 1 _ _ _ _ _ hrunB).1.1
-    let xs := insVals ins 0 1
-    have hxl : xs.length = stB.base := by rw [← hbB, insVals_length hins]; simp
-    obtain ⟨hc, hag⟩ := extendSt_agree hxl hscB
-    have facts := unrollO_sound hrange hres hA hins hc 1 0 0 _ _ _ _ hrunB (.refl _)
-      (fun j hj => by simpa using insVals_agree hins 1 hag j hj) .conc 0 (by simp)
-      (fun i _ => by simpa using rt i)
-    simp only [List.getElem_cons_zero, Nat.zero_add] at facts
-    unfold baseOblOf at hφB
-    simp only [Option.map_eq_some_iff] at hφB
-    obtain ⟨ps, hps, rfl⟩ := hφB
-    have hev := eval_coi hc (body := .gate .and sB.1 (.not (conjE ps))) (by
-      rw [eval_and, eval_not, facts.1, eval_conjE_propsOf facts.2.1 _ _ hps, hall]
-      simpa using hasm 0 (Nat.le_refl 0))
-    rw [hunsB] at hev; cases hev
-  | succ n ih =>
-    intro hasm
-    have hprev := ih (fun j hj => hasm j (by omega))
-    rw [List.all_eq_true]
-    intro p hp
-    obtain ⟨t, ht, rfl⟩ := List.getElem_of_mem hp
-    cases hgt : propBit (outM D s0 ins (n + 1)) sp.conjs[t]
-    case true => rfl
-    case false =>
-    exfalso
-    obtain ⟨φ, hφ, huns⟩ := hstep t ht
-    have hbS := (unrollO_extends 2 _ _ _ _ _ hrunS).1.1
-    let xs := stateVals (traceM D s0 ins n) ++ insVals ins n 2
-    have hxl : xs.length = stS.base := by
-      rw [← hbS, List.length_append, stateVals_length (hinv n).1, insVals_length hins]
-    obtain ⟨hc, hag⟩ := extendSt_agree hxl hscS
-    rw [AgreeAt_append, stateVals_length (hinv n).1, Nat.zero_add] at hag
-    have hS := stateVar_rel (hinv n).1 hag.1
-    have facts := unrollO_sound hrange hres hA hins hc 2 n _ _ _ _ _ hrunS (.refl _)
-      (insVals_agree hins 2 hag.2) hS
-    have f0 := facts 0 (by simp) (fun i hi => by
-      have : i = 0 := by omega
-      subst this; simpa using rt n)
-    have f1 := facts 1 (by simp) (fun i hi => by
-      rcases Nat.lt_or_ge i 1 with h | h
-      · have : i = 0 := by omega
-        subst this; simpa using rt n
-      · have : i = 1 := by omega
-        subst this; simpa using rt (n + 1))
-    simp only [List.getElem_cons_zero, List.getElem_cons_succ, Nat.add_zero] at f0 f1
-    unfold stepOblOf at hφ
-    simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def, Option.some.injEq] at hφ
-    obtain ⟨hp', hsel, hs, hhs, p', hp'', g, hg, rfl⟩ := hφ
-    have hp'eq : p' = sp.conjs[t] := by
-      rw [List.getElem?_eq_getElem ht] at hp''; exact (Option.some.inj hp'').symm
-    subst hp'eq
-    -- every hypothesis is a conjunct, and every conjunct held at cycle n
-    have hyps_true : hp'.all (propBit (outM D s0 ins n)) = true := by
-      rw [List.all_eq_true]
-      intro q hq
-      unfold ConjSpec.select at hsel
-      exact (List.all_eq_true.mp hprev) q (mem_of_mapM_getElem? hsel q hq)
-    have hev := eval_coi hc (body := conjE [a.1, conjE hs, b.1, .not g]) (by
-      rw [eval_conjE]
-      simp only [List.all_cons, List.all_nil, Bool.and_true, eval_not]
-      rw [f0.1, f1.1, eval_conjE_propsOf f0.2.1 _ _ hhs, hyps_true, propOf_sound f1.2.1 hg, hgt]
-      have h0 := hasm n (by omega)
-      have h1 := hasm (n + 1) (Nat.le_refl _)
-      simp [h0, h1])
-    rw [huns] at hev; cases hev
-
 end
-
-/-! ## Against the reference semantics -/
-
-/-- **The conjunctive invariant, in the shared reference semantics**, for a
-residual `R` from the specializer run: at every cycle whose assumptions up to
-it all held, every conjunct of `interpretDesign`'s outputs holds. -/
-theorem runConjOf_sound_ref {D : DesignCert} {R : Stepper} {sp : ConjSpec}
-    {s0 : StateM} {pfB : ByteArray} {pfS : List ByteArray} (hres : MemResidual D R)
-    (hA : admitsWB D = true) (hr : runConjOf D R sp s0 pfB pfS = true)
-    (ins : Nat → RuntimeInput) (hins : ∀ n, (ins n).toList.map BV.width = sp.inW) :
-    ∀ n, (∀ j, j ≤ n → asmBit (refOut D (StateM.denote s0) ins j) (ins j) sp.asmOut sp.asmIn = true) →
-      sp.conjs.all (propBit (refOut D (StateM.denote s0) ins n)) = true := by
-  have hside := (conj_parts hr).1
-  have hinv := invC_all hres hA hr hins
-  have hR : ∀ n, runtimeFullOKB D (ins n) (traceM D s0 ins n) (edgesAll D) = true :=
-    fun n => runtime_of_invC hside (hinv n).1 (hinv n).2 (hins n)
-  have hden := traceM_denote hA hR
-  intro n hasm
-  rw [← (hden n).2]
-  exact runConjOf_sound hres hA hr hins n (fun j hj => by rw [(hden j).2]; exact hasm j hj)
 
 end HDLProof.Sym

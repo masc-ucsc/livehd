@@ -14,9 +14,9 @@ outputs BEFORE the edge and the state AFTER it, exactly `interpretDesign`'s shap
   `interpretDesign`. A stepper carries no state between steps, so this is the full step:
   `cert_trace route:vc` runs it only with `inc:off`; its default step reuses the last step's
   environment (`Compiler/ResidualEv`, `ResidualFlat`, `ResidualWork`). `Run/Engine`'s
-  `EngineSelector` builds every route and mode as an engine that keeps such state; `cert_run` runs
-  those engines. The steppers here remain, with their theorems, for code that steps runtime
-  states; `fpStep` is also the `fp` engine's step.
+  `EngineSelector` builds every route and mode as an engine that keeps such state, and the drivers
+  run those engines. Kept here: `irStep` (`irStep_sound`), `fpStep` (the `fp` engine's `loop:full`
+  step, `fpStep_agree`), and the `fp` route's checks and residual (`fpChecks`, `fpResidual`).
 * `ref`: `interpretDesign` itself. Exact by definition and slow on memories (a write wraps the
   memory function, so reads walk the chain).
 * `fp`: the Futamura projection's residual (`dcert2_memroute`'s route: `MemFused`, plain writes
@@ -57,26 +57,12 @@ def Route.parse? : String → Option Route
 def Route.name : Route → String
   | .ir => "ir" | .vc => "vc" | .ref => "ref" | .fp => "fp"
 
-structure Stepper where
-  name : String
-  step : ClockEdges → RuntimeInput → RuntimeState → Except String RuntimeResult
-
-instance : Inhabited Stepper := ⟨{ name := "none", step := fun _ _ _ => .error "no stepper" }⟩
-
 /-- The `ir` stepper, once `checkDesign D` has passed. -/
 def irStep (D : DesignCert) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :
     Except String RuntimeResult :=
   match Direct.checkRuntime D e i s with
   | .error err => .error err.render
   | .ok _ => .ok (Direct.directStepRaw D e i s)
-
-/-- The `ir` stepper on the staged direct step (`Compiler/DirectStaged`): the design is prepared
-once, each step is `Staged.step`, which `Staged.step_eq` proves equal to `directStepRaw`. -/
-def irStepStaged (P : Staged.Prep) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :
-    Except String RuntimeResult :=
-  match Direct.checkRuntime P.D e i s with
-  | .error err => .error err.render
-  | .ok _ => .ok (Staged.step P e i s)
 
 /-- The `fp` route's residual: the checked bundle and, unless `opt:off`, its shared-tails form. -/
 structure FpSim where
@@ -116,38 +102,6 @@ def fpResidual (D : DesignCert) : Except String Projection.Program :=
     | .ok R => .ok R
     | .error e => .error s!"fp: specialization failed ({repr e})"
   | .error e => .error s!"fp: specialization failed ({repr e})"
-
-/-- The stepper of route `r` for design `D`, or why it cannot be built. -/
-def mkStepper (D : DesignCert) (r : Route) (opt : Bool := true) : Except String Stepper :=
-  match r with
-  | .ir =>
-    match Direct.checkDesign D with
-    | .error e => .error s!"ir: the direct simulator refuses the certificate: {e.render}"
-    | .ok _ =>
-      let P := Staged.prepare D
-      .ok { name := "ir", step := irStepStaged P }
-  | .vc =>
-    match compileDesign D with
-    | .error e => .error s!"vc: compileDesign refused: {repr e}"
-    | .ok R0 =>
-      let R := if opt then (ResidualOpt.optimizeWith R0).1 else R0
-      .ok { name := "vc", step := fun e i s => .ok (denoteResidual R e i s) }
-  | .ref => .ok { name := "ref", step := fun e i s => .ok (interpretDesign D e i s) }
-  | .fp =>
-    match fpChecks D with
-    | some e => .error s!"fp: {e}"
-    | none =>
-      match fpResidual D with
-      | .error e => .error e
-      | .ok R =>
-        match Projection.HwMem.mkMemSimOfW D R with
-        | none => .error "fp: the memory route does not admit the design, or checkResidual rejects its residual"
-        | some sim =>
-          .ok { name := "fp",
-                step := fpStep D ⟨sim, if opt then Projection.ShareTails.shareSim sim else none⟩ }
-
-/-- Every clock fires. -/
-def allClocks (D : DesignCert) : ClockEdges := Array.replicate D.clocks.size true
 
 end Run
 end HDLProof

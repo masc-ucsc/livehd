@@ -24,7 +24,6 @@ namespace HDLProof
 #audit_axioms Sym.eval_norm
 #audit_axioms Sym.checkUnsat_sound
 #audit_axioms Sym.runInvKOf_sound_ref
-#audit_axioms Sym.runConjOf_sound_ref
 #audit_axioms Sym.stateVarT_rel
 #audit_axioms Sym.runConjTOf_sound_ref
 
