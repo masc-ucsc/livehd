@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # run_tier.sh quick|full: the Lean tools' tests, by tier, in one run.
 #
-#   quick  every commit (about 30 min): .build-proj.sh (every module, DirectTests' guards, the axiom
-#          gate), a check that .olean-dev is a build of these sources (check_fresh.sh), the axiom
+#   quick  every commit (about 30 min): .build-proj.sh (every module, DirectTests' guards, the DCERT4
+#          codec's and admission's guards (CertIOChecks), the axiom gate, the format theorems' gate
+#          lines), a check that .olean-dev is a build of these sources (check_fresh.sh), the axiom
 #          gate's own controls, the Lean-only checks (image_check: program images; engine_examples: every engine
 #          on lgraph-sim's in-Lean examples, and the ir route's refusal of the malformed ones), the
 #          certificate format (dcert_version_check: the codec on every version; cert_admit_selftest.sh:
@@ -12,12 +13,17 @@
 #          fixtures, lgraph-sim's command line), the operator corpus on every engine against ref
 #          (opcorpus_test.sh, interpreted), sym_observe_test, reach_selftest and judge_selftest.
 #   full   nightly (about 3.5 h): quick, then the sym, refmap, run, ckpt and lhd_ckpt_import
-#          self-tests, xpatch, the lake side (CompileOpt, LgraphSim), the census traces, the
-#          Verilog designs against Verilator on every route (vref_test.sh, with TV and legacy), the
-#          operator corpus natively on every route and TV (opcorpus_test.sh), and the exporter's
-#          oracles (pass/lean/Exporter/Frontend/scripts/*_oracle.sh: small designs exported by lhd,
-#          every Lean route on their certificates against iverilog on the source, and the value
-#          gates on the real scanner's certificates), all 21 in one test (about 30 min).
+#          self-tests, xpatch, the certificates lhd writes (lhd_dcert_test.sh: DCERT4, admitted,
+#          and byte for byte the Lean literal's, dcert_parity.py), the lake side (CompileOpt,
+#          LgraphSim, and the Mathlib-side format theorems under the axiom gate, CertIOAudit), the
+#          census traces, the Verilog designs against Verilator on every route (vref_test.sh, with
+#          TV and legacy), the operator corpus natively on every route and TV (opcorpus_test.sh),
+#          the exporter's memory depth (design_scan_test's DesignScanMemoryDepth unit tests), the
+#          real scanner's multi-domain certificates in Lean (scanner_dcert_test.sh), and the
+#          exporter's oracles (pass/lean/Exporter/Frontend/scripts/*_oracle.sh: small designs
+#          exported by lhd, every Lean route on their certificates against iverilog on the source,
+#          and the value gates on the real scanner's certificates), all 21 in one test (about 30
+#          min).
 #
 # One line per test, then a summary:
 #   PASS <test> (<seconds> s)
@@ -40,9 +46,10 @@
 #   NATROOT      build-opt.sh ROOT for the native cert_trace and per-design simulators of the census
 #                traces, vref_test and opcorpus_test (default $OUT/natroot)
 #   verilator on PATH for vref_test (full); without it the test is a SKIP
-#   DESIGN_SCAN_TEST  the //pass/lean:design_scan_test binary the exporter oracles' value gates
-#                run (default bazel-bin/pass/lean/design_scan_test); iverilog and vvp on PATH and
-#                LHD for the exporter oracles (full); without any of them the test is a SKIP
+#   DESIGN_SCAN_TEST  the //pass/lean:design_scan_test binary (default
+#                bazel-bin/pass/lean/design_scan_test): the exporter's memory depth, the scanner's
+#                certificates and the exporter oracles' value gates run it (full); iverilog and vvp
+#                on PATH and LHD for the exporter oracles; without any of them the test is a SKIP
 set -uo pipefail
 TIER="${1:-}"
 [[ "$TIER" == quick || "$TIER" == full ]] || { echo "usage: run_tier.sh quick|full" >&2; exit 2; }
@@ -135,17 +142,22 @@ if [[ "$TIER" == full ]]; then
     run_test ckpt_selftest '^PASS ckpt_selftest' env LHD="$LHD" OUT="$OUT/out_ckpt" bash "$SCRIPT_DIR/ckpt_selftest.sh"
     run_test lhd_ckpt_import_test '^PASS lhd_ckpt_import_test' env LHD="$LHD" OUT="$OUT/out_import" \
       bash "$SCRIPT_DIR/lhd_ckpt_import_test.sh"
+    run_test lhd_dcert '^PASS lhd_dcert_test' env LHD="$LHD" OUT="$OUT/out_lhd_dcert" bash "$SCRIPT_DIR/lhd_dcert_test.sh"
     if command -v cadical > /dev/null; then
       run_test xpatch - env LHD="$LHD" OUT="$OUT/out_xpatch" bash "$ROOT/pass/lean/xpatch/run.sh"
     else
       record xpatch SKIP 0 "cadical is not on PATH"
     fi
   else
-    for t in sym_selftest refmap_selftest run_selftest ckpt_selftest lhd_ckpt_import_test xpatch; do
+    for t in sym_selftest refmap_selftest run_selftest ckpt_selftest lhd_ckpt_import_test lhd_dcert xpatch; do
       record "$t" SKIP 0 "no lhd at $LHD"
     done
   fi
-  run_test lake - bash -c "cd '$L' && lake build LeanSemanticPrimitives.Compiler.CompileOpt LgraphSim"
+  # the Mathlib side: the verified compiler's optimizer, lgraph-sim, and the certificate format's
+  # theorems (the round trip, injectivity), whose #audit_axioms lines fail the build on a sorry or
+  # a native axiom (CertIOAudit)
+  run_test lake - bash -c "cd '$L' && lake build LeanSemanticPrimitives.Compiler.CompileOpt LgraphSim \
+    LeanSemanticPrimitives.Compiler.CertIOAudit"
   if [[ -n "${CENSUS_ROWS:-}" && -n "${STAGE0:-}" ]]; then
     census_traces() {
       local nr="$NATROOT" bad=0 n=0
@@ -180,6 +192,22 @@ if [[ "$TIER" == full ]]; then
   else
     run_test vref_test '^PASS vref_test' env LHD="$LHD" OUT="$OUT/out_vref" NATROOT="$NATROOT" PERDESIGN=1 \
       bash "$SCRIPT_DIR/vref_test.sh"
+  fi
+  # the exporter's C++ unit tests of the memory depth, and the real scanner's multi-domain
+  # certificates in Lean: both run design_scan_test
+  if [[ ! -x "$DESIGN_SCAN_TEST" ]]; then
+    for t in exporter_depth scanner_dcert; do
+      record "$t" SKIP 0 "no design_scan_test at $DESIGN_SCAN_TEST (bazel build //pass/lean:design_scan_test)"
+    done
+  else
+    # every test the filter names passed, at least one ran, none skipped
+    exporter_depth() {
+      mkdir -p "$OUT/out_depth" && (cd "$OUT/out_depth" && "$DESIGN_SCAN_TEST" --gtest_filter='DesignScanMemoryDepth.*') \
+        && ! grep -q '^\[  SKIPPED \]' "$OUT/exporter_depth.log"
+    }
+    run_test exporter_depth '^\[  PASSED  \] [1-9][0-9]* tests?\.' exporter_depth
+    run_test scanner_dcert '^PASS scanner_dcert_test' env DESIGN_SCAN_TEST="$DESIGN_SCAN_TEST" OUT="$OUT/out_scanner_dcert" \
+      bash "$SCRIPT_DIR/scanner_dcert_test.sh"
   fi
   # the exporter's oracles, one at a time (each builds what it loads; see oracle_lean.sh there): a
   # script passes when it exits 0 with its `PASS:` line; the note names every one that did not
