@@ -932,6 +932,131 @@ TEST(DesignScan, UnprovenMemoryIsRefused) {
         << e.what();
   }
 }
+
+// THE EXPORTER'S MEMORY DEPTH (case C11 of the format test plan).
+//
+// A Memory cell's `size` is the memory's real depth, DCERT4's `MemoryDesc.depth`: its address
+// width is ceil_log2(size), so a size that is not a power of two leaves words in the 2^aw table
+// that the hardware does not have, and the Lean loader refuses any access that could reach them
+// (`Compiler.MemAddr`). memory_lowering copies the size into the certificate; until these tests,
+// only the self-tests that need a built lhd checked it. A RAM of `size` words, one write port and
+// one synchronous read port on one clock, 4-bit addresses.
+std::shared_ptr<hhds::Graph> build_depth_fixture(std::string_view lgdb, int64_t size) {
+  auto&    lib = livehd::Hhds_graph_library::instance(std::string(lgdb));
+  auto     io  = lib.create_io("depthfix");
+  uint32_t pid = 1;
+  for (const char* n : {"clk", "we", "re"}) {
+    io->add_input(n, pid++);
+    io->set_bits(n, 1);
+  }
+  for (const char* n : {"waddr", "raddr"}) {
+    io->add_input(n, pid++);
+    io->set_bits(n, 4);
+  }
+  io->add_input("wdata", pid++);
+  io->set_bits("wdata", 8);
+  io->add_output("rdata", 1);
+  io->set_bits("rdata", 8);
+  auto g   = io->create_graph();
+  auto ram = create_proven_memory(*g);
+  // the read port's data: pin (#write ports + read ordinal) = 1
+  set_bits(ram.create_driver_pin(1), 8);
+  const auto mstride = static_cast<uint32_t>(Ntype::Memory_port_stride);
+  auto       sink    = [&](std::string_view n, uint32_t port) {
+    return ram.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, n) + port * mstride);
+  };
+  auto cst = [&](std::string_view n, int64_t v, uint32_t port = 0) {
+    livehd::graph_util::create_const(*g, *Dlop::create_integer(v)).connect_sink(sink(n, port));
+  };
+  cst("bits", 8);
+  cst("size", size);
+  cst("type", 1);  // synchronous read
+  cst("wensize", 1);
+  cst("fwd", 0);
+  cst("posclk", 1);
+  cst("rdport", 0, 0);  // port 0 writes
+  cst("rdport", 1, 1);  // port 1 reads
+  g->get_input_pin("waddr").connect_sink(sink("addr", 0));
+  g->get_input_pin("wdata").connect_sink(sink("din", 0));
+  g->get_input_pin("we").connect_sink(sink("enable", 0));
+  g->get_input_pin("raddr").connect_sink(sink("addr", 1));
+  g->get_input_pin("re").connect_sink(sink("enable", 1));
+  g->get_input_pin("clk").connect_sink(sink("clock_pin", 0));
+  g->get_input_pin("clk").connect_sink(sink("clock_pin", 1));
+  ram.create_driver_pin(1).connect_sink(g->get_output_pin("rdata"));
+  return g;
+}
+
+// The records of section `k` of a DCERT4 text (0 sources, 1 nodes, 2 outputs, 3 flops,
+// 4 memories, 5 clocks): each section is its count, then one record a line (no clock name here
+// holds a newline).
+std::vector<std::string> dcert_section(const std::string& text, size_t k) {
+  std::istringstream       in(text);
+  std::string              line;
+  std::vector<std::string> recs;
+  std::getline(in, line);  // the magic
+  for (size_t s = 0; s <= k; ++s) {
+    if (!std::getline(in, line)) {
+      ADD_FAILURE() << "the certificate ends before section " << s;
+      return {};
+    }
+    const auto n = std::stoul(line);
+    recs.clear();
+    for (size_t r = 0; r < n && std::getline(in, line); ++r) {
+      recs.push_back(line);
+    }
+  }
+  return recs;
+}
+
+TEST(DesignScanMemoryDepth, PartialTableCarriesItsDepth) {
+  auto       g      = build_depth_fixture("lgdb_depth_12", 12);
+  const auto design = scan_design(*g, {});
+  const auto cert   = build_certificate(design, {});
+  ASSERT_EQ(cert.memories.size(), 1u);
+  EXPECT_EQ(cert.memories[0].addr_w, 4u) << "12 words need a 4-bit address";
+  EXPECT_EQ(cert.memories[0].depth, 12u) << "the cell's size is the memory's depth";
+  const auto text = render_dcert(cert);
+  ASSERT_EQ(text.rfind("DCERT4\n", 0), 0u) << "the certificate is not DCERT4";
+  const auto mems = dcert_section(text, 4);
+  ASSERT_EQ(mems.size(), 1u);
+  EXPECT_TRUE(mems[0].starts_with("4 8 ")) << "aw 4, dw 8: " << mems[0];
+  EXPECT_TRUE(mems[0].ends_with(" 12")) << "the memory record's last field is its depth: " << mems[0];
+  std::ostringstream literal;
+  emit_design_cert(design, cert, literal);
+  EXPECT_NE(literal.str().find("depth := 12 }"), std::string::npos) << literal.str();
+}
+
+TEST(DesignScanMemoryDepth, WholeTableCarriesItsDepth) {
+  auto       g      = build_depth_fixture("lgdb_depth_16", 16);
+  const auto design = scan_design(*g, {});
+  const auto cert   = build_certificate(design, {});
+  ASSERT_EQ(cert.memories.size(), 1u);
+  EXPECT_EQ(cert.memories[0].addr_w, 4u);
+  EXPECT_EQ(cert.memories[0].depth, 16u);
+  const auto mems = dcert_section(render_dcert(cert), 4);
+  ASSERT_EQ(mems.size(), 1u);
+  EXPECT_TRUE(mems[0].ends_with(" 16")) << mems[0];
+  // the literal states a depth only for a partial table: `depth` defaults to 2 ^ aw
+  std::ostringstream literal;
+  emit_design_cert(design, cert, literal);
+  EXPECT_EQ(literal.str().find("depth :="), std::string::npos) << literal.str();
+}
+
+// Unset (0) is the whole 2^aw table, which a 64-bit address cannot name: the DCERT4 writer
+// refuses such a memory rather than writing a depth it would have to guess.
+TEST(DesignScanMemoryDepth, AnUnsetDepthIsTheWholeTableOrRefused) {
+  auto g    = build_depth_fixture("lgdb_depth_unset", 12);
+  auto cert = build_certificate(scan_design(*g, {}), {});
+  ASSERT_EQ(cert.memories.size(), 1u);
+  cert.memories[0].depth = 0;
+  const auto mems        = dcert_section(render_dcert(cert), 4);
+  ASSERT_EQ(mems.size(), 1u);
+  EXPECT_TRUE(mems[0].ends_with(" 16")) << "an unset depth is the whole table: " << mems[0];
+  cert.memories[0].addr_w = 64;
+  EXPECT_THROW(render_dcert(cert), std::invalid_argument);
+}
+
 // Three transparent wrappers may sit between a primary input and an
 // asynchronous reset pin: the emitter's arity-1 Or resize, a zero-based
 // Get_mask window covering the source, and a ONE-BIT Sext. The last is what
