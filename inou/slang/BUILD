@@ -277,6 +277,7 @@ _SV_SOURCES = glob(
     exclude = [
         # These retain checks that a source/round-trip comparison cannot express.
         "tests/sv/scalar_initial_no_reset.v",
+        "tests/sv/async_reset_memory.v",
         "tests/sv/mem_struct_slice_write.v",
         "tests/sv/ignored_assertion_past.sv",
         "tests/sv/packed_array_loop_reg_sroa.v",
@@ -344,6 +345,22 @@ sh_test(
         "//inou/yosys:scripts",
         "//lhd",
     ],
+)
+
+# An asynchronous reset rung that resets every memory entry to a constant is
+# the memory's asynchronous reset, not a demoted synchronous one: Pyrope,
+# Verilog and certificate spellings, LEC, the forms that still demote, the
+# initial-contents rule, and an event-level leg under LHD_EXTERNAL_SIM=1.
+sh_test(
+    name = "slang_async_reset_memory",
+    srcs = ["tests/async_reset_memory_test.sh"],
+    data = [
+        "tests/sv/async_reset_memory.v",
+        "//lhd",
+        "//ware:cgen_memory_rtl",
+    ],
+    # The optional event-level leg finds iverilog/vvp on PATH.
+    env_inherit = ["PATH"],
 )
 
 sh_test(

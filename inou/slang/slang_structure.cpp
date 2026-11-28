@@ -3276,7 +3276,7 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
     ln.add_child(aidx, Lnast_node::create_ref(name));
     ln.add_child(aidx, Lnast_node::create_const("initial"));
     ln.add_child(aidx, Lnast_node::create_const(packed_mem_contents(iit->second, mi.size, ei.bits)));
-    ln.add_child(didx, Lnast_node::create_const("nil"));
+    mem_decl_init_.insert_or_assign(&sym, ln.add_child(didx, Lnast_node::create_const("nil")));
   } else if (iit != mem_init_vals_.end() && !iit->second.empty()) {
     const auto& vals = iit->second;
     const bool  uniform
@@ -3295,7 +3295,7 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
       }
     }
   } else if (is_reg) {
-    ln.add_child(didx, Lnast_node::create_const("nil"));  // no power-on contents
+    mem_decl_init_.insert_or_assign(&sym, ln.add_child(didx, Lnast_node::create_const("nil")));  // no power-on contents
   } else {
     // A COMBINATIONAL linearized array (a multi-dimensional one; the flat branch
     // above took every 1-D case) is aggregate storage with no power-on value, so
@@ -6872,7 +6872,7 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
     auto&     reset_stores = arm.stores;
     auto&     async_loads  = arm.loads;
     auto&     partials     = arm.partials;
-    bool      harvested    = harvest_reset_arm(cond_stmt.ifTrue, arm, /*allow_loads=*/true);
+    bool      harvested    = harvest_reset_arm(cond_stmt.ifTrue, arm, /*allow_loads=*/true, /*allow_mems=*/true);
     // A symbol that ALSO has a continuous-assign driver is only PARTLY a
     // register, so `full` (its whole declared width) is a denominator the reset
     // slices can never reach — queueing it would only guarantee a spurious
@@ -6896,6 +6896,26 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
           break;
         }
       }
+    }
+    // A REGISTER MEMORY the arm writes takes this asynchronous reset only when
+    // the memory lowering can state it exactly: one reset value per entry for
+    // EVERY entry (a memory reset reloads the whole array; an entry the arm
+    // skips would have to hold), this process the memory's only writer (the
+    // memory gates ALL its write ports with the reset, and another process's
+    // writes do not wait for it), the guard polarity equal to the edge (the
+    // memory has one active level), and the FIRST rung: a later rung's arm runs
+    // only while every earlier guard is inactive (`if (arst) .. else if (brst)
+    // <memory reset>` leaves the memory alone while arst is held), and one reset
+    // pin cannot say that. Anything else keeps the previous lowering below.
+    // Checked here, before the queueing below, for the reason given above.
+    for (const auto& [sym, entries] : arm.mems) {
+      if (!harvested) {
+        break;
+      }
+      const auto writers    = array_writer_count_.find(sym);
+      const bool one_writer = writers != array_writer_count_.end() && writers->second == 1;
+      const bool every      = static_cast<int64_t>(entries.size()) == mem_info_.at(sym).size;
+      harvested             = !peeled_any && every && one_writer && edge_pos == polarity;
     }
     if (harvested) {
       // A single process may cover the whole register, or generated sibling
@@ -6958,6 +6978,9 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
       for (const auto& [sym, expr] : async_loads) {
         rung_syms.push_back(sym);
       }
+      for (const auto& [sym, entries] : arm.mems) {
+        rung_syms.push_back(sym);  // a memory has one reset pin too
+      }
       for (const auto* sym : rung_syms) {
         bool bit_overlap = false;
         for (const auto& [bsym, bit] : async_rung_bits) {
@@ -6989,6 +7012,9 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
       auto ti    = tinfo(sym->getType());
       auto value = fit_wrap(lower_rvalue(*expr), ti.bits, ti.is_signed);
       emit_reg_reset_attrs(*sym, value, reset_ref_name, edge_pos, true);
+    }
+    for (const auto& [sym, entries] : arm.mems) {
+      emit_mem_async_reset(*sym, entries, reset_ref_name, edge_pos);
     }
 
     // Peeling the reset arm into per-register attributes must not discard the
@@ -7271,9 +7297,49 @@ slang::SVInt Slang_module_state::Reset_slices::assemble() const {
   return out;
 }
 
-bool Slang_context::harvest_reset_arm(const slang::ast::Statement& arm, Reset_arm& out, bool allow_loads) {
+bool Slang_context::harvest_reset_arm(const slang::ast::Statement& arm, Reset_arm& out, bool allow_loads, bool allow_mems) {
   using slang::ast::ExpressionKind;
   using slang::ast::StatementKind;
+  // REGISTER-MEMORY entries (`allow_mems`, the asynchronous rung only):
+  // `m[k] <= C` on a memory declare_unpacked lowered natively. The values are
+  // collected per entry (last write wins, as the updates apply in program
+  // order); whether they cover the whole memory is the caller's question. A
+  // write outside the declared range does nothing in Verilog and is skipped.
+  // An x/z value has no memory reset spelling and declines the arm.
+  int  loop_depth = 0;  // inside a harvested `for`: only memory entries may be written
+  auto mem_entry  = [&](const slang::ast::Expression& lhs, const slang::ast::ValueSymbol& sym, const slang::SVInt& value) -> bool {
+    const auto&                                mi = mem_info_.at(&sym);
+    std::vector<const slang::ast::Expression*> sels;
+    const auto*                                base = peel_unpacked_chain(lhs, sels);
+    if (base->kind != ExpressionKind::NamedValue || &base->as<slang::ast::NamedValueExpression>().symbol != &sym
+        || sels.size() != mi.rank() || lhs.type->getCanonicalType().isUnpackedArray() || value.hasUnknown()) {
+      return false;  // a sub-array, a part of an element, or an unknown value
+    }
+    // Row-major linear entry, exactly as build_unpacked_address folds it.
+    int64_t entry  = 0;
+    bool    inside = true;
+    for (size_t k = 0; k < sels.size(); ++k) {
+      const auto d  = mi.dims.empty() ? Mem_info::Dim{mi.lower, mi.size} : mi.dims[k];
+      const auto ci = try_eval_int(*sels[k]);
+      if (!ci) {
+        return false;
+      }
+      inside = inside && *ci >= d.lower && *ci - d.lower < d.width;
+      entry  = entry * d.width + (*ci - d.lower);
+    }
+    if (!inside) {
+      return true;
+    }
+    auto v = value.resize(static_cast<slang::bitwidth_t>(mi.elem_bits));
+    v.setSigned(false);  // unsigned spelling, as Reset_slices::assemble explains
+    auto it = std::find_if(out.mems.begin(), out.mems.end(), [&](const auto& m) { return m.first == &sym; });
+    if (it == out.mems.end()) {
+      out.mems.emplace_back(&sym, std::map<int64_t, slang::SVInt>{});
+      it = std::prev(out.mems.end());
+    }
+    it->second.insert_or_assign(entry, std::move(v));
+    return true;
+  };
   // PARTIAL (bit-range) reset writes: `if (!rst_b) begin q[9:1] <= 0; q[0] <= 1; end`
   // is one constant reset value spelled across several slices. Requiring a
   // whole-reg NamedValue write rejected it, and the whole always block then
@@ -7322,6 +7388,12 @@ bool Slang_context::harvest_reset_arm(const slang::ast::Statement& arm, Reset_ar
     const auto* sym = lhs_base_symbol(lhs);
     if (sym == nullptr || !reg_syms_.contains(sym)) {
       return false;
+    }
+    if (allow_mems && mem_decl_init_.contains(sym)) {
+      return mem_entry(lhs, *sym, value);
+    }
+    if (loop_depth > 0) {
+      return false;  // a harvested loop resets memory entries only
     }
     if (bit_regs_.contains(sym)) {
       Packed_lv lv;
@@ -7402,7 +7474,7 @@ bool Slang_context::harvest_reset_arm(const slang::ast::Statement& arm, Reset_ar
             return false;
           }
           if (as.isNonBlocking() && as.left().kind == ExpressionKind::NamedValue && !sym->getType().isUnpackedArray()
-              && !packed_mem_regs_.contains(sym)) {
+              && !packed_mem_regs_.contains(sym) && loop_depth == 0) {
             if (!allow_loads) {
               return false;  // a runtime SYNC reset value is ordinary data, not a reset
             }
@@ -7412,6 +7484,75 @@ bool Slang_context::harvest_reset_arm(const slang::ast::Statement& arm, Reset_ar
           return false;
         }
         return harvest_constant(as.left(), cv->integer());
+      }
+      case StatementKind::VariableDeclaration:
+        // A header-declared counter (`for (int i = 0; ...)`): slang wraps the
+        // loop in an implicit block that declares it first. The loop below
+        // binds it again from its initializer.
+        return allow_mems && elaboration_counters_.contains(&s.as<slang::ast::VariableDeclStatement>().symbol);
+      case StatementKind::ForLoop: {
+        // `for (k = 0; k < N; k = k + 1) m[k] <= C(k);` -- the usual spelling of
+        // a whole-memory reset. Walk it at elaboration time, as
+        // collect_initial_values does for an `initial` loop: each counter is an
+        // EvalContext local, so the selectors and values fold per iteration.
+        // Peeling the arm drops the loop, and with it the loop's own writes to
+        // its counters, so every counter must be an elaboration counter (no
+        // use outside the loops that bind it).
+        if (!allow_mems || !eval_ctx_) {
+          return false;
+        }
+        const auto&                                 loop = s.as<slang::ast::ForLoopStatement>();
+        std::vector<const slang::ast::ValueSymbol*> locals;
+        bool                                        ok = loop.stopExpr != nullptr && !loop.steps.empty();
+        for (const auto* lv : loop.loopVars) {
+          slang::ConstantValue init;
+          if (const auto* ie = lv->getInitializer()) {
+            if (auto cv = try_eval(*ie)) {
+              init = *cv;
+            }
+          }
+          if (!ok || init.bad() || !elaboration_counters_.contains(lv)) {
+            ok = false;
+            break;
+          }
+          eval_ctx_->createLocal(lv, init);
+          locals.push_back(lv);
+        }
+        if (ok && loop.loopVars.empty()) {
+          for (const auto* ie : loop.initializers) {
+            if (ie->kind != ExpressionKind::Assignment
+                || ie->as<slang::ast::AssignmentExpression>().left().kind != ExpressionKind::NamedValue) {
+              ok = false;
+              break;
+            }
+            const auto& assign = ie->as<slang::ast::AssignmentExpression>();
+            const auto& sym    = assign.left().as<slang::ast::NamedValueExpression>().symbol;
+            auto        cv     = try_eval(assign.right());
+            if (!cv || !elaboration_counters_.contains(&sym)) {
+              ok = false;
+              break;
+            }
+            eval_ctx_->createLocal(&sym, *cv);
+            locals.push_back(&sym);
+          }
+        }
+        ++loop_depth;
+        for (int iterations = 0; ok; ++iterations) {
+          auto stop = iterations < options_.unroll_limit ? try_eval(*loop.stopExpr) : std::nullopt;
+          if (!stop || !stop->isTrue()) {
+            ok = stop.has_value();  // false: over the unroll limit, or a stop test that does not fold
+            break;
+          }
+          ok = harvest(loop.body);
+          for (const auto* step : loop.steps) {
+            ok = ok && try_eval(*step).has_value();
+          }
+        }
+        --loop_depth;
+        for (const auto* lv : locals) {
+          eval_ctx_->deleteLocal(lv);
+        }
+        return ok;
       }
       default: return false;
     }
@@ -7577,6 +7718,72 @@ void Slang_context::emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std
     // active-high `if (rst_n)` into an active-low reset (LEC false PROVEN).
     emit_attr(target.name, "negreset", edge_pos ? "false" : "true", false);
   }
+}
+
+// An asynchronous reset rung that sets EVERY entry of a register memory to a
+// constant (the rung loop checked coverage, the single writer and the
+// polarity). The memory then carries the reset the way a Pyrope register
+// array spells it, `reg m:[N]T:[reset_pin=r, sync=false, negreset=…] = <reset
+// contents>`: tolg binds the cell's whole-array reset pin to `r` (async),
+// reloads the contents from the declaration initializer and gates every write
+// port while the reset is asserted. The declare was emitted before any process
+// lowered, so its `nil` initializer is rewritten in place.
+//
+// Power-on contents from an `initial` block follow the register rule
+// (emit_reg_reset_attrs): a memory has ONE initial value, so contents equal to
+// the reset contents are kept with the `reg-init-and-reset` warning, and
+// different contents are refused (tolg would refuse the pair as well).
+void Slang_context::emit_mem_async_reset(const slang::ast::ValueSymbol& sym, const std::map<int64_t, slang::SVInt>& entries,
+                                         std::string_view reset_ref, bool edge_pos) {
+  const auto&       mi    = mem_info_.at(&sym);
+  const std::string image = packed_mem_contents(entries, mi.size, mi.elem_bits);
+  if (auto iit = mem_init_vals_.find(&sym); iit != mem_init_vals_.end() && !iit->second.empty()) {
+    const std::string power_on = packed_mem_contents(iit->second, mi.size, mi.elem_bits);
+    if (power_on != image) {
+      emit_unsupported(slang::SourceRange(sym.location, sym.location),
+                       "reset-init-mismatch",
+                       std::string("memory '") + std::string(sym.name) + "' has the power-on contents " + power_on
+                           + " but is asynchronously reset to " + image
+                           + "; a memory has ONE initial value (its power-on contents ARE its reset contents), so the two "
+                             "must agree",
+                       "drop the initial block, or give it the reset contents");
+      return;
+    }
+    if (init_reset_warned_.insert(&sym).second) {
+      emit_warning(slang::SourceRange(sym.location, sym.location),
+                   "reg-init-and-reset",
+                   "unsupported",
+                   std::string("memory '") + std::string(sym.name)
+                       + "' has both initial-block contents and an asynchronous reset to the same contents; LiveHD keeps "
+                         "one power-on value (the reset contents)",
+                   "drop the initial block and rely on the reset");
+    }
+  }
+
+  auto&      ln      = *builder_.lnast;
+  const auto nid     = mem_decl_init_.at(&sym);
+  const auto first   = entries.begin()->second;
+  const bool uniform = std::all_of(entries.begin(), entries.end(), [&](const auto& kv) { return exactlyEqual(kv.second, first); });
+  set_pending_loc(sym.location);
+  if (uniform) {
+    ln.set_data(nid, Lnast_node::create_const(const_text(first)));
+  } else {
+    ln.set_data(nid, Lnast_ntype::create_tuple_add());
+    for (const auto& [entry, value] : entries) {  // entries 0..size-1, in order
+      ln.add_child(nid, Lnast_node::create_const(const_text(value)));
+    }
+  }
+  const auto name      = lname_of(sym);
+  auto       emit_attr = [&](std::string_view key, const Lnast_node& val) {
+    auto idx = builder_.add_child(Lnast_ntype::create_attr_set());
+    ln.add_child(idx, Lnast_node::create_ref(name));
+    ln.add_child(idx, Lnast_node::create_const(key));
+    ln.add_child(idx, val);
+  };
+  emit_attr("reset_pin", Lnast_node::create_ref(reset_ref));
+  emit_attr("sync", Lnast_node::create_const("false"));
+  emit_attr("negreset", Lnast_node::create_const(edge_pos ? "false" : "true"));
+  clear_pending_loc();
 }
 
 // Declare one flop per (signal, depth) for every `$past` in the body. Done

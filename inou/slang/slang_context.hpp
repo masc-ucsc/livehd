@@ -353,6 +353,13 @@ struct Slang_module_state {
   // mem_init_vals_); declare_reg emits them as the array's tuple initializer
   // and the async-reset lowering then skips its scalar `initial` for these.
   absl::flat_hash_map<const slang::ast::Symbol*, std::vector<std::string>> array_reset_lanes_;
+  // The `nil` initializer leaf of each REGISTER memory declare_unpacked emits
+  // as a native Memory with no file preload. An asynchronous reset rung found
+  // later, while the process lowers, rewrites this leaf into the memory's
+  // reset contents (a scalar or a tuple literal: the declaration initializer
+  // IS a register array's reset value). Only memories listed here can take an
+  // asynchronous reset from the reader.
+  absl::flat_hash_map<const slang::ast::Symbol*, Lnast_nid>                mem_decl_init_;
 
   // ── scalar packed-struct vars as per-field BUNDLES ─────────────────────────
   // A scalar (non-array, non-reg, non-port) packed-struct variable lowers to one
@@ -697,6 +704,9 @@ private:
   // Constant register values collected from one reset arm. `stores` are
   // whole-register writes, `partials` accumulate constant SLICES of one
   // register, and `loads` are runtime values an ASYNC arm may drive.
+  // `mems` holds constant ENTRY writes to a register memory (mem_decl_init_),
+  // entry index -> unsigned element value; only an asynchronous rung collects
+  // them (`allow_mems`).
   struct Reset_arm {
     struct Bit_store {
       const slang::ast::ValueSymbol* sym;
@@ -704,12 +714,21 @@ private:
       std::string                    value;
     };
 
-    std::vector<std::pair<const slang::ast::ValueSymbol*, std::string>>                   stores;
-    std::vector<std::pair<const slang::ast::ValueSymbol*, const slang::ast::Expression*>> loads;
-    std::vector<std::pair<const slang::ast::ValueSymbol*, Reset_slices>>                  partials;
-    std::vector<Bit_store>                                                                bit_stores;
+    std::vector<std::pair<const slang::ast::ValueSymbol*, std::string>>                     stores;
+    std::vector<std::pair<const slang::ast::ValueSymbol*, const slang::ast::Expression*>>   loads;
+    std::vector<std::pair<const slang::ast::ValueSymbol*, Reset_slices>>                    partials;
+    std::vector<Bit_store>                                                                  bit_stores;
+    std::vector<std::pair<const slang::ast::ValueSymbol*, std::map<int64_t, slang::SVInt>>> mems;
   };
-  bool harvest_reset_arm(const slang::ast::Statement& arm, Reset_arm& out, bool allow_loads);
+  // `allow_mems` (the asynchronous rung only) also accepts constant writes to
+  // register-memory entries, spelled directly or through constant-bounded
+  // `for` loops whose counters nothing else observes.
+  bool harvest_reset_arm(const slang::ast::Statement& arm, Reset_arm& out, bool allow_loads, bool allow_mems = false);
+  // The asynchronous reset of a register memory whose rung reset every entry
+  // to a constant: its declaration initializer becomes the reset contents and
+  // it takes the rung's reset_pin, polarity and async flavour.
+  void emit_mem_async_reset(const slang::ast::ValueSymbol& sym, const std::map<int64_t, slang::SVInt>& entries,
+                            std::string_view reset_ref, bool edge_pos);
   // `async` picks the reset FLAVOUR: an edge-triggered rung (the default) emits
   // `sync=false`, a recognized synchronous `if (rst)` guard emits `sync=true`.
   void emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std::string_view initial, std::string_view reset_ref, bool edge_pos,
