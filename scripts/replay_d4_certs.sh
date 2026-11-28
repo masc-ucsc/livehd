@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Replay RETAINED DCERT1 certificates through the runtime path.
+# Replay RETAINED DCERT4 certificates through the runtime path (an older version is refused at
+# load: convert a DCERT3 file with dcert_upgrade first).
 #
 # The sweep (`run_d4_runtime_sweep.sh`) re-emits every block from RTL, which for
 # CORE-ET's 122 is ~1.5 h and re-measures the FRONT END.  When the question is
@@ -8,7 +9,7 @@
 # This script holds the certificates FIXED -- it refuses to run one whose
 # SHA-256 does not match the recorded table -- and re-runs only
 #
-#     <mod>.dcert --CertIO.loadCert--> runChecked
+#     <mod>.dcert --CertIO.readCertChecked--> runChecked
 #
 # at the ORDINARY stack limit, then diffs every digest against the recorded one.
 #

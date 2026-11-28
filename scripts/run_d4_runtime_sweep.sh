@@ -7,7 +7,7 @@
 # 91-98% of end-to-end wall time on the large modules.  This script never
 # elaborates anything.  Per block it runs
 #
-#     RTL --lhd--> <mod>.dcert --CertIO.loadCert--> runChecked
+#     RTL --lhd--> <mod>.dcert --CertIO.readCertChecked--> runChecked
 #
 # at the ORDINARY stack limit, and emits one machine-readable row.
 #

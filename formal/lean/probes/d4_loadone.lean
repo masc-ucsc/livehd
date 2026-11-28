@@ -36,7 +36,7 @@ def main (args : List String) : IO Unit := do
   let t0 ← IO.monoMsNow
   let b ← IO.FS.readBinFile p
   let t1 ← IO.monoMsNow
-  match parseCert b with
+  match readCertChecked b with
   | .error e => IO.println s!"{name}\t{p}\tPARSE_ERROR\t{e}"
   | .ok D =>
     let t2 ← IO.monoMsNow

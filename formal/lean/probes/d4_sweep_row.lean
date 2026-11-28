@@ -1,7 +1,7 @@
 /-
-One sweep row, from a DCERT2 file.  RUNTIME path only: this never elaborates or
+One sweep row, from a DCERT4 file.  RUNTIME path only: this never elaborates or
 typechecks a generated `_Lgraph.lean`, which is the whole point of Direction 4 --
-`DCERT2 -> CertIO.loadCert -> runCheckedAllEdges`.
+`DCERT4 -> CertIO.readCertChecked -> runCheckedAllEdges`.
 
 Prints one tab-separated row so the bash harness never has to parse prose:
 
@@ -17,7 +17,8 @@ missing row: the harness must be unable to turn an absent result into a success.
 
 The four failure kinds the sweep has to tell apart are distinguishable here:
   READ_ERROR    the certificate is not there or not readable
-  PARSE_ERROR   the certificate is malformed  (`parseCert`)
+  PARSE_ERROR   the certificate is malformed or inadmissible (`readCertChecked`:
+                `parse: ...` or `refused: ...`, the loader every driver admits with)
   REFUSED       `compilesOk` is false -- the VERIFIED COMPILER declines the
                 design; the certificate itself is fine
   RUN_ERROR     accepted, but evaluation failed
@@ -26,7 +27,9 @@ Front-end/emission failure is upstream of this file and is the harness's job.
 RESTORED from pinned D4 f6ad1fe29f8f15aeda045115864fd81a34c33aef. Two
 adaptations, and nothing else:
 
-  * the format is DCERT2. It carries the clock table, `FlopDesc.clock`,
+  * the format is DCERT4 (DCERT2 when restored), admitted by `readCertChecked`
+    (parse, then `certWfError`: shapes, memory depths, addresses), as every
+    driver admits. It carries the clock table, `FlopDesc.clock`,
     `asyncReset` and `MemoryDesc.clock`, and `parseCert_renderCert` proves the
     codec total and invertible for EVERY `DesignCert`. A historical DCERT1 file
     is refused by magic rather than reinterpreted as a one-clock design.
@@ -54,7 +57,7 @@ def main (args : List String) : IO Unit := do
       IO.println s!"-\t-\t-\t-\tREAD_ERROR\t0\t-\tNOT_RUN\t0\t-\tempty certificate {path}"
     else
       let t0 ← IO.monoMsNow
-      match parseCert b with
+      match readCertChecked b with
       | .error e =>
           let t1 ← IO.monoMsNow
           IO.println s!"-\t-\t-\t-\tPARSE_ERROR\t{t1 - t0}\t-\tNOT_RUN\t0\t-\t{e}"
