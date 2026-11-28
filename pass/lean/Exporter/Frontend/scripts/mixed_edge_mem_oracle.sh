@@ -21,9 +21,9 @@ set -euo pipefail
 #            elaborated without sorry), equals IR at every step, so it also
 #            equals the source at every period boundary.
 #   FP       admits the memory, executes it and compares it with the reference
-#            itself (RESULT MEMROUTE OK), and its trace equals IR's under FP's
-#            own schedule (FP `edges:all` = cert_trace `edges:third`: every
-#            third step quiet; FP has no every-step mode).
+#            itself (RESULT MEMROUTE OK), and its trace equals IR's under
+#            `edges:third` on both (every third step quiet; FP has no every-step
+#            schedule).
 #   D3       translation validation (d3_sweep.py, its default generator) passes
 #            every gate, the proof included, and rejects a memory mutation.
 # So all five Lean simulators (IR, VC, legacy, FP, D3) agree with each other and
@@ -186,7 +186,7 @@ others() { # <dir> <legacy module prefix>
   echo "ok: $top legacy (bridge proofs elaborated) == IR at all $STEPS steps"
 
   (ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run Futamura_Projection_Scripts/dcert2_memroute.lean \
-     "$R/vc/$top.dcert" 20000 200 "$STEPS" zero edges:all "stim:$R/stim.txt" outputs > "$R/fp.log" 2> "$R/fp.err") \
+     "$R/vc/$top.dcert" 20000 200 "$STEPS" init:reset edges:third "stim:$R/stim.txt" outputs > "$R/fp.log" 2> "$R/fp.err") \
     || { tail -5 "$R/fp.log"; cat "$R/fp.err"; echo "FAIL: $top FP runner"; exit 1; }
   grep -q 'RESULT: MEMROUTE OK' "$R/fp.log" || { grep RESULT "$R/fp.log"; echo "FAIL: $top FP did not run the memory"; exit 1; }
   grep '^STEP' "$R/fp.log" > "$R/fp.txt"

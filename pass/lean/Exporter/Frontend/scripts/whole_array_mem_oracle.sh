@@ -24,8 +24,8 @@ set -euo pipefail
 #            iverilog at every cycle.
 #   FP       admits the certificate, specializes and executes it and compares
 #            it with the reference itself (RESULT MEMROUTE OK), and its trace
-#            equals IR's under FP's own schedule (FP `edges:all` = cert_trace
-#            `edges:third`: every third cycle quiet; FP has no every-cycle mode).
+#            equals IR's under `edges:third` on both (every third cycle quiet;
+#            FP has no every-cycle schedule).
 #   D3       translation validation (d3_sweep.py, its default generator) passes
 #            every gate on every row's certificate, the proof included, and
 #            rejects a memory mutation.
@@ -258,7 +258,7 @@ for row in $ROWS; do
   # FP: admitted, specialized, executed and compared with its own reference
   fp() { # <dcert> <out prefix>
     (ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run Futamura_Projection_Scripts/dcert2_memroute.lean \
-       "$1" 20000 200 "$CYCLES" zero edges:all "stim:$R/stim.txt" outputs > "$2.log" 2> "$2.err") \
+       "$1" 20000 200 "$CYCLES" init:reset edges:third "stim:$R/stim.txt" outputs > "$2.log" 2> "$2.err") \
       || { tail -5 "$2.log"; cat "$2.err"; echo "FAIL: $row FP runner on $1"; exit 1; }
     grep -q 'RESULT: MEMROUTE OK' "$2.log" || { grep RESULT "$2.log"; echo "FAIL: $row FP did not run the memory"; exit 1; }
     grep '^STEP' "$2.log" > "$2.txt"

@@ -179,13 +179,13 @@ for route in ir vc; do
     || { head -4 "$W/diff_$route.txt"; echo "FAIL: ram $route differs from the source"; exit 1; }
 done
 echo "ok: ram -- a writable memory starts from the file's words: IR and VC equal iverilog on all $STEPS steps"
-# FP starts from `initStateOf`; its `edges:all` leaves every third step quiet,
-# so it is compared with cert_trace `edges:third`.
+# FP starts from `init:reset` (`initStateOf`) under `edges:third` (every third step quiet; FP has
+# no every-step schedule), so it is compared with cert_trace `edges:third`.
 (cd "$ROOT/formal/lean" && ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run \
    Futamura_Projection_Scripts/cert_trace.lean "$W/vc/ram_file.dcert" "$STEPS" "$OUT/stim.txt" edges:third \
    > "$W/ir_third.txt" 2> "$W/ir_third.err") || { cat "$W/ir_third.err"; echo "FAIL: cert_trace edges:third (ram)"; exit 1; }
 (cd "$ROOT/formal/lean" && ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run \
-   Futamura_Projection_Scripts/dcert2_memroute.lean "$W/vc/ram_file.dcert" 20000 200 "$STEPS" zero edges:all \
+   Futamura_Projection_Scripts/dcert2_memroute.lean "$W/vc/ram_file.dcert" 20000 200 "$STEPS" init:reset edges:third \
    "stim:$OUT/stim.txt" outputs nocompare > "$W/fp.log" 2> "$W/fp.err") \
   || { tail -3 "$W/fp.log"; cat "$W/fp.err"; echo "FAIL: FP runner (ram)"; exit 1; }
 grep '^STEP' "$W/fp.log" > "$W/fp.txt"

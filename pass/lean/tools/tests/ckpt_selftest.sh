@@ -268,13 +268,13 @@ EOF
 steps() { grep '^STEP' "$1" > "$2" || true; }
 for d in pw tc; do
   cert="$OUT/${d}_lean/$d.dcert"
-  if [[ $d == pw ]]; then ctE="edges:third"; mrE="edges:all"; else ctE="edges:file:$R/tc.edges"; mrE="edges:indep"; fi
+  if [[ $d == pw ]]; then ctE="edges:third"; mrE="edges:third"; else ctE="edges:file:$R/tc.edges"; mrE="edges:indep"; fi
   for rt in ir vc; do
     ct "$cert" $CYC "$R/$d.stim" $ctE route:$rt ckpt-at:$K:"$R/$d.$rt.$K.ckpt" ckpt-out:"$R/$d.$rt.end.ckpt"
     [[ $RC == 0 ]] || { cat "$LOG"; echo "FAIL: cert_trace $d route:$rt"; exit 1; }
     steps "$LOG" "$R/$d.$rt.txt"
   done
-  mr "$cert" auto auto $CYC zero outputs $mrE stim:"$R/$d.stim" ckpt-at:$K:"$R/$d.fp.$K.ckpt" ckpt-out:"$R/$d.fp.end.ckpt"
+  mr "$cert" auto auto $CYC init:reset outputs $mrE stim:"$R/$d.stim" ckpt-at:$K:"$R/$d.fp.$K.ckpt" ckpt-out:"$R/$d.fp.end.ckpt"
   [[ $RC == 0 ]] && grep -q 'RESULT: MEMROUTE OK' "$LOG" || { tail -5 "$LOG"; echo "FAIL: dcert2_memroute $d"; exit 1; }
   steps "$LOG" "$R/$d.fp.txt"
   [[ $(wc -l < "$R/$d.ir.txt") == "$CYC" ]] || { echo "FAIL: $d: $(wc -l < "$R/$d.ir.txt") steps"; exit 1; }

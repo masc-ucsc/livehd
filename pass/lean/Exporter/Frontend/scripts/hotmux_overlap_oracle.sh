@@ -19,8 +19,8 @@ set -euo pipefail
 #   VC      cert_trace route:vc (compileDesign)
 #   legacy  the legacy fast model (make_legacy_sim.py --stim), compiled with
 #           `lean -R` into this run's directory
-#   FP      dcert2_memroute `outputs`; FP's `edges:all` leaves every third step
-#           quiet, so it is compared with cert_trace `edges:third`
+#   FP      dcert2_memroute `outputs` under `edges:third` (every third step quiet;
+#           FP has no every-step schedule), compared with cert_trace `edges:third`
 # Two controls must DIFFER from the IR trace, which shows that the stimulus
 # really overlaps the controls and that the comparison tells the answers apart:
 #   rtl_or      the RTL with the arms ORed together (the blaster's answer)
@@ -155,10 +155,10 @@ grep -q sorry "$OUT/legacy_build.log" && { echo "FAIL: sorry in the legacy proof
    > "$OUT/legacy.txt" 2> "$OUT/legacy.err") || { cat "$OUT/legacy.err"; echo "FAIL: legacy run"; exit 1; }
 same rtl legacy "legacy == RTL"
 
-# FP: its `edges:all` is cert_trace's `edges:third`
+# FP: `edges:third`, the schedule both drivers name so
 ct ir_third edges:third
 (ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run Futamura_Projection_Scripts/dcert2_memroute.lean \
-   "$OUT/vc/hot_overlap.dcert" 20000 200 "$CYCLES" zero edges:all "stim:$OUT/stim.txt" outputs nocompare \
+   "$OUT/vc/hot_overlap.dcert" 20000 200 "$CYCLES" init:reset edges:third "stim:$OUT/stim.txt" outputs nocompare \
    > "$OUT/fp.log" 2> "$OUT/fp.err") || { tail -3 "$OUT/fp.log"; cat "$OUT/fp.err"; echo "FAIL: FP runner"; exit 1; }
 grep '^STEP' "$OUT/fp.log" > "$OUT/fp.txt"
 same ir_third fp "FP == IR with every third step quiet"

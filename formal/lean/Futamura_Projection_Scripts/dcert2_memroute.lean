@@ -50,30 +50,23 @@ because it would pay for specialization twice.)
 The certificate's own bytes are digested and printed, so the artifact says which
 certificate it describes.
 
-STATE FILE, exactly.  A supplied file is READ and used, but two things in it
-are the driver's and must not be mistaken for the caller's:
+STARTUP CONTRACT.  `init:reset` (the default) is `initStateOf`: every flop at its
+reset value and every memory at its power-on words (0 past them), the start
+`cert_trace` calls `init:reset` (`Direct.resetState`).  Any other start is read
+from a checkpoint (`ckpt:<file>`) or is one of the two synthetic controls (`ramp`,
+`narrow`); anything else is REFUSED, not silently replaced.  A `memConst` ROM is
+a different thing entirely -- it is a SOURCE, its actual contents and
+`contents.size` bound come from the certificate, and they pass through untouched.
 
-  * EVERY numeric field goes through `mk_bv`, so a value is stored reduced
-    modulo `2 ^ width`.  `BV(8, 300)` supplied as a word is stored as
-    `mk_bv 8 300`, i.e. 44.  The file supplies the number; `mk_bv` decides the
-    representation.
-  * A `mem` line FILLS the whole `2 ^ aw`-word table with its declared default,
-    and `word` lines then overwrite the addresses they name.  An address the
-    file does not mention is the DEFAULT, not something the file said.  The
-    default's own width is the memory's `dw`, and `setWord` stores a word at
-    that same width.
-
-So "supplied" means the words and defaults the file names are the ones used,
-not that the table contains only what the file wrote.
-
-STARTUP CONTRACT.  `initStateOf` is zero tables and reset-valued flops.  That is
-a LEGAL-STATE WITNESS -- it shows the policy is not vacuous -- and it is NOT an
-RTL startup contract.  It is used only under `init=zero`, which is printed as
-such.  Any other startup contract is REFUSED, not silently replaced: a design
-whose real initial memory contents matter must have them supplied, and this
-driver does not invent them.  A `memConst` ROM is a different thing entirely --
-it is a SOURCE, its actual contents and `contents.size` bound come from the
-certificate, and they pass through untouched.
+OPTION WORDS.  A word this driver shares with `cert_trace` means what it means
+there: `edges:third` (every clock quiet on cycles k % 3 = 2) and `init:reset`.
+The earlier words `edges:all` (which here meant `edges:third`; `cert_trace`'s
+`edges:all` fires every clock on every cycle) and `zero` (which meant
+`init:reset`; `cert_trace`'s `init:zero` starts every flop at 0) are refused with
+a message naming the new word, so a run never changes meaning when it moves
+between drivers.  The `memstate v1` start files and the `react` stimulus lines
+are gone: a start state is a checkpoint, as in every other driver, and a
+stimulus is the `stim v1` every other driver reads.
 
 CHECKPOINTS (`lhdcert-ckpt v1`, `Compiler/Ckpt.lean`, `pass/lean/tools/formats/ckpt.md`).
 The start `ckpt:<file>` reads a checkpoint, validates it against the certificate (design
@@ -359,112 +352,45 @@ def CmpStatus.meet : CmpStatus → CmpStatus → CmpStatus
 /-! ## The driver -//-! ## The driver -/
 
 inductive InitMode where
-  /-- `initStateOf`: zero tables, reset-valued flops.  A SYNTHETIC control and a
-  legal-state witness; NOT a startup contract. -/
-  | zeroWitness
+  /-- `initStateOf`: every flop at its reset value, every memory at its power-on
+  words; `cert_trace`'s `init:reset`. -/
+  | reset
   /-- An internally generated SYNTHETIC pattern (word `k` holds `k + 1`).  It is
   a control, not a loader: nothing about it comes from the caller. -/
   | rampSynthetic
   /-- A deliberately illegal synthetic control: flop values narrower than
   declared.  The gate must refuse it. -/
   | narrowControl
-  /-- The real thing: initial flops and memory images READ FROM A FILE, carried
-  through the production codec unchanged. -/
-  | suppliedFile (path : String)
   /-- An `lhdcert-ckpt v1` checkpoint, validated against the certificate; the run
   starts at its cycle. -/
   | ckptFile (path : String)
 
-def parseInit (s : String) : Option InitMode :=
-  if s == "zero" then some .zeroWitness
-  else if s == "ramp" then some .rampSynthetic
-  else if s == "narrow" then some .narrowControl
-  else if s.startsWith "file:" then some (.suppliedFile (s.drop 5).toString)
-  else if s.startsWith "ckpt:" then some (.ckptFile (s.drop 5).toString)
-  else none
+/-- The start-state word, or why it is refused: an earlier word names the word that replaced it. -/
+def parseInit (s : String) : Except String InitMode :=
+  if s == "init:reset" then .ok .reset
+  else if s == "ramp" then .ok .rampSynthetic
+  else if s == "narrow" then .ok .narrowControl
+  else if s.startsWith "ckpt:" then .ok (.ckptFile (s.drop 5).toString)
+  else if s == "zero" then
+    .error "`zero` is now `init:reset` (every flop at its reset value, every memory at its \
+power-on words), the word cert_trace uses for that start; cert_trace's `init:zero` (every flop \
+at 0) is a different start, which this driver does not run"
+  else if s.startsWith "file:" then
+    .error s!"{s}: memstate start files are no longer read; start from a checkpoint with \
+`ckpt:<file>` (lhd_ckpt init and import-lhd write one)"
+  else
+    .error s!"startup contract {repr s} is NOT supported by this driver (init:reset | ramp | \
+narrow | ckpt:<file>). It is refused rather than silently replaced."
 
 def InitMode.label : InitMode → String
-  | .zeroWitness    => "zero (SYNTHETIC control: zero tables, reset-valued flops; \
-a legal-state witness, NOT an RTL startup contract)"
+  | .reset          => "init:reset (every flop at its reset value, every memory at its \
+power-on words: initStateOf)"
   | .rampSynthetic  => "ramp (SYNTHETIC control: an internally generated pattern, \
 NOT caller-supplied contents)"
   | .narrowControl  => "narrow (SYNTHETIC negative control: under-width flops)"
-  | .suppliedFile p => s!"file:{p} (SUPPLIED initial state, read from the file)"
   | .ckptFile p     => s!"ckpt:{p} (an lhdcert-ckpt v1 checkpoint, validated against the certificate)"
 
-/-! ### The supplied-state format
-
-```
-memstate v1
-flop <width> <value>
-mem  <aw> <dw> <default-value>
-word <addr> <value>
-```
-
-`word` applies to the most recent `mem`.  Anything else -- a bad keyword, a
-non-numeric field, a `word` before any `mem`, an address outside the declared
-table -- is a REFUSAL naming the line.  Nothing is defaulted and nothing is
-invented; a field that is not in the file is not supplied. -/
-
-structure SuppliedState where
-  flops : Array BV
-  mems  : Array MemImg
-  /-- the file asked for the design's DECLARED reset values instead of listing
-  every flop.  That is synthetic and is labelled as such; it is still the
-  file's explicit request, not something the driver decided. -/
-  flopsFromReset : Bool := false
-
-def emptyTable (aw dw : Nat) (dflt : Int) : MemImg :=
-  ⟨List.replicate (2 ^ aw) (mk_bv dw dflt), mk_bv dw dflt⟩
-
-def setWord (m : MemImg) (a : Nat) (v : Int) : MemImg :=
-  { m with words := m.words.set a (mk_bv m.dflt.width v) }
-
-def parseState (txt : String) : Except String SuppliedState := do
-  let lines := (txt.splitOn "\n").map (fun l => (l.splitOn "\r").headD "")
-  let body := lines.filter (fun l => l != "" && !l.startsWith "#")
-  match body with
-  | [] => .error "empty state file"
-  | hdr :: rest =>
-    if hdr != "memstate v1" then
-      .error s!"line 1: expected header \"memstate v1\", got {repr hdr}"
-    else
-      let mut fs : Array BV := #[]
-      let mut ms : Array MemImg := #[]
-      let mut fromReset := false
-      let mut n := 1
-      for l in rest do
-        n := n + 1
-        let ws := (l.splitOn " ").filter (fun w => w != "")
-        match ws with
-        | ["flops", "reset"] => fromReset := true
-        | ["flop", w, v] =>
-            let some w' := w.toNat? | throw s!"line {n}: flop width {repr w} is not a number"
-            let some v' := v.toInt? | throw s!"line {n}: flop value {repr v} is not an integer"
-            fs := fs.push (mk_bv w' v')
-        | ["mem", aw, dw, d] =>
-            let some aw' := aw.toNat? | throw s!"line {n}: aw {repr aw} is not a number"
-            let some dw' := dw.toNat? | throw s!"line {n}: dw {repr dw} is not a number"
-            let some d'  := d.toInt?  | throw s!"line {n}: default {repr d} is not an integer"
-            if aw' > awEnumLimit then
-              throw s!"line {n}: aw {aw'} exceeds this driver's table limit {awEnumLimit}"
-            ms := ms.push (emptyTable aw' dw' d')
-        | ["word", a, v] =>
-            let some a' := a.toNat? | throw s!"line {n}: address {repr a} is not a number"
-            let some v' := v.toInt? | throw s!"line {n}: word value {repr v} is not an integer"
-            if ms.size = 0 then throw s!"line {n}: `word` before any `mem`"
-            else
-              let k := ms.size - 1
-              let m := ms[k]!
-              if a' >= m.words.length then
-                throw s!"line {n}: address {a'} is outside the {m.words.length}-word table"
-              ms := ms.set! k (setWord m a' v')
-        | _ => throw s!"line {n}: unrecognised {repr l}"
-      if fromReset && fs.size > 0 then
-        .error "a file may use `flops reset` or list `flop` lines, not both"
-      else .ok ⟨fs, ms, fromReset⟩
-
-/-- Caller-supplied initial contents, at the declared geometry. -/
+/-- An internally generated table at the declared geometry (word `k` holds `k + 1`). -/
 def rampImg (aw dw : Nat) : MemImg :=
   ⟨(List.range (2 ^ aw)).map (fun k => mk_bv dw (Int.ofNat k + 1)), mk_bv dw 0⟩
 
@@ -489,17 +415,17 @@ supplies the vector instead:
 ```
 stim v1
 in <ordinal> <width> <value>
+at <cycle> in <ordinal> <width> <value>
 ```
 
-Every cycle uses it; unlisted ordinals keep their declared width and value 0.
-It is SUPPLIED, like the state file, and the report says so. -/
+`in` holds for every cycle, `at` for one cycle (it wins); unlisted ordinals keep
+their declared width and value 0.  It is SUPPLIED, and the report says so. -/
 
-/-- A stimulus is three things: constants, per-cycle overrides (`at`), and
-reactive inputs (`react`).  A core that needs a RESET PULSE cannot be driven by
-constants alone, which is what `at` is for. -/
+/-- A stimulus is two things: constants and per-cycle overrides (`at`).  A core
+that needs a RESET PULSE cannot be driven by constants alone, which is what `at`
+is for. -/
 def parseStim (txt : String) :
-    Except String (List (Nat × Nat × Int) × List (Nat × Nat)
-                   × List (Nat × Nat × Nat × Int)) := do
+    Except String (List (Nat × Nat × Int) × List (Nat × Nat × Nat × Int)) := do
   let body := ((txt.splitOn "\n").map (fun l => (l.splitOn "\r").headD "")).filter
                 (fun l => l != "" && !l.startsWith "#")
   match body with
@@ -508,7 +434,6 @@ def parseStim (txt : String) :
     if hdr != "stim v1" then .error s!"line 1: expected \"stim v1\", got {repr hdr}"
     else
       let mut out : List (Nat × Nat × Int) := []
-      let mut rx : List (Nat × Nat) := []
       let mut ats : List (Nat × Nat × Nat × Int) := []
       let mut n := 1
       for l in rest do
@@ -520,37 +445,25 @@ def parseStim (txt : String) :
             let some w' := w.toNat? | throw s!"line {n}: width {repr w} is not a number"
             let some v' := v.toInt? | throw s!"line {n}: value {repr v} is not an integer"
             ats := ats ++ [(c', i', w', v')]
-        | ["react", i, o] =>
-            let some i' := i.toNat? | throw s!"line {n}: input ordinal {repr i} is not a number"
-            let some o' := o.toNat? | throw s!"line {n}: output ordinal {repr o} is not a number"
-            rx := rx ++ [(i', o')]
         | ["in", i, w, v] =>
             let some i' := i.toNat? | throw s!"line {n}: ordinal {repr i} is not a number"
             let some w' := w.toNat? | throw s!"line {n}: width {repr w} is not a number"
             let some v' := v.toInt? | throw s!"line {n}: value {repr v} is not an integer"
             out := out ++ [(i', w', v')]
         | _ => throw s!"line {n}: unrecognised {repr l}"
-      .ok (out, rx, ats)
+      .ok (out, ats)
 
-/-- The supplied vector, with any `react` input taken from the PREVIOUS cycle's
-output -- the handshake a core needs, and the only part of the stimulus that is
-not a constant.  On the first cycle there is no previous output, so a reactive
-input is 0. -/
+/-- The supplied vector: a per-cycle override wins over the constant, then zero
+at the declared width. -/
 def stimInput (D : DesignCert) (spec : List (Nat × Nat × Int))
-    (rx : List (Nat × Nat)) (ats : List (Nat × Nat × Nat × Int))
-    (prevOuts : Array BV) (cyc : Nat) : RuntimeInput :=
+    (ats : List (Nat × Nat × Nat × Int)) (cyc : Nat) : RuntimeInput :=
   let n := max (maxInputIdx D) ((spec.map (fun t => t.1 + 1)).foldl max 0)
   (List.range n).toArray.map (fun i =>
     let w := match spec.find? (fun t => t.1 == i) with
              | some (_, w, _) => w
              | none           => inputWidth D i
-    -- a per-cycle override wins over everything; then a reactive input; then
-    -- the constant; then zero at the declared width
     match ats.find? (fun t => t.1 == cyc && t.2.1 == i) with
     | some (_, _, w', v) => mk_bv w' v
-    | none =>
-    match rx.find? (fun t => t.1 == i) with
-    | some (_, o) => bv_resize w (prevOuts[o]?.getD (mk_bv w 0))
     | none =>
       match spec.find? (fun t => t.1 == i) with
       | some (_, _, v) => mk_bv w v
@@ -564,7 +477,6 @@ structure Cfg where
   compare  : Bool
   /-- a supplied stimulus, applied every cycle, or `none` for the generated one -/
   stim     : Option (List (Nat × Nat × Int)) := none
-  react    : List (Nat × Nat) := []
   ats      : List (Nat × Nat × Nat × Int) := []
   stimProv : String := "generated: mkInputFor (synthetic, width-derived)"
   /-- stop after the support report -- used to compare two certificates'
@@ -585,8 +497,9 @@ structure Cfg where
   admissions agree. -/
   plainWrite : Bool := true
   /-- which clocks fire on each cycle (RunnerSupport `scheduleEdges`): `auto`
-  keeps the one-clock schedule for a one-clock design and fires domains
-  INDEPENDENTLY when the certificate declares more than one clock. -/
+  keeps the one-clock schedule (`edges:third`) for a one-clock design and fires
+  domains INDEPENDENTLY (`edges:indep`) when the certificate declares more than
+  one clock. RunnerSupport's `EdgeMode.all` is the word `edges:third` here. -/
   edgeMode : EdgeMode := .auto
   /-- which memory interpreter is specialized: `fused` (default:
   `MemFused.projectMemFDesignAt`, `env0` inlined and the node fold fused into
@@ -597,16 +510,11 @@ structure Cfg where
   /-- print each executed cycle's outputs as `STEP <k> <out0> <out1> ...` (each
   output's unsigned value, before the state update), the line format
   `cert_trace` prints, so an FP trace compares line for line with the IR, TV and
-  legacy traces on the same stimulus. Two names differ between the runners:
-  - edges: this runner's `edges:all` (and `auto` on one clock) is
-    `edgeSchedule`, every third cycle quiet. That is `cert_trace`'s
-    `edges:third`; `cert_trace`'s `edges:all` fires every clock on every step,
-    and this runner has no such mode.
-  - start state: this runner's `zero` is `initStateOf` (flops at their reset
-    values, memories zero). That is `cert_trace`'s default start (`init:reset`),
-    not `cert_trace`'s `init:zero`.
-  So `zero edges:all stim:<f> outputs` here matches
-  `cert_trace <cert> <n> <f> edges:third`. -/
+  legacy traces on the same stimulus. The shared words mean the same schedule
+  and start: `init:reset edges:third stim:<f> outputs` here matches
+  `cert_trace <cert> <n> <f> edges:third` (whose start is `init:reset` by
+  default). This runner has no every-cycle schedule (`cert_trace`'s `edges:all`)
+  and no all-zero start (`cert_trace`'s `init:zero`). -/
   outputs : Bool := false
   /-- `auto` in place of the step budget: size it from the certificate,
   `autoStepFuel D`. -/
@@ -828,7 +736,6 @@ did not step or was refused"
       let mut tags : List String := []
       let mut outs : List (Array BV) := []
       let mut flops : List (Array BV) := []
-      let mut prevOuts : Array BV := #[]
       let mut bad := false
       let mut policyBad := false
       let mut cmp : CmpStatus := if cfg.compare then .complete else .disabled
@@ -856,7 +763,7 @@ did not step or was refused"
           let e := scheduleEdges cfg.edgeMode D k
           if let some rc := (← RunAdmission.refuseEdges? D k e) then return rc
           let i := match cfg.stim with
-                   | some spec => stimInput D spec cfg.react cfg.ats prevOuts k
+                   | some spec => stimInput D spec cfg.ats k
                    | none      => mkInputFor D k
           let mut pass := false
           if stateOK then
@@ -893,7 +800,6 @@ did not step or was refused"
                   if cfg.outputs then
                     IO.println s!"STEP {k} {" ".intercalate (os.toList.map (fun o => toString (bv_uint o)))}"
                   outs := os :: outs
-                  prevOuts := os
                   flops := fls :: flops
                   sv := sp
                   stKnown := false
@@ -908,7 +814,7 @@ did not step or was refused"
           let e := scheduleEdges cfg.edgeMode D k
           if let some rc := (← RunAdmission.refuseEdges? D k e) then return rc
           let i := match cfg.stim with
-                   | some spec => stimInput D spec cfg.react cfg.ats prevOuts k
+                   | some spec => stimInput D spec cfg.ats k
                    | none      => mkInputFor D k
           if runtimeFullOKB D i st e != true then
             tags := "policy-refused" :: tags
@@ -921,7 +827,6 @@ did not step or was refused"
                 if cfg.outputs then
                   IO.println s!"STEP {k} {" ".intercalate (r.outputs.toList.map (fun o => toString (bv_uint o)))}"
                 outs := r.outputs :: outs
-                prevOuts := r.outputs
                 flops := r.nextState.flops :: flops
                 if cfg.compare then
                   -- `interpretDesign`, computed as `directStepRaw` (`refStep_eq_interpretDesign`)
@@ -1034,14 +939,12 @@ def resolveStim (cfg : Cfg) : IO (Except String Cfg) := do
       | some txt =>
         match parseStim txt with
         | .error e => pure (.error s!"{path}: {e}")
-        | .ok (spec, rx, ats) =>
-            let prov := s!"SUPPLIED file {path}, {bytes.size} bytes, fnv1a {fnv1a bytes}, {spec.length} constant(s), {ats.length} per-cycle override(s), {rx.length} reactive (from the previous cycle's outputs)"
-            pure (.ok { cfg with stim := some spec, react := rx, ats := ats, stimProv := prov })
+        | .ok (spec, ats) =>
+            let prov := s!"SUPPLIED file {path}, {bytes.size} bytes, fnv1a {fnv1a bytes}, {spec.length} constant(s), {ats.length} per-cycle override(s)"
+            pure (.ok { cfg with stim := some spec, ats := ats, stimProv := prov })
 
-/-- Build the initial state.  Synthetic modes are generated here and SAID to be
-synthetic; a supplied file is read and used, with the two caveats the header
-states: every value is `mk_bv`-normalised, and unnamed addresses hold the
-declared default rather than anything the file wrote. -/
+/-- Build the initial state: the power-on state, a synthetic control (generated
+here and SAID to be synthetic), or a checkpoint validated against the certificate. -/
 def buildState (D : DesignCert) (im : InitMode) : IO (Except String (StateM × String)) := do
   match im with
   | .ckptFile path => do
@@ -1059,26 +962,9 @@ def buildState (D : DesignCert) (im : InitMode) : IO (Except String (StateM × S
             let note := if c.exts.isEmpty then "" else s!", {c.exts.size} ext section(s) not read"
             pure (.ok (CkptStateM.toStateM c,
               s!"checkpoint {path}, {bytes.size} bytes, cycle {c.cycle}{note}"))
-  | .zeroWitness   => pure (.ok (initStateOf D, "generated: initStateOf (synthetic)"))
+  | .reset         => pure (.ok (initStateOf D, "generated: initStateOf (the power-on state)"))
   | .rampSynthetic => pure (.ok (rampStateOf D, "generated: ramp pattern (synthetic)"))
   | .narrowControl => pure (.ok (narrowStateOf D, "generated: narrow control (synthetic)"))
-  | .suppliedFile path => do
-      let bytes? ← try (do let b ← IO.FS.readBinFile path; pure (some b))
-                    catch e => do IO.eprintln s!"state file unreadable: {e}"; pure none
-      match bytes? with
-      | none => pure (.error s!"cannot read state file {path}")
-      | some bytes =>
-        match String.fromUTF8? bytes with
-        | none => pure (.error s!"{path}: not valid UTF-8")
-        | some txt =>
-        match parseState txt with
-        | .error e => pure (.error s!"{path}: {e}")
-        | .ok ss   =>
-            let fl := if ss.flopsFromReset then initFlopsOf D else ss.flops
-            let note := if ss.flopsFromReset then
-              " ; flops: the design's DECLARED RESET VALUES, as the file requested (synthetic, not supplied)" else " ; flops: supplied"
-            pure (.ok (⟨fl, ss.mems⟩,
-              s!"supplied file {path}, {bytes.size} bytes, fnv1a {fnv1a bytes}{note}"))
 
 /-- The absolute cycle a run starts at: a checkpoint's own, else 0. -/
 def startOf (im : InitMode) : IO Nat := do
@@ -1091,14 +977,29 @@ def startOf (im : InitMode) : IO Nat := do
 
 def usage : String :=
   "usage: dcert2_memroute (<cert.dcert>|--fixture <name>|--selftest) <stepFuel|auto> \
-<workFuel|auto> [cycles] [init] [nocompare] [trace] [outputs] [no-plain-write] [route:fused|var|plain]\n  \
+<workFuel|auto> [cycles] [init] [nocompare] [trace] [outputs] [stim:<file>] [edges:auto|third|indep] \
+[no-plain-write] [support-only] [route:fused|var|plain]\n  \
 auto: step = max 20000 (4 x (nodes + sources)), work = 2000, one retry at 10x after an out-of-fuel\n  \
 fixtures: full mixed twomem lane\n\
-  fixtures (negative): romwrite\n  init: zero | ramp | narrow | file:<path> | ckpt:<path>\n  \
+  fixtures (negative): romwrite\n  init: init:reset (default) | ramp | narrow | ckpt:<path>\n  \
+edges: auto (default: third on one clock, indep on more) | third (cert_trace's edges:third) | indep\n  \
 checkpoints: ckpt-at:<cycle>:<file> (repeatable) ckpt-out:<file>\n  \
 loop:full: every cycle through runMemSim with the full state check (the default loop keeps the state \
 encoded and checks the state once; compare and trace use the full loop)\n  \
 share:off: run the residual as specialized (by default its list tails are shared, Projection/ShareTails)"
+
+/-- An edge word: `edges:third` (`cert_trace`'s word for `edgeSchedule`, every clock quiet on
+cycles k % 3 = 2; RunnerSupport calls it `EdgeMode.all`), and this driver's own `edges:indep`
+and `edges:auto`. The earlier `edges:all` meant `edges:third` here and every clock on every
+cycle in `cert_trace`, so it is refused, naming the new word. -/
+def parseEdgeWord : String → Except String EdgeMode
+  | "third" => .ok .all
+  | "indep" => .ok .indep
+  | "auto"  => .ok .auto
+  | "all"   => .error "edges:all is now edges:third (every clock quiet on cycles k % 3 = 2), \
+the word cert_trace uses for that schedule; cert_trace's edges:all fires every clock on every \
+cycle, a schedule this driver does not run"
+  | w       => .error s!"edges:{w} is not one of auto | third | indep"
 
 def parseCfg (rest : List String) : Except String Cfg := do
   match rest with
@@ -1116,11 +1017,8 @@ def parseCfg (rest : List String) : Except String Cfg := do
     let some cyc := cycArg.toNat? | .error s!"cycles {repr cycArg} is not a natural number"
     if cyc == 0 then
       .error "cycles must be POSITIVE: zero cycles executes no residual step, so an OK would be earned by doing nothing"
-    let initArg := (more.drop 1).head?.getD "zero"
-    let some im := parseInit initArg
-      | .error s!"startup contract {repr initArg} is NOT supported by this driver. \
-It is refused rather than silently replaced by zeros; supply the real initial \
-contents or use init=zero, which is a legal-state witness only."
+    let initArg := (more.drop 1).head?.getD "init:reset"
+    let im ← parseInit initArg
     let tl := more.drop 2
     let cmp := !(tl.contains "nocompare")
     let sup := tl.contains "support-only"
@@ -1134,8 +1032,9 @@ contents or use init=zero, which is a legal-state witness only."
                 | some t => s!"PENDING {t}"
                 | none   => "generated: mkInputFor (synthetic, width-derived)"
     let edgeTok := tl.findSome? (fun t => (t.dropPrefix? "edges:").map (·.toString))
-    let some em := (edgeTok.map EdgeMode.parse?).getD (some .auto)
-      | .error s!"edges:{edgeTok.getD ""} is not one of auto | all | indep"
+    let em ← match edgeTok with
+      | some w => parseEdgeWord w
+      | none => pure .auto
     let route := (tl.findSome? (fun t => (t.dropPrefix? "route:").map (·.toString))).getD "fused"
     unless ["fused", "var", "plain"].contains route do
       .error s!"route:{route} is not one of fused | var | plain"
@@ -1150,7 +1049,7 @@ contents or use init=zero, which is a legal-state witness only."
           | some k => ckptAt := ckptAt ++ [(k, ":".intercalate q)]
           | none => .error s!"ckpt-at: {repr k} is not a number"
         | _ => .error s!"ckpt-at expects <cycle>:<file>, got {repr t}"
-    let cfg : Cfg := ⟨sf, wf, cyc, im, cmp, none, [], [], prov, sup, tr, pw, em, route, op, autoStep, autoWork,
+    let cfg : Cfg := ⟨sf, wf, cyc, im, cmp, none, [], prov, sup, tr, pw, em, route, op, autoStep, autoWork,
       0, [], none, tl.contains "loop:full", !(tl.contains "share:off")⟩
     .ok { cfg with ckptAt, ckptOut }
   | _ => .error usage
@@ -1200,29 +1099,34 @@ def selftest : IO UInt32 := do
   -- a memory-array length mismatch is a FAILURE, not a skip
   ok := (← check "memory array length mismatch FAILS"
             ((memsCheck bigD { flops := #[], mems := #[] } bigRef).isFailure) true) && ok
-  -- the state parser refuses malformed input rather than defaulting it
-  let bad : List (String × String) :=
-    [ ("no header",        "flop 8 1")
-    , ("bad keyword",      "memstate v1\nfrob 1 2")
-    , ("non-numeric",      "memstate v1\nflop eight 1")
-    , ("word before mem",  "memstate v1\nword 0 1")
-    , ("address past end", "memstate v1\nmem 1 8 0\nword 9 1") ]
-  for (name, txt) in bad do
-    let got := (parseState txt).toOption.isNone
-    ok := (← check s!"state parser refuses: {name}" got true) && ok
-  let goodTxt := "memstate v1\nflop 8 3\nmem 1 8 5\nword 0 1\nword 1 2"
-  ok := (← check "state parser accepts a well-formed file"
-            ((parseState goodTxt).toOption.isSome) true) && ok
-  match parseState goodTxt with
-  | .ok ss =>
-      ok := (← check "supplied NONZERO default is kept"
-                ((ss.mems[0]!).dflt == mk_bv 8 5) true) && ok
-      ok := (← check "supplied words are kept"
-                ((ss.mems[0]!).get 1 == mk_bv 8 2) true) && ok
-      ok := (← check "supplied flop is kept" (ss.flops[0]! == mk_bv 8 3) true) && ok
-      ok := (← check "out-of-range read returns the SUPPLIED default"
-                ((ss.mems[0]!).get 99 == mk_bv 8 5) true) && ok
-  | .error _ => ok := false
+  -- the option words: cert_trace's words mean cert_trace's schedule and start; the earlier
+  -- words are refused with a message naming the new one, never read with another meaning
+  let cfgOf (opts : List String) : Except String Cfg := parseCfg (["auto", "auto"] ++ opts)
+  let refusedNaming (opts : List String) (word : String) : Bool :=
+    match cfgOf opts with
+    | .error e => (e.splitOn word).length > 1
+    | .ok _ => false
+  ok := (← check "edges:third is edgeSchedule (cert_trace's edges:third)"
+            (match cfgOf ["4", "init:reset", "edges:third"] with
+             | .ok c => c.edgeMode == .all | .error _ => false) true) && ok
+  ok := (← check "edges:indep and the default auto are kept"
+            (match cfgOf ["4", "init:reset", "edges:indep"], cfgOf ["4"] with
+             | .ok c, .ok d => c.edgeMode == .indep && d.edgeMode == .auto | _, _ => false) true) && ok
+  ok := (← check "edges:all is refused, naming edges:third"
+            (refusedNaming ["4", "init:reset", "edges:all"] "edges:third") true) && ok
+  ok := (← check "init:reset is the default start"
+            (match cfgOf ["4", "init:reset"], cfgOf ["4"] with
+             | .ok c, .ok d => (match c.init, d.init with | .reset, .reset => true | _, _ => false)
+             | _, _ => false) true) && ok
+  ok := (← check "zero is refused, naming init:reset" (refusedNaming ["4", "zero"] "init:reset") true) && ok
+  ok := (← check "a memstate start file is refused, naming ckpt:"
+            (refusedNaming ["4", "file:x.memstate"] "ckpt:<file>") true) && ok
+  ok := (← check "cert_trace's init:zero is refused" ((cfgOf ["4", "init:zero"]).toOption.isNone) true) && ok
+  -- the stimulus reader takes `in` and `at` lines and refuses anything else (a `react` line)
+  ok := (← check "stim v1 with in and at lines is read"
+            ((parseStim "stim v1\nin 0 8 3\nat 2 in 1 4 5").toOption.isSome) true) && ok
+  ok := (← check "a react line is refused"
+            ((parseStim "stim v1\nin 0 8 3\nreact 3 8").toOption.isNone) true) && ok
   IO.println s!"  SELFTEST {if ok then "PASS" else "FAIL"}"
   pure (if ok then 0 else 1)
 

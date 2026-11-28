@@ -18,8 +18,8 @@ checkpoints and compaction for every route. `route:ref` runs `interpretDesign` i
 `route:fp` the Futamura projection's residual on its encoded state (`Run/FpEngine`; `share:off`
 without shared tails, `loop:full` its earlier step); `ir:raw` the unstaged direct step.
 
-`stim v1` is the dcert2_memroute format, restricted to what an RTL testbench
-can replay: `in <ordinal> <width> <value>` (every cycle) and
+`stim v1` is the stimulus format every driver reads (dcert2_memroute too), what an
+RTL testbench can replay: `in <ordinal> <width> <value>` (every cycle) and
 `at <cycle> in <ordinal> <width> <value>` (that cycle wins). Unlisted inputs
 are 0 at their declared width. The initial state puts every flop at its reset
 value and every memory word at 0 (`init:zero` starts the flops at 0 instead). Edges: `all` fires every declared clock on every step; `third` is

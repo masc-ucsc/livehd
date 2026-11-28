@@ -228,7 +228,7 @@ for row in $ROWS; do
   # FP: admitted, run, equal to IR under FP's schedule
   for t in zero ones; do
     (ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run Futamura_Projection_Scripts/dcert2_memroute.lean \
-       "$D" 20000 200 "$CYCLES" zero edges:all "stim:$R/stim_$t.txt" outputs > "$R/fp_$t.log" 2> "$R/fp_$t.err") \
+       "$D" 20000 200 "$CYCLES" init:reset edges:third "stim:$R/stim_$t.txt" outputs > "$R/fp_$t.log" 2> "$R/fp_$t.err") \
       || { tail -5 "$R/fp_$t.log"; cat "$R/fp_$t.err"; echo "FAIL: $row FP runner"; exit 1; }
     grep -q 'RESULT: MEMROUTE OK' "$R/fp_$t.log" || { grep RESULT "$R/fp_$t.log"; echo "FAIL: $row FP did not run the memory"; exit 1; }
     grep '^STEP' "$R/fp_$t.log" > "$R/fp_$t.txt"

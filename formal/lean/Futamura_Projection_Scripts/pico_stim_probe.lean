@@ -13,10 +13,11 @@ WHAT IT IS NOT.  It runs the reference only.  It is a diagnostic, not a route:
 it specializes nothing, checks no residual and earns no readiness credit.  The
 driver remains the thing that executes the projection.
 
-The stimulus is the one in `Futamura_Projection_Scripts/memstate/pico_run_instr.stim`, written out
-here rather than parsed, so this file has no copy of the driver's parsers to
-drift from: reset LOW for two cycles then HIGH, `mem_ready` reacting to the
-previous cycle's `mem_valid`, and `mem_rdata` held at `addi x1, x0, 1`.
+The stimulus is written out here rather than parsed: reset LOW for two cycles
+then HIGH, `mem_ready` reacting to the previous cycle's `mem_valid`, and
+`mem_rdata` held at `addi x1, x0, 1`. (It was once a `stim v1` file with a
+`react` line, a dialect only dcert2_memroute read; that dialect and the file are
+gone, so a stimulus that reacts to the outputs lives in code like this.)
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemRuntime
 import LeanSemanticPrimitives.Compiler.CertIOFacade
@@ -26,7 +27,7 @@ open Compiler Projection Projection.HwMem
 def rampImg (aw dw : Nat) (dflt : Int) : MemImg :=
   ⟨(List.range (2 ^ aw)).map (fun _ => mk_bv dw dflt), mk_bv dw dflt⟩
 
-/-- The supplied image of `pico_rom_image.memstate`, inline. -/
+/-- The supplied ROM image (once a `memstate v1` file, a format no driver reads now), inline. -/
 def picoImg : MemImg :=
   let base := rampImg 5 32 4294967295
   let set (m : MemImg) (a : Nat) (v : Int) : MemImg :=

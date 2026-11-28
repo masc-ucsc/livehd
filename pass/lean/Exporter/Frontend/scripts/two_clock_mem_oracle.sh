@@ -221,7 +221,7 @@ with open(out, "w") as f:
         f.write(f"at {k} {int((k + 0) % 2 != 0)} {int((k + 1) % 3 != 0)}\n")
 PY
 (cd "$ROOT/formal/lean" && ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run \
-   Futamura_Projection_Scripts/dcert2_memroute.lean "$D" 20000 200 "$STEPS" zero edges:indep \
+   Futamura_Projection_Scripts/dcert2_memroute.lean "$D" 20000 200 "$STEPS" init:reset edges:indep \
    "stim:$OUT/stim.txt" outputs > "$OUT/fp.log" 2> "$OUT/fp.err") \
   || { tail -5 "$OUT/fp.log"; cat "$OUT/fp.err"; echo "FAIL: FP runner"; exit 1; }
 grep -q 'RESULT: MEMROUTE OK' "$OUT/fp.log" || { grep RESULT "$OUT/fp.log"; echo "FAIL: FP did not run the memory"; exit 1; }

@@ -108,7 +108,7 @@ OPT=-O2 ROOT=$ROOT bash Futamura_Projection_Scripts/build-opt.sh Futamura_Projec
     Futamura_Projection_Scripts/gen_probe_v2.lean Futamura_Projection_Scripts/gen_readiness_v2.lean
 # -> $ROOT/nat/dcert2_memroute, ...
 
-# 4. self-tests: the comparison and state-file rules, then the four small fixtures
+# 4. self-tests: the comparison and option-word rules, then the four small fixtures
 $ROOT/nat/dcert2_memroute --selftest                        # ends with SELFTEST PASS
 $ROOT/nat/dcert2_memroute --fixture twomem 200000 5000 4    # also: full, mixed, lane
 ```
@@ -134,17 +134,22 @@ lhd compile lg:$W/s2 --top top --emit-dir lean:$W/lean --workdir $W/w3 \
 **2a. Run the simulator directly:**
 
 ```bash
-dcert2_memroute $W/lean/top.dcert 20000000 500000 4 zero
+dcert2_memroute $W/lean/top.dcert 20000000 500000 4 init:reset
 #               certificate       stepFuel workFuel cycles init
 ```
 
 - `stepFuel`, `workFuel`: the specializer's fuel. Running out is reported as exit 3,
   never as a refusal of the design.
 - `cycles`: must be positive.
-- `init`: the initial state. `zero` (empty memories, flops at their reset values) is a
-  synthetic legal state, not the RTL's startup state. `file:<path>` reads a supplied
-  state. `ramp` and `narrow` are other synthetic controls.
-- More options: `stim:<file>` (supplied inputs), `nocompare` (no reference run),
+- `init`: the initial state. `init:reset` (the default: every flop at its reset value,
+  every memory at its power-on words) is `cert_trace`'s `init:reset`. `ckpt:<file>`
+  starts from an `lhdcert-ckpt v1` checkpoint (`lhd_ckpt init` and `import-lhd` write
+  one). `ramp` and `narrow` are synthetic controls. The earlier `zero` (now
+  `init:reset`) and `file:<path>` (`memstate v1` files) are refused.
+- More options: `stim:<file>` (supplied inputs, `stim v1`), `edges:auto|third|indep`
+  (the clock schedule: `third` is `cert_trace`'s `edges:third`, every clock quiet on
+  cycles k % 3 = 2; `auto` is `third` on one clock and `indep` on more; the earlier
+  `edges:all`, which meant `third`, is refused), `nocompare` (no reference run),
   `trace` (per-cycle memory traces), `route:fused|var|plain`.
 - Exit codes: 0 ok, 1 execution failure, 2 configuration refused, 3 out of fuel,
   4 specialization failed, 5 residual check rejected, 6 memory route refuses the
@@ -198,13 +203,13 @@ cycle, and (unless `nocompare`) equality of outputs and next state with
 
 **What a run claims:** for the cycles run, with the stated initial state and inputs,
 the simulator's outputs and next states equal those of `interpretDesign`. The
-synthetic `zero` state is a legal state, not the RTL's reset sequence.
+`init:reset` state is the power-on state, not the RTL's reset sequence.
 
 ## Benchmarks
 
 The 12 rows of LiveHD's Lean coverage table, from the baseline RTL of each block.
 Measured 2026-10-20 with the `lhd` of master at `2353ee77a`: memory route, `MemFused`,
-fuel 20000000/500000, `init=zero`, 4 cycles each compared with `interpretDesign`.
+fuel 20000000/500000, `init=zero` (now `init:reset`), 4 cycles each compared with `interpretDesign`.
 
 | row | block | top | nodes | flops | memories | residual terms | step bound | 4 compared cycles |
 |---|---|---|---|---|---|---|---|---|
@@ -244,7 +249,7 @@ The certificate has 316 sources, 467 nodes, 5 outputs, 30 flops, one memory of 8
 × 69 bits, and one clock.
 
 ```bash
-dcert2_memroute minion_tlb.dcert 20000000 500000 4 zero
+dcert2_memroute minion_tlb.dcert 20000000 500000 4 init:reset
 ```
 
 | phase | time | result |
@@ -260,7 +265,7 @@ dcert2_memroute minion_tlb.dcert 20000000 500000 4 zero
 The certificate has 10,709 sources, 16,370 nodes, 21 outputs, 876 flops and one clock.
 
 ```bash
-dcert2_memroute load_store_unit_gate.dcert 20000000 500000 4 zero
+dcert2_memroute load_store_unit_gate.dcert 20000000 500000 4 init:reset
 ```
 
 | phase | time | result |
@@ -330,8 +335,9 @@ The Lean code stays in the Lean project:
 - `formal/lean/Futamura_Projection_Scripts/`: every file is this direction's.
   It holds the drivers (`dcert2_*`, `gen_probe_v2`, `gen_readiness_v2`,
   `cert_trace`, ...), the build scripts `build-opt.sh` and
-  `build-native.sh`, the helpers next to them, and the state and stimulus files
-  in `memstate/`. It was `formal/lean/scripts/`; recorded runs keep that path.
+  `build-native.sh`, the helpers next to them, and B11's stimulus files in
+  `memstate/` (its `memstate v1` start files were retired with the driver's
+  `file:` start). It was `formal/lean/scripts/`; recorded runs keep that path.
   Two other users: the proof tools build with its `build-opt.sh`, and the
   exporter's RTL oracles (`pass/lean/Exporter/Frontend/scripts/*_oracle.sh`) run
   its `cert_trace.lean`.
