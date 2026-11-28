@@ -112,14 +112,13 @@ def withByte (b : ByteArray) (k : Nat) (v : UInt8) : ByteArray := b.set! k v
 def str (s : String) : ByteArray := s.toUTF8
 
 /-- The cases, built from the base certificate `D` (its bytes `b`). The version rows say what
-the codec does today; each version a later change retires flips its row to a refusal. -/
+the codec does: it reads DCERT4 only, and refuses every earlier version by its magic. -/
 def cases (D : DesignCert) (b : ByteArray) : List Case :=
   let mem0 (f : MemoryDesc → MemoryDesc) := { D with memories := D.memories.map f }
   let badout := { D with outputs := D.outputs.modify 0 fun o => { o with slot := D.numSlots } }
   [ { name := "ok4", bytes := b, parse := .ok, check := .ok }
   , { name := "ok4 with a trailing newline", bytes := b.push 10, parse := .ok, check := .ok }
-    -- today: DCERT3 is read, every memory at the whole 2^aw table
-  , { name := "ok3", bytes := render3 D, parse := .ok, check := .ok }
+  , { name := "ok3", bytes := render3 D, parse := .err "bad magic", check := .err "bad magic" }
   , { name := "v2", bytes := withByte b 5 50, parse := .err "bad magic", check := .err "bad magic" }
   , { name := "v1min", bytes := str "DCERT1\n0\n0\n0\n0\n0\n", parse := .err "bad magic",
       check := .err "bad magic" }

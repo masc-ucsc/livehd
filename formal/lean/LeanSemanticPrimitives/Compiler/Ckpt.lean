@@ -24,8 +24,8 @@ digest <16 hex>          fnv1a64 of every byte before this line
 
 Values are unsigned, at the declared width. A memory's default is its value at every
 address it does not list, at or past `depth` and below 0 included; no step ever writes those.
-The design hash is taken over `renderCert D`, not over a file, so a DCERT4 or DCERT3 file of the
-same design hashes the same.
+The design hash is taken over `renderCert D`, not over a file, so it is a property of the record:
+a DCERT3 file converted by `dcert_upgrade` (the same record) keeps every checkpoint taken against it.
 
 `validate` refuses a checkpoint that does not fit the certificate, with one message per
 rule. Two rules are about the certificate alone: every next image of a memory is a version of

@@ -190,6 +190,11 @@ refuse "an operator code the format does not define" "$WORK/op.dcert" "is not an
 
 refuse "a certificate that is not there at all" "$WORK/no-such-file.dcert" "cannot read"
 
+# An earlier version: DCERT3 is the DCERT4 record without the memory depth; this one has no
+# memory, so it differs from TINY only in its magic. Refused by name, never read.
+sed '1s/DCERT4/DCERT3/' "$TINY" > "$WORK/v3.dcert"
+refuse "a DCERT3 certificate" "$WORK/v3.dcert" "bad magic: expected DCERT4"
+
 # --- NON-CANONICAL RECORDS -------------------------------------------------
 # These are files that PARSE as integers but that `renderCert` could never have
 # written.  Accepting one lets the structural metric separate two records that

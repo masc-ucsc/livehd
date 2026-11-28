@@ -41,7 +41,7 @@ Names come from the `_io.json` beside the certificate:
 - Values are hex (`0x...`) or decimal, a negative one modulo `2 ^ width`; a memory word past
   the memory's depth must be 0. The cycle is `meta.json`'s `cycle`.
 
-`<cert>` is a DCERT4 file (DCERT3 is still read), admitted with `CertIO.readCertChecked`. Exit codes: 0 ok / SAME, 1 refused / DIFFER,
+`<cert>` is a DCERT4 file, admitted with `CertIO.readCertChecked`. Exit codes: 0 ok / SAME, 1 refused / DIFFER,
 2 usage or I/O, 3 the checkpoint does not parse.
 
 The format and every refusal are in `Compiler/Ckpt.lean`; `pass/lean/tools/formats/ckpt.md`

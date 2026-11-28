@@ -30,13 +30,13 @@
 #                                    up; a second run onto the existing up is refused (exit 2)
 #   dcert_upgrade ok3space|ok3trunc|v2|v1flop|ok4|junk   refused (exit 1), nothing written
 #   lhd_ckpt init ok4full a.ckpt; lhd_ckpt check up a.ckpt    OK: the same design hash
-#   lhd_ckpt check ok3 a.ckpt        WANT_OK3_CKPT (today: OK, DCERT3 is read)
+#   lhd_ckpt check ok3 a.ckpt        refused: DCERT3 is not read (bad magic)
 #   lhd_ckpt check ok4 a.ckpt        REFUSED, design hash (ok4's memory has depth 12)
 #
 # Expect: on ok4 every driver exits 0 and prints its normal result. Every input WANT names with a
 # reason is refused: the driver exits nonzero, prints `<file>: ` and the reason, and prints no
-# result of a run. An input WANT marks `admitted` is not refused at load (today's policy; the
-# run's own result is not checked).
+# result of a run. An input WANT marks `admitted` would be one not refused at load whose run's own
+# result is not checked; with DCERT4 the only version read, no input is marked so.
 #
 # Prints `PASS cert_admit_selftest: ...` and exits 0, or `FAIL ...` lines and exits 1.
 #
@@ -57,15 +57,15 @@ FX="$OUT/fx"
 # (not refused at load), or an extended regex the refusal must match
 declare -A WANT=(
   [ok4]=ok
-  [ok3]=admitted
-  [v2]='parse: bad magic'
-  [v1min]='parse: bad magic'
-  [v1flop]='parse: bad magic'
-  [fpfix]='parse: bad magic'
+  [ok3]='parse: bad magic: expected DCERT4$'
+  [v2]='parse: bad magic: expected DCERT4$'
+  [v1min]='parse: bad magic: expected DCERT4$'
+  [v1flop]='parse: bad magic: expected DCERT4$'
+  [fpfix]='parse: bad magic: expected DCERT4$'
   [depth0]='refused: memory 0 declares depth 0'
   [noclk]='refused: no clock domains'
   [badout]='refused: output 0 reads slot'
-  [junk]='parse: bad magic'
+  [junk]='parse: bad magic: expected DCERT4$'
 )
 CERTS="ok4 ok3 v2 v1min v1flop fpfix depth0 noclk badout junk"
 
@@ -143,7 +143,7 @@ for d in $DRIVERS; do
 done
 
 # ---- dcert_upgrade (C7) and the design hash across it (C6)
-WANT_OK3_CKPT=ok   # today: lhd_ckpt reads DCERT3
+WANT_OK3_CKPT='bad magic: expected DCERT4$'   # DCERT3 is refused; dcert_upgrade converts it
 up_run() { lean_run "$T/sim/dcert_upgrade.lean" "$@"; }
 U="$OUT/upgrade"; mkdir -p "$U"
 up_run "$FX/ok3.dcert" "$U/up.dcert" > "$U/ok3.log" 2>&1; rc=$?
@@ -201,4 +201,4 @@ if [[ $nok -ne $nd || $nref -ne $((nd * nrefc)) ]]; then
   fails=$((fails + 1))
 fi
 if [[ $fails -gt 0 ]]; then echo "FAIL cert_admit_selftest: $fails"; exit 1; fi
-echo "PASS cert_admit_selftest: $nd drivers, ok4 run by each, $nref refusals at load, $nadm admitted (today's policy); dcert_upgrade and the design hash"
+echo "PASS cert_admit_selftest: $nd drivers, ok4 run by each, $nref refusals at load, $nadm other admitted; dcert_upgrade and the design hash"

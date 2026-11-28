@@ -186,8 +186,8 @@ structure MemoryDesc where
   the words the hardware lacks are never written or read, and the table and the
   array agree on every word a step can see.
 
-  The default is the whole table: a DCERT3 certificate does not state a depth
-  and keeps the meaning it always had. -/
+  The default is the whole table: what a DCERT3 certificate (which stated no
+  depth) meant, and what `dcert_upgrade` writes when it converts one. -/
   depth    : Nat := 2 ^ aw
 deriving Repr, Inhabited, DecidableEq
 

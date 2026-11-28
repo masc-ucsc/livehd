@@ -24,7 +24,8 @@ The depth this gives is the DCERT3 meaning, not the memory's real size: a 12-wor
 to depth 16. A fresh lhd export writes the real depth (and so a stronger address check), so
 re-export where the RTL is at hand; convert the files whose flow cannot be rerun.
 
-The driver is `pass/lean/tools/sim/dcert_upgrade.lean`.
+The driver is `pass/lean/tools/sim/dcert_upgrade.lean`. This module is the only reader of DCERT3:
+`parseCert` and every driver refuse it, and nothing but the converter imports this module.
 -/
 import LeanSemanticPrimitives.Compiler.CertIOCodec
 
@@ -34,6 +35,28 @@ namespace Upgrade
 
 /-- "DCERT3\n". -/
 def magic3Bytes : List UInt8 := [68, 67, 69, 82, 84, 51, 10]
+
+/-- The DCERT3 magic. Only this converter reads it: `parseCert` refuses DCERT3. -/
+def hasMagic3 (b : ByteArray) : Bool :=
+  let m := "DCERT3".toUTF8
+  b.size ≥ m.size && (List.range m.size).all fun k => b[k]! == m[k]!
+
+/-- A DCERT3 memory record: the DCERT4 one (`readMemory`) without the depth, which is then the
+field's default, the whole `2 ^ aw` table: the meaning every DCERT3 certificate was written and
+checked under. -/
+def readMemory3 (b : ByteArray) (i : Nat) : Option (MemoryDesc × Nat) := do
+  let (aw, i) ← readNat b i
+  let (dw, i) ← readNat b i
+  let (nx, i) ← readNat b i
+  let (ck, i) ← readNat b i
+  let (ni, i) ← readNat b i
+  let (iv, i) ← readMany readNat b i ni #[]
+  let (nc, i) ← readNat b i
+  let (cs, i) ← readMany readCommit b i nc #[]
+  let (ha, i) ← readNat b i
+  let (a, i)  ← readNat b i
+  some ({ aw := aw, dw := dw, nextImg := nx, clock := ck, init := iv, commits := cs,
+          asyncImg := if ha != 0 then some a else none }, i)
 
 /-- The DCERT3 memory record: `memBody` without its last field, the depth. -/
 def memBody3 (m : MemoryDesc) : List UInt8 :=

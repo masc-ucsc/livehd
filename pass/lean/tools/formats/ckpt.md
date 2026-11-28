@@ -34,8 +34,9 @@ digest <16 hex>          fnv1a64 of every byte before this line
   strictly increasing. Every other address reads the default: the addresses at or past `depth`,
   and the negative ones. No step reads or writes those (`Projection/MemAddrSound`), so the
   default there has no effect on any run.
-- The design hash is taken over `renderCert D`, not over the file. A DCERT4 file and a DCERT3
-  file of the same design hash the same.
+- The design hash is taken over `renderCert D`, not over the file. A DCERT3 file converted by
+  `dcert_upgrade` is the same record, so a checkpoint taken against the DCERT3 file checks against
+  the DCERT4 one.
 - An `ext` section is opaque. Any tool that does not know its name copies it unchanged. A run
   loop can keep its host state there.
 
@@ -139,7 +140,8 @@ lhd_ckpt to-state  <cert> <ckpt> <out>             the same state as an lgraph-s
 lhd_ckpt import-lhd <cert> <ckpt dir> <out.ckpt> ...  an `lhd sim` checkpoint, imported (below)
 ```
 
-- `<cert>` is a DCERT4 file (DCERT3 is still read), admitted with `CertIO.readCertChecked`.
+- `<cert>` is a DCERT4 file, admitted with `CertIO.readCertChecked` (every earlier version is
+  refused; `dcert_upgrade` converts a DCERT3 file).
 - Exit codes: 0 for OK or SAME; 1 for REFUSED or DIFFER; 2 for usage or I/O errors; 3 when
   the checkpoint does not parse.
 - `init reset` starts every flop at its declared reset value and every memory at its power-on

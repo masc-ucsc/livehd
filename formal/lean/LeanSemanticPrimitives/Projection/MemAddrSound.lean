@@ -504,7 +504,7 @@ theorem certWfError_of_readCertChecked {b : ByteArray} {D : DesignCert}
       exact hw
 
 /-- **For a certificate the loader admitted** (`readCertChecked`, which every
-DCERT3/DCERT4 route loads through): the same, on every step. -/
+route loads through): the same, on every step. -/
 theorem loaded_memAccess_lt_depth {b : ByteArray} {D : DesignCert}
     (hload : CertIO.readCertChecked b = .ok D) (hwf : DesignCert.DesignCertWF D)
     {j : Nat} {c : DenseNodeCert} (hc : D.nodes[j]? = some c) (hop : isAddrOp c.op = true)

@@ -1,5 +1,5 @@
 /-
-# The DCERT4 codec (it reads DCERT3 too) -- Mathlib-free
+# The DCERT4 codec -- Mathlib-free
 
 The wire format, the pure writer, the TOTAL reader, checked admission
 (`certWfError` / `readCertChecked`), `loadCert` (read a file, then `readCertChecked`), and the
@@ -13,7 +13,7 @@ native objects, so anything importing it cannot be linked into a compiled
 driver and cannot be built by the no-Mathlib `.build-proj.sh`.  Nothing here
 needs it: the codec depends on the `DesignCert` record and `Runtime` alone.
 Splitting it out lets the Futamura-projection modules and their native drivers
-read DCERT3 directly.  `Compiler/CertIO.lean` imports this module and keeps the
+read certificates directly.  `Compiler/CertIO.lean` imports this module and keeps the
 verified entry point (`runChecked`, `runChecked_correct`, `loadAndRun`,
 `runCycles`) and `clockName_utf8_inverse`; the round-trip theorem stays in
 `CertIORoundTrip`.  Like the D3 `Defs` split, this module holds definitions
@@ -77,8 +77,8 @@ asynchronous reset (`hasAsync asyncImg`, as a flop spells `enable`).  A DCERT2
 stream is refused by magic: its memory record is a different length.
 
 DCERT4 extends ONLY the memory record again: its last field is the memory's
-real `depth` (the LGraph Memory cell's `size`). A DCERT3 stream is still read,
-with every memory at the whole `2 ^ aw` table (see `magicBytes`).
+real `depth` (the LGraph Memory cell's `size`). DCERT4 is the only version this
+codec reads (see `magicBytes`).
 -/
 
 /-- Operator tag and its payload.  The payload slot is always present and is `0`
@@ -267,12 +267,13 @@ def memBytes (m : MemoryDesc) : List UInt8 := memBody m ++ [chNL]
 /-- "DCERT4\n" -- spelled as bytes so the proof never unfolds `String.toUTF8`.
 
 VERSION 4. The memory record ends with the memory's real depth
-(`MemoryDesc.depth`), which `aw = ceil_log2 depth` cannot carry. Unlike the
-earlier bumps, DCERT3 is still READ: its memory record is the DCERT4 record
-without the depth, and a DCERT3 memory means what it always meant -- the whole
-`2 ^ aw` table, the field's default. That is not an assumption added about the
-design: it is the meaning every DCERT3 certificate was written and checked
-under. `readMemory3` reads it; nothing writes it.
+(`MemoryDesc.depth`), which `aw = ceil_log2 depth` cannot carry. DCERT3 was
+read for a while after this bump (its memory record is the DCERT4 record without
+the depth, and a DCERT3 memory means the whole `2 ^ aw` table); it is refused by
+name now, like every earlier version, so one format has one reader. A stored
+DCERT3 file converts exactly: `dcert_upgrade` (`Compiler/CertIOUpgrade.lean`)
+reads it into the same record, every depth at `2 ^ aw`, and writes it with
+`renderCert`, which keeps its design hash and so its checkpoints.
 
 VERSION 3. DCERT2 carried no `MemoryDesc.init`, `commits` or `asyncImg`; its
 memory record is shorter, so it is refused by name like DCERT1.
@@ -445,22 +446,6 @@ def readMemory (b : ByteArray) (i : Nat) : Option (MemoryDesc × Nat) := do
   some ({ aw := aw, dw := dw, nextImg := nx, clock := ck, init := iv, commits := cs,
           asyncImg := if ha != 0 then some a else none, depth := dp }, i)
 
-/-- A DCERT3 memory record: the DCERT4 one without the depth, which is then the
-field's default, the whole `2 ^ aw` table (see `magicBytes`). -/
-def readMemory3 (b : ByteArray) (i : Nat) : Option (MemoryDesc × Nat) := do
-  let (aw, i) ← readNat b i
-  let (dw, i) ← readNat b i
-  let (nx, i) ← readNat b i
-  let (ck, i) ← readNat b i
-  let (ni, i) ← readNat b i
-  let (iv, i) ← readMany readNat b i ni #[]
-  let (nc, i) ← readNat b i
-  let (cs, i) ← readMany readCommit b i nc #[]
-  let (ha, i) ← readNat b i
-  let (a, i)  ← readNat b i
-  some ({ aw := aw, dw := dw, nextImg := nx, clock := ck, init := iv, commits := cs,
-          asyncImg := if ha != 0 then some a else none }, i)
-
 /-- A length-prefixed name: the count, ONE separating space -- CHECKED, not
 assumed -- then exactly that many bytes taken without scanning. -/
 def readClock (b : ByteArray) (i : Nat) : Option (ClockDesc × Nat) := do
@@ -479,30 +464,23 @@ def hasMagic (b : ByteArray) : Bool :=
   let m := "DCERT4".toUTF8
   b.size ≥ m.size && (List.range m.size).all fun k => b[k]! == m[k]!
 
-/-- The previous version's magic: DCERT3 is still read (`readMemory3`). -/
-def hasMagic3 (b : ByteArray) : Bool :=
-  let m := "DCERT3".toUTF8
-  b.size ≥ m.size && (List.range m.size).all fun k => b[k]! == m[k]!
-
 /-- Parse a whole certificate.  The CODEC: a faithful decoding that judges
-nothing.  Every semantic refusal lives in `certWfError` / `readCertChecked`. -/
+nothing.  Every semantic refusal lives in `certWfError` / `readCertChecked`.
+DCERT4 only: every earlier version is refused by its magic (see `magicBytes`). -/
 def parseCert (b : ByteArray) : Except String DesignCert :=
-  if !hasMagic b then
-    -- DCERT3: the same sections, a memory record without the depth.
-    if hasMagic3 b then
-      match go readMemory3 b with
-      | some D => .ok D
-      | none   => .error "malformed certificate"
-    else .error "bad magic: expected DCERT4 or DCERT3"
+  if !hasMagic b then .error "bad magic: expected DCERT4"
   else
   match go readMemory b with
   | some D => .ok D
   | none   => .error "malformed certificate"
 where
+  /-- The sections after the magic. The memory record's reader is a parameter: `parseCert`
+  passes `readMemory`; `dcert_upgrade`'s DCERT3 reader (`Compiler/CertIOUpgrade.lean`) reads a
+  DCERT3 file's sections with this same code and its own memory record. -/
   go (readMem : ByteArray → Nat → Option (MemoryDesc × Nat)) (b : ByteArray) :
       Option DesignCert := do
-    -- Past the six bytes of "DCERT4" (or "DCERT3"); the magic's trailing newline
-    -- is consumed as leading whitespace by the first `readNat`.
+    -- Past the six bytes of the magic; its trailing newline is consumed as leading
+    -- whitespace by the first `readNat`.
     let i := 6
     let (ns, i)   ← readNat b i
     let (srcs, i) ← readMany readSource b i ns #[]

@@ -178,18 +178,19 @@ def main : IO UInt32 := do
   -- 5. REFUSAL CONTROLS on the production bytes.
   expectError lg "DCERT1 magic" (parseCert (raw.set! 5 49))
   expectError lg "DCERT2 magic (its memory record is shorter)" (parseCert (raw.set! 5 50))
+  expectError lg "DCERT3 magic (its memory record has no depth)" (parseCert (raw.set! 5 51))
   expectError lg "truncation (last 10 bytes removed)"
     (parseCert (raw.extract 0 (raw.size - 10)))
   expectError lg "trailing non-whitespace" (parseCert (raw.push 120))
   expectOk    lg "trailing whitespace (allowed by the format)" (parseCert (raw.push 10))
   expectError lg "unsupported opcode 99"
-    (parseCert "DCERT3\n0\n1\n99 0 8 0 7\n0\n0\n0\n1\n5 clock\n".toUTF8)
+    (parseCert "DCERT4\n0\n1\n99 0 8 0 7\n0\n0\n0\n1\n5 clock\n".toUTF8)
   expectError lg "clock name separator is not a space"
-    (parseCert "DCERT3\n0\n0\n0\n0\n0\n1\n5xclock\n".toUTF8)
+    (parseCert "DCERT4\n0\n0\n0\n0\n0\n1\n5xclock\n".toUTF8)
   expectError lg "clock name shorter than its count"
-    (parseCert "DCERT3\n0\n0\n0\n0\n0\n1\n9 clk\n".toUTF8)
+    (parseCert "DCERT4\n0\n0\n0\n0\n0\n1\n9 clk\n".toUTF8)
   expectOk    lg "a clock name containing a space and a newline"
-    (parseCert "DCERT3\n0\n0\n0\n0\n0\n1\n7 a b\nc d\n".toUTF8)
+    (parseCert "DCERT4\n0\n0\n0\n0\n0\n1\n7 a b\nc d\n".toUTF8)
 
   let fails ← lg.get
   if fails.isEmpty then

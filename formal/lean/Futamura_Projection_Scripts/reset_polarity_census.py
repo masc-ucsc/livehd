@@ -64,7 +64,7 @@ def parse(path):
         else:
             srcs.append((kind, *f))
     flops = [dict(zip(FLOP_KEYS, f)) for f in c['flops']]
-    return c['magic'].decode().strip(), srcs, len(c['nodes']), len(c['outputs']), flops
+    return 'DCERT4', srcs, len(c['nodes']), len(c['outputs']), flops
 
 
 def census(path):

@@ -108,7 +108,7 @@ def main : IO UInt32 := do
     ("12-word memory, mask guarding another index", ramMask 12 12 (guard := 3), some "bounded only by 15"),
     ("12-word memory, constant mask 7 on the read", ramMask 12 12 (constMask := true), none),
     ("6-word memory, constant mask 7 on the read",  ramMask 6 6 (constMask := true), some "bounded only by 7"),
-    ("whole table by default (DCERT3 meaning)",
+    ("whole table by default (the DCERT3 meaning)",
        { ram 12 12 false with memories := #[{ aw := 4, dw := 8, nextImg := 13 }] }, none),
     ("depth 0",                                ram 0 0 true,    some "declares depth 0"),
     ("depth past the 2^aw table",              ram 17 12 true,  some "declares depth 17"),
@@ -118,7 +118,7 @@ def main : IO UInt32 := do
   for (name, D, want) in cases do
     n := n + 1
     if let some f ← admit name D want then fails := fails.push f
-  -- 2. the codec: DCERT4 round trip, and DCERT3 read as the whole table
+  -- 2. the codec: DCERT4 round trip; DCERT3 refused by its magic
   n := n + 1
   let D := ram 12 12 true
   match parseCert (renderCert D) with
@@ -132,7 +132,7 @@ def main : IO UInt32 := do
   let one (magic depth : String) : ByteArray :=
     s!"{magic}\n1\n4 0 4 8\n0\n0\n0\n1\n4 8 0 0 0 0 0 0{depth}\n1\n5 clock\n".toUTF8
   for (name, bytes, want) in [("DCERT4 depth 12", one "DCERT4" " 12", some 12),
-                              ("DCERT3, no depth: the whole table", one "DCERT3" "", some 16),
+                              ("DCERT3, no depth: refused", one "DCERT3" "", none),
                               ("DCERT4 without its depth", one "DCERT4" "", none),
                               ("DCERT3 with a stray depth", one "DCERT3" " 12", none)] do
     n := n + 1

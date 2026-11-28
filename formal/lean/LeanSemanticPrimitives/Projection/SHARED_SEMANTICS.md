@@ -47,7 +47,8 @@ a recorded hash.
 DCERT4 adds `MemoryDesc.depth`, the number of words the memory really has (the
 Memory cell's `size`); `aw = ceil_log2 depth` rounds a depth that is not a power
 of two up.  It defaults to the whole `2 ^ aw` table, which is what a DCERT3
-memory meant, so DCERT3 is still read.  The step semantics never read it:
+memory meant (`dcert_upgrade` converts a DCERT3 file with exactly that depth;
+the codec reads DCERT4 only).  The step semantics never read it:
 admission (`certWfError`, via `Compiler/MemAddr`) refuses a depth of 0 or past
 `2 ^ aw`, and any read or write whose address bound is not below the depth,
 and `Projection/MemAddrSound` proves that on every step of `interpretDesign` of
@@ -198,7 +199,8 @@ the same commit, and say why.
 | `Compiler/MemDomains.lean` | which clock domains of a memory fire (read by `srcMemNext`) |
 | `Compiler/DirectCheck.lean` | the checker's slot kinds (memory route only) |
 | `Compiler/MemAddr` | the load-time memory-address check (DCERT4) |
-| `Compiler/CertIOV1` / `CertIOCodec` / `CertIORoute` | the DCERT1 and DCERT4 codecs (DCERT4 also reads DCERT3) and the router |
+| `Compiler/CertIOV1` / `CertIOCodec` / `CertIORoute` | the DCERT1 (fp history, read by no driver) and DCERT4 codecs and the router |
+| `Compiler/CertIOUpgrade` | DCERT3 to DCERT4, lossless (`dcert_upgrade`); the only reader of DCERT3 |
 | `Compiler/ResetPolarity` / `RunAdmission` | the drivers' run-admission checks |
 
 `Translation/OpBridge.lean` needs Mathlib and is not imported by any Projection

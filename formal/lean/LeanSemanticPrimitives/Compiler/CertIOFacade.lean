@@ -30,29 +30,15 @@ theorem magics_are_exclusive (b : ByteArray) : ¬ (hasMagic b ∧ V1.hasMagic b)
   rw [e1] at e2
   exact absurd e2 (by decide)
 
-/-- …and DCERT3, which is still read, is not DCERT1 either (`'3'` against `'1'`). -/
-theorem magic3_exclusive (b : ByteArray) : ¬ (hasMagic3 b ∧ V1.hasMagic b) := by
-  rintro ⟨h2, h1⟩
-  simp only [hasMagic3, V1.hasMagic, Bool.and_eq_true, decide_eq_true_eq,
-             List.all_eq_true, List.mem_range] at h2 h1
-  have e2 := h2.2 5 (by rw [show "DCERT3".toUTF8.size = 6 from rfl]; omega)
-  have e1 := h1.2 5 (by rw [show "DCERT1".toUTF8.size = 6 from rfl]; omega)
-  rw [show ("DCERT3".toUTF8[5]! : UInt8) = 51 from rfl] at e2
-  rw [show ("DCERT1".toUTF8[5]! : UInt8) = 49 from rfl] at e1
-  simp only [beq_iff_eq] at e1 e2
-  rw [e1] at e2
-  exact absurd e2 (by decide)
-
-/-- Routing does not change what DCERT3 means: a rendered certificate comes
+/-- Routing does not change what a certificate means: a rendered certificate comes
 back through the facade exactly as `parseCert` returns it, tagged `v2`. -/
 theorem parseAny_renderCert (D : DesignCert) :
     parseAny (renderCert D) = .ok (Format.v2, D) := by
   have hm : hasMagic (renderCert D) = true := hasMagic_render D
-  simp only [parseAny, detect, hm, Bool.true_or, if_pos, parseCert_renderCert D, Except.map]
+  simp only [parseAny, detect, hm, if_pos, parseCert_renderCert D, Except.map]
 
 end CertIO
 end Compiler
 
 #print axioms Compiler.CertIO.magics_are_exclusive
-#print axioms Compiler.CertIO.magic3_exclusive
 #print axioms Compiler.CertIO.parseAny_renderCert
