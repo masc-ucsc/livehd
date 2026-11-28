@@ -14,12 +14,13 @@ running many commands sets to what --detect printed):
              --user then cannot reach the user's manager although it runs;
   watch      no user manager at all (no login session and no linger): the command runs in a
              session of its own and a watchdog sums the resident memory of every process in that
-             session every 0.5 s, and kills the session (SIGKILL) when the sum passes the cap.
+             session every 0.5 s, and kills every one of them (SIGKILL, process groups such as
+             `timeout`'s included) when the sum passes the cap.
              Coarser than a cgroup: the command can pass the cap for up to one interval, and
              memory that is not resident (page cache, swap) is not counted.
 
 A command killed for memory exits as a SIGKILL does (137 from the command line, -9 from run());
-in the watch way a line `memcap: killed ...` goes to stderr as well.
+in the watch way a line `memcap: killed ...` goes where the command's stderr goes as well.
 """
 import os
 import signal
@@ -74,9 +75,9 @@ def method():
     return _METHOD
 
 
-def _session_rss(sid, page):
-    """Resident bytes of every process whose session is `sid`."""
-    tot = 0
+def _session(sid):
+    """(pid, resident pages) of every process whose session is `sid`."""
+    out = []
     for p in os.listdir("/proc"):
         if not p.isdigit():
             continue
@@ -86,10 +87,25 @@ def _session_rss(sid, page):
         except OSError:
             continue
         f = st[st.rfind(b")") + 2:].split()
-        # after the command name: state ppid pgrp session ... rss is the 22nd field
-        if len(f) > 21 and int(f[3]) == sid:
-            tot += int(f[21]) * page
-    return tot
+        # after the command name: state ppid pgrp session ... rss is the 22nd field; a zombie
+        # (state Z) holds no memory and waits only for its parent
+        if len(f) > 21 and int(f[3]) == sid and f[0] != b"Z":
+            out.append((int(p), int(f[21])))
+    return out
+
+
+def _kill_session(sid):
+    """SIGKILL every process of the session, its own process groups included (`timeout` makes one)."""
+    for _ in range(50):
+        pids = [p for p, _ in _session(sid)]
+        if not pids:
+            return
+        for p in pids:
+            try:
+                os.kill(p, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        time.sleep(0.05)
 
 
 def run(cmd, mem="20G", stdout=None, stderr=None):
@@ -107,15 +123,14 @@ def run(cmd, mem="20G", stdout=None, stderr=None):
             return p.wait(timeout=0.5)
         except subprocess.TimeoutExpired:
             pass
-        rss = _session_rss(p.pid, page)
+        rss = sum(n for _, n in _session(p.pid)) * page
         if rss > cap:
-            try:
-                os.killpg(p.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            _kill_session(p.pid)
             p.wait()
-            print(f"memcap: killed at {rss >> 20} MB resident (cap {mem}, watchdog)", file=sys.stderr,
-                  flush=True)
+            # the line goes where the command's stderr went (its log), or to ours
+            out = stderr if hasattr(stderr, "write") else \
+                stdout if stderr == subprocess.STDOUT and hasattr(stdout, "write") else sys.stderr
+            print(f"memcap: killed at {rss >> 20} MB resident (cap {mem}, watchdog)", file=out, flush=True)
             return -signal.SIGKILL
 
 
