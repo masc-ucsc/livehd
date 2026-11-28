@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "kind": "lean_design_io",
+  "top": "ram12",
+  "runtime_input_arity": 7,
+  "inputs": [
+    {"name": "clk", "ordinal": 0, "width": 1, "used_by_model": false},
+    {"name": "rp", "ordinal": 1, "width": 2, "used_by_model": true},
+    {"name": "rw", "ordinal": 2, "width": 2, "used_by_model": true},
+    {"name": "wd", "ordinal": 3, "width": 8, "used_by_model": true},
+    {"name": "we", "ordinal": 4, "width": 1, "used_by_model": true},
+    {"name": "wp", "ordinal": 5, "width": 2, "used_by_model": true},
+    {"name": "ww", "ordinal": 6, "width": 2, "used_by_model": true}
+  ],
+  "outputs": [
+    {"name": "bad_rd", "ordinal": 0, "width": 1, "used_by_model": true},
+    {"name": "ok_rd", "ordinal": 1, "width": 1, "used_by_model": true},
+    {"name": "ok_w0", "ordinal": 2, "width": 1, "used_by_model": true},
+    {"name": "rd_o", "ordinal": 3, "width": 8, "used_by_model": true}
+  ],
+  "clocks": [
+    {"name": "clk", "ordinal": 0, "implicit": false}
+  ],
+  "flops": [],
+  "memories": [
+    {"name": "mem_1", "inst": "mem", "ordinal": 0, "aw": 4, "dw": 8, "depth": 12}
+  ]
+}
