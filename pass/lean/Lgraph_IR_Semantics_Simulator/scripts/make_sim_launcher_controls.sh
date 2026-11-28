@@ -12,12 +12,15 @@
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 GEN="$ROOT/pass/lean/Lgraph_IR_Semantics_Simulator/scripts/make_sim_launcher.py"
-WORK="$ROOT/generated/master_port/sim_launcher_controls"
+WORK="${WORK:-$ROOT/generated/master_port/sim_launcher_controls}"
 SRC="${1:-$ROOT/generated/master_port/replay/jobs/CORE-ET/verified_compiler/txfma_e4/lean/txfma_e4_Lgraph.lean}"
 
 if [ ! -f "$SRC" ]; then
   echo "REFUSE: no certificate at $SRC (pass one as \$1)" >&2; exit 2
 fi
+# the certificate's name (`def <base>_designCert`), which the generator names its files after
+BASE=$(sed -n 's/^def \([A-Za-z0-9_]*\)_designCert[[:space:]]*:.*/\1/p' "$SRC" | head -1)
+[ -n "$BASE" ] || { echo "REFUSE: $SRC has no \`def <name>_designCert\`" >&2; exit 2; }
 fails=0
 
 # fixture NAME [--no-sims]  ->  prints the fake tree root
@@ -62,17 +65,17 @@ open(sys.argv[2],'w').write(s)" "$SRC" "$1"
 # ---- 1. a real certificate ------------------------------------------------
 d=$(fixture accepts)
 if run_case accepts 0 "$d" "$SRC"; then
-  cert="$d/formal/lean/Sims/txfma_e4_Cert.lean"
-  main="$d/formal/lean/Sims/txfma_e4_Main.lean"
+  cert="$d/formal/lean/Sims/${BASE}_Cert.lean"
+  main="$d/formal/lean/Sims/${BASE}_Main.lean"
   if [ ! -f "$cert" ] || [ ! -f "$main" ]; then
     echo " -- MISS: outputs missing"; fails=$((fails+1))
   elif grep -q 'Compiler.CompileDesign' "$cert"; then
     echo " -- MISS: the CompileDesign import survived"; fails=$((fails+1))
-  elif ! grep -q 'txfma_e4_designCert' "$cert"; then
+  elif ! grep -q "${BASE}_designCert" "$cert"; then
     echo " -- MISS: the certificate itself was cut away"; fails=$((fails+1))
   elif grep -q 'Compile-and-run' "$cert"; then
     echo " -- MISS: the residual half survived"; fails=$((fails+1))
-  elif ! grep -q 'name = "Simtxfma_e4"' "$d/formal/lean/lakefile.toml"; then
+  elif ! grep -q "name = \"Sim${BASE}\"" "$d/formal/lean/lakefile.toml"; then
     echo " -- MISS: no lean_exe stanza"; fails=$((fails+1))
   else
     echo ", cert cut, compiler import gone, stanza appended"
@@ -83,7 +86,7 @@ fi
 d=$(fixture idempotent)
 python3 -I "$d/pass/lean/Lgraph_IR_Semantics_Simulator/scripts/make_sim_launcher.py" "$SRC" >/dev/null 2>&1
 python3 -I "$d/pass/lean/Lgraph_IR_Semantics_Simulator/scripts/make_sim_launcher.py" "$SRC" >/dev/null 2>&1
-n=$(grep -c 'name = "Simtxfma_e4"' "$d/formal/lean/lakefile.toml")
+n=$(grep -c "name = \"Sim${BASE}\"" "$d/formal/lean/lakefile.toml")
 if [ "$n" -eq 1 ]; then echo "ok: idempotent -> 1 stanza after two runs"
 else echo "MISS: idempotent -> $n stanzas"; fails=$((fails+1)); fi
 
@@ -107,7 +110,7 @@ d=$(fixture step_fallback)
 mutate "$d/cut.lean" "s = s.replace('/-- Compile-and-run.', '/-- removed.')"
 if grep -qE '^def \w+_step[[:space:]]*:' "$d/cut.lean"; then
   if run_case step_fallback 0 "$d" "$d/cut.lean"; then
-    c="$d/formal/lean/Sims/txfma_e4_Cert.lean"
+    c="$d/formal/lean/Sims/${BASE}_Cert.lean"
     if grep -q 'Compile-and-run\|removed\.' "$c"; then
       echo " -- MISS: the fallback did not cut the residual half"; fails=$((fails+1))
     elif [ "$(tail -c 3 "$c" | tr -d '\n')" = "-/" ]; then
@@ -139,7 +142,7 @@ run_case no_cert 1 "$d" "$d/cut.lean" && echo ", no _designCert"
 # ---- 7. --keep-compiler takes the file verbatim ---------------------------
 d=$(fixture keep_compiler)
 if run_case keep_compiler 0 "$d" --keep-compiler "$SRC"; then
-  if ! diff -q "$SRC" "$d/formal/lean/Sims/txfma_e4_Cert.lean" >/dev/null; then
+  if ! diff -q "$SRC" "$d/formal/lean/Sims/${BASE}_Cert.lean" >/dev/null; then
     echo " -- MISS: --keep-compiler altered the certificate"; fails=$((fails+1))
   else echo ", certificate byte-identical"; fi
 fi
@@ -147,9 +150,9 @@ fi
 # ---- 8. --bench emits the differential harness ----------------------------
 d=$(fixture bench)
 if run_case bench 0 "$d" --bench "$SRC"; then
-  if [ ! -f "$d/formal/lean/Sims/txfma_e4_Bench.lean" ]; then
+  if [ ! -f "$d/formal/lean/Sims/${BASE}_Bench.lean" ]; then
     echo " -- MISS: no _Bench.lean"; fails=$((fails+1))
-  elif ! grep -q 'name = "Benchtxfma_e4"' "$d/formal/lean/lakefile.toml"; then
+  elif ! grep -q "name = \"Bench${BASE}\"" "$d/formal/lean/lakefile.toml"; then
     echo " -- MISS: no bench stanza"; fails=$((fails+1))
   else echo ", bench harness and stanza"; fi
 fi

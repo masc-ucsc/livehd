@@ -30,7 +30,21 @@ set -euo pipefail
 #   engines   every route and knob combination `EngineSelector` builds (HDLProof/Run/Engine) on busm,
 #             busm_mealy, seqm and seqm_init: 300 cycles of random ticks, stepped once, twice from
 #             one state, after two peeks, and reloaded from a checkpoint, against ref
-#             (tests/engine_check.lean, interpreted against .olean-dev)
+#             (tests/engine_check.lean, interpreted against .olean-dev): exactly 13 x 4 x 4 = 208
+#             runs (RS-01); control: one certificate gives 52, which the exact count rejects
+#   refusals  (RS-09) another design's checkpoint, a host section the bind file does not fit,
+#             ckpt-at outside the run (exit 2), load: with no host memory (exit 2), a truncated
+#             ELF, a file that is not a certificate (exit 3); each has its accepted twin above
+#   traces    (RS-10) console.txt is the console, bus.trace has the program's fetch of word 0 and
+#             its 4 console writes, and every route writes the same bus.trace; control: latency
+#             moves the transfers' cycles, not the transfers
+#   images    (RS-11) the program as 16-bit $readmemh words (word:2) and as an ELF whose p_vaddr
+#             differs from p_paddr run as the ELF does; with vaddr the image lands outside every
+#             region (exit 3); control: the 16-bit words without word:2 do not print the console
+#   bind      (RS-12) `const` inputs drive the run as a stim file's `in` lines do; a bus with
+#             `we=` in place of `wstrb=` runs the program; control: another constant, other lines
+#   launcher  (RS-22) make_sim_launcher.py's controls on seqm's certificate module (no SKIP), and
+#             the launcher it emits, built against .olean-dev, prints cert_trace's lines
 #
 # CK_NAT=<dir with native cert_run and cert_trace> uses them; otherwise the drivers run
 # interpreted against formal/lean/.olean-dev (build it with formal/lean/.build-proj.sh).
@@ -93,8 +107,10 @@ sed -e 's/module busm(/module busm_mealy(/' -e 's/output \[31:0\] acc_o, output 
 sed -e 's/module busm(/module busm_proto(/' \
   -e "s/        2'd2: if (mem_ready) begin/        2'd2: if (!mem_ready) mem_addr <= mem_addr + 32'd4; else begin/" \
   "$OUT/busm.v" > "$OUT/busm_proto.v"
+sed -e 's/module busm(/module busm_we(/' -e 's/output \[31:0\] acc_o, output \[31:0\] pc_o);/output [31:0] acc_o, output [31:0] pc_o, output mem_we);\n  assign mem_we = |mem_wstrb;/' \
+  "$OUT/busm.v" > "$OUT/busm_we.v"
 grep -q 'rdy_o = mem_ready' "$OUT/busm_mealy.v" && grep -q 'mem_addr + 32.d4; else' "$OUT/busm_proto.v" \
-  || { echo "FAIL: the fixture variants were not derived"; exit 1; }
+  && grep -q 'assign mem_we = |mem_wstrb;' "$OUT/busm_we.v" || { echo "FAIL: the fixture variants were not derived"; exit 1; }
 cat > "$OUT/seqm.v" <<'EOF'
 module seqm(input clk, input we, input [3:0] wa, input [7:0] wd, output [7:0] q, output [3:0] pc_o);
   reg [3:0] pc = 4'd0;
@@ -127,6 +143,11 @@ ehdr = struct.pack('<4sBBBBB7sHHIIIIIHHHHHH', b'\x7fELF', 1, 1, 1, 0, 0, b'\0'*7
                    2, 243, 1, 0, 52, 0, 0, 52, 32, 1, 0, 0, 0)
 phdr = struct.pack('<IIIIIIII', 1, 84, 0, 0, len(data), len(data) + 64, 5, 4)
 open(f'{out}/prog.elf', 'wb').write(ehdr + phdr + data)
+# the same program as 16-bit $readmemh words, low half first (cert_run word:2)
+open(f'{out}/prog16.hex', 'w').write('\n'.join('%04x\n%04x' % (w & 0xffff, w >> 16) for w in main) + '\n')
+# the same ELF with p_vaddr 0x80000000 (p_paddr stays 0)
+phdr_va = struct.pack('<IIIIIIII', 1, 84, 0x80000000, 0, len(data), len(data) + 64, 5, 4)
+open(f'{out}/prog_va.elf', 'wb').write(ehdr + phdr_va + data)
 # a store to an address no region or device names; exit code 7
 open(f'{out}/buserr.bin', 'wb').write(prog([ins(0,1), ins(2,0x0E000000), ins(0,0), ins(2,EXIT)]))
 open(f'{out}/exit7.bin', 'wb').write(prog([ins(0,7), ins(2,EXIT)]))
@@ -136,7 +157,7 @@ open(f'{out}/prog8.bin', 'wb').write(bytes(p8))
 open(f'{out}/prog8_long.hex', 'w').write(' '.join('%02x' % v for v in p8 + [0xdd]) + '\n')
 EOF
 
-for d in busm busm_mealy busm_proto seqm seqm_init; do
+for d in busm busm_mealy busm_proto busm_we seqm seqm_init; do
   (cd "$OUT" && "$LHD" compile "$d.v" --reader slang --top "$d" --emit-dir "lg:${d}_lg" --workdir "${d}_cw" \
      > "$d.compile.log" 2>&1) || { tail -5 "$OUT/$d.compile.log"; echo "FAIL: compile $d"; exit 1; }
   (cd "$OUT" && "$LHD" compile "lg:${d}_lg" --top "$d" --workdir "${d}_lw" --emit-dir "lean:${d}_lean" \
@@ -203,7 +224,7 @@ done
 
 # latency
 for b in lat3 latr; do
-  expect 0 exit "$B" bind:"$OUT/$b.bind" load:"$OUT/prog.elf" max:5000
+  expect 0 exit "$B" bind:"$OUT/$b.bind" load:"$OUT/prog.elf" trace:"$OUT/t_$b" max:5000
   has "console ABBB"; has "word sig 2a"; has "exit_code 0"
   grep -q "^cycles $CYC\$" "$LOG" && { cat "$LOG"; echo "FAIL: $b took as many cycles as latency zero"; exit 1; }
 done
@@ -228,6 +249,34 @@ expect 0 exit "$B" bind:"$OUT/busm.bind" load:"$OUT/prog.elf" route:fp opt:off t
 cmp -s "$OUT/t_elf/steps.trace" "$OUT/t_fp_off/steps.trace" || { echo "FAIL: route:fp opt:off steps.trace"; exit 1; }
 expect 0 exit "$B" bind:"$OUT/busm.bind" load:"$OUT/prog.elf" lockstep:vc max:2000
 expect 0 exit "$B" bind:"$OUT/busm.bind" load:"$OUT/prog.elf" route:fp lockstep:ir max:2000
+
+# RS-10 the trace's console.txt and bus.trace: the console, the fetch of word 0 (`ins(0, 0x41)`),
+# the 4 console writes, the same transfers on every route
+printf 'ABBB' | cmp -s - "$OUT/t_elf/console.txt" || { od -c "$OUT/t_elf/console.txt"; echo "FAIL: console.txt"; exit 1; }
+[[ $(grep -cE '^[0-9]+ [0-9]+ W f000000 ' "$OUT/t_elf/bus.trace") == 4 ]] \
+  || { grep ' f000000 ' "$OUT/t_elf/bus.trace"; echo "FAIL: bus.trace: 4 console writes expected"; exit 1; }
+head -1 "$OUT/t_elf/bus.trace" | grep -qE '^[0-9]+ [0-9]+ I 0 41 0$' || { head -3 "$OUT/t_elf/bus.trace"; echo "FAIL: bus.trace: the first fetch"; exit 1; }
+for rt in vc ref fp; do
+  cmp -s "$OUT/t_elf/bus.trace" "$OUT/t_$rt/bus.trace" && cmp -s "$OUT/t_elf/console.txt" "$OUT/t_$rt/console.txt" \
+    || { echo "FAIL: route:$rt bus.trace or console.txt"; exit 1; }
+done
+# control: latency moves the cycles of the transfers, not the transfers
+cmp -s <(cut -d' ' -f3- "$OUT/t_lat3/bus.trace") <(cut -d' ' -f3- "$OUT/t_elf/bus.trace") \
+  && ! cmp -s "$OUT/t_lat3/bus.trace" "$OUT/t_elf/bus.trace" || { echo "FAIL: bus.trace under latency fixed:3"; exit 1; }
+echo "ok: RS-10 console.txt and bus.trace (fetch of word 0, 4 console writes, the same on vc, ref, fp; latency moves only the cycles)"
+
+# RS-11 image placement: 16-bit $readmemh words (word:2), an ELF placed at p_paddr, and vaddr
+expect 0 exit "$B" bind:"$OUT/busm.bind" load:"$OUT/prog16.hex" word:2 max:2000
+summary | cmp -s - "$OUT/elf.summary" || { cat "$LOG"; echo "FAIL: 16-bit hex (word:2) run differs from the elf run"; exit 1; }
+expect 0 exit "$B" bind:"$OUT/busm.bind" load:"$OUT/prog_va.elf" max:2000
+summary | cmp -s - "$OUT/elf.summary" || { cat "$LOG"; echo "FAIL: the elf with p_vaddr 0x80000000 is not placed at p_paddr"; exit 1; }
+run "$B" bind:"$OUT/busm.bind" load:"$OUT/prog_va.elf" vaddr max:2000
+[[ $RC == 3 ]] && grep -q 'image byte at 0x80000000 is outside every ram/rom region' "$LOG" \
+  || { cat "$LOG"; echo "FAIL: vaddr: the image must land outside every region"; exit 1; }
+# control: the 16-bit words read as 4-byte words are another program
+run "$B" bind:"$OUT/busm.bind" load:"$OUT/prog16.hex" max:2000
+grep -qx "console ABBB" "$LOG" && { cat "$LOG"; echo "FAIL: 16-bit hex without word:2 printed the console"; exit 1; }
+echo "ok: RS-11 word:2 and an ELF with another p_vaddr run as the ELF; vaddr refused; control without word:2"
 
 # checkpoint and resume, the host in the ext section
 expect 0 exit "$B" bind:"$OUT/lat2.bind" load:"$OUT/prog.elf" trace:"$OUT/t_full" ckpt-at:30:"$OUT/c30.ckpt" ckpt-out:"$OUT/cend.ckpt" max:5000
@@ -349,6 +398,52 @@ run "$B" bind:"$OUT/busm.bind" frob
 printf 'bind v1\nbus m valid=nosuch addr=mem_addr ready=mem_ready rdata=mem_rdata\n' > "$OUT/bad.bind"
 run "$B" bind:"$OUT/bad.bind"
 [[ $RC == 2 ]] && grep -q 'no output `nosuch`' "$LOG" || { cat "$LOG"; echo "FAIL: a bind file naming no port"; exit 1; }
+# RS-09 the refusals (each has its accepted twin above: the resume from c30.ckpt, load:, ckpt-at)
+want() { # <exit code> <fixed text> <what>
+  if [[ "$RC" != "$1" ]] || ! grep -qF -- "$2" "$LOG"; then
+    cat "$LOG"; echo "FAIL: $3 -- expected exit $1 and '$2', got exit $RC"; exit 1
+  fi
+}
+run "$OUT/seqm_lean/seqm.dcert" ckpt-in:"$OUT/c30.ckpt"
+want 3 "does not match the certificate's" "cert_run from another design's checkpoint"
+grep -qx "RESULT: refused" "$LOG" || { cat "$LOG"; echo "FAIL: another design's checkpoint: RESULT"; exit 1; }
+bindv two 's/^ram 0x0 0x1000$/ram 0x0 0x1000\nram 0x2000 0x100/'
+run "$B" bind:"$OUT/two.bind" ckpt-in:"$OUT/c30.ckpt"
+want 3 "does not fit the bind file" "cert_run: a host section for another bind file"
+run "$B" bind:"$OUT/busm.bind" load:"$OUT/prog.elf" ckpt-at:50:"$OUT/x.ckpt" max:10
+want 2 "outside this run" "cert_run ckpt-at outside the run"
+run "$B" load:"$OUT/prog.elf"
+want 2 "no host memory" "cert_run load: without a bind file"
+head -c 20 "$OUT/prog.elf" > "$OUT/short.elf"
+run "$B" bind:"$OUT/busm.bind" load:"$OUT/short.elf"
+want 3 "elf: truncated header" "cert_run on a truncated ELF"
+run "$OUT/prog.bin"
+want 3 "RESULT: refused" "cert_run on a file that is not a certificate"
+echo "ok: RS-09 cert_run refusals: checkpoint of another design, host section, ckpt-at, no host memory, truncated ELF, not a certificate"
+
+# RS-12 bind `const` inputs and a bus with `we=`
+python3 -I - "$OUT/seqm_lean/seqm_io.json" "$OUT" <<'PY'
+import json, sys
+ins = {i['name']: i for i in json.load(open(sys.argv[1]))['inputs']}
+for tag, wd in (('', 0x5a), ('_b', 0x5b)):
+    vals = (('we', 1), ('wa', 3), ('wd', wd))
+    open(f'{sys.argv[2]}/cconst{tag}.bind', 'w').write('bind v1\n' + ''.join(f'const {n} {v}\n' for n, v in vals))
+    open(f'{sys.argv[2]}/cconst{tag}.stim', 'w').write('stim v1\n' + ''.join(
+        f"in {ins[n]['ordinal']} {ins[n]['width']} {v}\n" for n, v in vals))
+PY
+for t in "" _b; do
+  run "$OUT/seqm_lean/seqm.dcert" bind:"$OUT/cconst$t.bind" trace:"$OUT/t_const$t" max:30
+  [[ $RC == 0 ]] || { cat "$LOG"; echo "FAIL: cert_run with const inputs ($t)"; exit 1; }
+  ct "$OUT/seqm_lean/seqm.dcert" 30 "$OUT/cconst$t.stim"
+  [[ $RC == 0 ]] && cmp -s <(grep '^STEP' "$LOG") "$OUT/t_const$t/steps.trace" \
+    || { diff <(grep '^STEP' "$LOG") "$OUT/t_const$t/steps.trace" | head; echo "FAIL: const inputs ($t) differ from the stim file's"; exit 1; }
+done
+cmp -s "$OUT/t_const/steps.trace" "$OUT/t_const_b/steps.trace" && { echo "FAIL: const wd 0x5b printed the 0x5a run's lines"; exit 1; }
+sed 's/wstrb=mem_wstrb/we=mem_we/' "$OUT/busm.bind" > "$OUT/we.bind"
+grep -q ' we=mem_we ' "$OUT/we.bind" || { echo "FAIL: we.bind was not derived"; exit 1; }
+expect 0 exit "$OUT/busm_we_lean/busm_we.dcert" bind:"$OUT/we.bind" load:"$OUT/prog.elf" max:2000
+has "console ABBB"; has "word sig 2a"; has "exit_code 0"
+echo "ok: RS-12 const inputs equal a stim file's in lines (control: another constant, other lines); a bus with we= runs the program"
 
 # a program in the design's own memory
 run "$OUT/seqm_init_lean/seqm_init.dcert" trace:"$OUT/t_init" max:30
@@ -367,11 +462,40 @@ run "$OUT/seqm_lean/seqm.dcert" load:"$OUT/prog8_long.hex:mem0" max:5
 grep -q '^\$var wire 1 .* mem_valid \$end$' "$OUT/busm.vcd" && grep -q '^\$var wire 32 .* mem_rdata \$end$' "$OUT/busm.vcd" \
   && [[ $(grep -c '^#' "$OUT/busm.vcd") -gt 10 ]] || { head -20 "$OUT/busm.vcd"; echo "FAIL: vcd"; exit 1; }
 
-# the engines `EngineSelector` builds, against ref (tests/engine_check.lean)
+# RS-01 the engines `EngineSelector` builds, against ref (tests/engine_check.lean): every one of the
+# 13 route and knob combinations, in 4 modes, on the 4 certificates, so exactly 208 runs, and no
+# FAIL line (a route that is not built is one)
 (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/tests/engine_check.lean" 300 \
    "$B" "$OUT/busm_mealy_lean/busm_mealy.dcert" "$OUT/seqm_lean/seqm.dcert" "$OUT/seqm_init_lean/seqm_init.dcert") \
-  > "$OUT/engine_check.log" 2>&1 && grep -q '^PASS engine' "$OUT/engine_check.log" \
-  || { tail -5 "$OUT/engine_check.log"; echo "FAIL: engine_check"; exit 1; }
-echo "ok: $(tail -1 "$OUT/engine_check.log")"
+  > "$OUT/engine_check.log" 2>&1 && grep -qx 'PASS engine: 208 runs' "$OUT/engine_check.log" \
+  && ! grep -q '^FAIL\|^note ' "$OUT/engine_check.log" || { tail -5 "$OUT/engine_check.log"; echo "FAIL: engine_check"; exit 1; }
+# control: one certificate is 52 runs, which the exact count rejects (seqm_init, 100 cycles: on it
+# engine_check's own all-clocks control fires, so the run passes and prints its count)
+(cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/tests/engine_check.lean" 100 \
+   "$OUT/seqm_init_lean/seqm_init.dcert") > "$OUT/engine_check_one.log" 2>&1 || true
+grep -qx 'PASS engine: 52 runs' "$OUT/engine_check_one.log" && ! grep -qx 'PASS engine: 208 runs' "$OUT/engine_check_one.log" \
+  || { tail -5 "$OUT/engine_check_one.log"; echo "FAIL: engine_check control (one certificate)"; exit 1; }
+echo "ok: RS-01 $(tail -1 "$OUT/engine_check.log"); control: one certificate gives 52"
+
+# RS-22 make_sim_launcher.py: its controls on seqm's certificate module, then the launcher it emits
+LW="$OUT/launcher"
+WORK="$LW" bash "$ROOT/pass/lean/Lgraph_IR_Semantics_Simulator/scripts/make_sim_launcher_controls.sh" \
+  "$OUT/seqm_lean/seqm_Lgraph.lean" > "$OUT/launcher_controls.log" 2>&1 \
+  && tail -1 "$OUT/launcher_controls.log" | grep -qx 'PASS: a launcher is emitted only when the cut boundary is found' \
+  && ! grep -q '^SKIP\|MISS' "$OUT/launcher_controls.log" || { cat "$OUT/launcher_controls.log"; echo "FAIL: make_sim_launcher_controls"; exit 1; }
+for c in no_boundary no_sims_lib no_cert; do
+  grep -q "^ok: $c -> exit 1" "$OUT/launcher_controls.log" || { cat "$OUT/launcher_controls.log"; echo "FAIL: the launcher control $c did not refuse"; exit 1; }
+done
+LT="$LW/accepts/formal/lean"; mkdir -p "$LW/olean/Sims"
+(cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean -R "$LT" -o "$LW/olean/Sims/seqm_Cert.olean" "$LT/Sims/seqm_Cert.lean") \
+  > "$LW/cert.log" 2>&1 || { cat "$LW/cert.log"; echo "FAIL: the launcher's certificate module does not build"; exit 1; }
+(cd "$ROOT/formal/lean" && LEAN_PATH="$LW/olean:$PWD/.olean-dev" lean --run "$LT/Sims/seqm_Main.lean" seqm --cycles 12) \
+  > "$LW/run.log" 2>&1 || { cat "$LW/run.log"; echo "FAIL: the launcher does not run"; exit 1; }
+printf 'stim v1\n' > "$OUT/empty.stim"
+ct "$OUT/seqm_lean/seqm.dcert" 12 "$OUT/empty.stim"
+[[ $RC == 0 ]] && cmp -s <(sed -n 's/^cycle \([0-9]*\) out /STEP \1 /p' "$LW/run.log") <(grep '^STEP' "$LOG") \
+  || { diff <(sed -n 's/^cycle \([0-9]*\) out /STEP \1 /p' "$LW/run.log") <(grep '^STEP' "$LOG") | head; echo "FAIL: the launcher's lines differ from cert_trace's"; exit 1; }
+[[ $(grep -c '^STEP' "$LOG") == 12 ]] || { echo "FAIL: cert_trace printed $(grep -c '^STEP' "$LOG") lines"; exit 1; }
+echo "ok: RS-22 make_sim_launcher controls (no SKIP) on seqm, and its launcher prints cert_trace's 12 lines"
 
 echo "PASS run_selftest: $N driver runs"
