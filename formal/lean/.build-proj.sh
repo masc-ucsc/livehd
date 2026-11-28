@@ -34,8 +34,13 @@ ROOTS=(
   # the routes as engines (a route's step on a state of its own kind) and their soundness
   LeanSemanticPrimitives.Compiler.Engine
   LeanSemanticPrimitives.Compiler.VcEngine
-  # the direct simulator's small examples
+  # the direct simulator (lgraph-sim's library) and its examples; DirectTests' 104 #guards run
+  # while it builds (the accepted examples step and agree with interpretDesign; each malformed
+  # certificate is refused for its stated reason; the async-reset and memory rules give the
+  # contract's values), so a change that breaks them fails the build. Nothing else built them:
+  # lake builds them only with lgraph-sim (`lake build LgraphSim`), which nothing runs.
   LeanSemanticPrimitives.Compiler.DirectSim
+  LeanSemanticPrimitives.Compiler.DirectTests
   # translation validation's reifier (a meta-program; the per-design TV drivers use it)
   LeanSemanticPrimitives.Compiler.ReifyGen
   # the legacy models' fast operators (the per-design legacy drivers import it; interpreted runs
