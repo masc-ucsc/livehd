@@ -5,7 +5,7 @@ set -euo pipefail
 # tested by refmap_selftest.sh (sym_refmap).
 #
 # Small RTL fixtures, each through the real flow (yosys-slang -> LGraph ->
-# DCERT2), then:
+# DCERT4), then:
 #   cnt10  mod-10 counter
 #     c <= 9                      PROVED (k=1); also with the check re-building
 #                                 the obligations (`rebuild`), closed (`closed`),
@@ -248,7 +248,7 @@ echo "ok: $(tail -1 "$OUT/native_symbolic.log")"
   > "$OUT/fp_symbolic.log" 2>&1 && grep -q '^PASS fp symbolic' "$OUT/fp_symbolic.log" \
   || { tail -5 "$OUT/fp_symbolic.log"; echo "FAIL: fp_symbolic"; exit 1; }
 echo "ok: $(tail -1 "$OUT/fp_symbolic.log")"
-# DCERT4: the memory depth and the load-time address check, and DCERT3 read as the whole table
+# DCERT4: the memory depth and the load-time address check, and DCERT3 refused by its magic
 # (tests/mem_addr_check.lean)
 (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/tests/mem_addr_check.lean") \
   > "$OUT/mem_addr_check.log" 2>&1 && grep -q '^PASS mem_addr_check' "$OUT/mem_addr_check.log" \

@@ -58,7 +58,7 @@ NU=$(grep -c 'LGraphOp.Op_UDiv' "$OUT/lean/rmd_Lgraph.lean" || true)
 [[ $NS -ge 1 && $NU -ge 1 ]] || { echo "FAIL: expected both Op_SDiv and Op_UDiv nodes (got $NS SDiv, $NU UDiv)"; exit 1; }
 echo "ok: emitted; $NS Op_SDiv and $NU Op_UDiv quotient nodes"
 
-# The cert_udiv control: DCERT2 node lines are `<opcode> <arg> <width> ...`;
+# The cert_udiv control: DCERT4 node lines are `<opcode> <arg> <width> ...`;
 # SDiv is opcode 6, UDiv 5 (CertIOCodec.opCode).
 sed -E 's/^6 0 /5 0 /' "$OUT/lean/rmd.dcert" > "$OUT/rmd_udiv.dcert"
 NM=$(diff "$OUT/lean/rmd.dcert" "$OUT/rmd_udiv.dcert" | grep -c '^>' || true)

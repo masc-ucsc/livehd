@@ -2,7 +2,7 @@
 set -euo pipefail
 # Judge self-test (`sym_refmap judge`, HDLProof.Kit.Judge) and the product search
 # (scripts/mk_product.py + `sym_verify ... base`), on small RTL fixtures through the real flow
-# (yosys-slang -> LGraph [-> single_edge] -> DCERT2):
+# (yosys-slang -> LGraph [-> single_edge] -> DCERT4):
 #   accS / acc2   the spec adds x every cycle; acc2 adds x every other cycle (adv) and takes x only
 #                 then (xfer out:adv), so D0 must hold in between (maxstall 1)
 #     random runs, acc2                     MATCH FOUND

@@ -1,5 +1,5 @@
 /-
-The DCERT3 round trip: `parseCert (renderCert D) = .ok D`, for EVERY `DesignCert`
+The DCERT4 round trip: `parseCert (renderCert D) = .ok D`, for EVERY `DesignCert`
 on the post-D2 clock-aware schema -- including the `clocks` section, every
 `FlopDesc.clock`/`asyncReset` and every `MemoryDesc.clock`, with no restriction
 on clock names.
@@ -8,7 +8,7 @@ WHAT THIS DOES AND DOES NOT ESTABLISH.  It verifies the Lean renderer/parser
 pair: bytes produced by `renderCert` are read back as the same certificate, with
 no restriction on widths, array lengths, Int magnitudes, clock-name bytes or
 which constructors appear.  It says NOTHING about the C++ exporter.  When this
-module was written there was no C++ DCERT2 serializer on master; there is now
+module was written there was no C++ DCERT serializer on master; there is now
 (`pass/lean/Exporter/DesignCert/emit_dcert.cpp`, 2daa01c94), and `pass/lean/Exporter/DesignCert/scripts/dcert_parity.py`
 compares its bytes with `renderCert` of the elaborated Lean literal -- equal
 bytes mean equal certificates, by `renderCert_injective`.  There is still no

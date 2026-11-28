@@ -168,7 +168,7 @@ signals. `sym_observe.py` writes a COPY of the RTL with added output ports:
     sym_observe.py in.v <module> out.v name:width=expr ... [--decl 'verilog;']
 
 The copy then goes through the normal flow (yosys-slang -> LGraph ->
-`single_edge` -> DCERT2). Observers only add outputs, so the next-state
+`single_edge` -> DCERT4). Observers only add outputs, so the next-state
 function is unchanged. `--decl` adds sequential observers: a register and
 its `always` block, read by a port.
 

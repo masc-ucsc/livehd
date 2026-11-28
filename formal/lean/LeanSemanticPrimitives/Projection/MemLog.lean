@@ -20,7 +20,8 @@ default), encodes all of it, and is evaluated by the object language.
 
 ## Why this file exists, concretely
 
-`gen_probe_v2` loads PicoRV32's DCERT2 certificate and refuses it at support with
+`gen_probe_v2` loaded PicoRV32's DCERT2 certificate (DCERT4 is the format now) and refused it at
+support with
 three distinct failures, not one:
 
     memFree false   1 memory (aw 5, dw 32, nextImg 3225, clock 0)

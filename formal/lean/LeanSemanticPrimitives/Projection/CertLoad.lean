@@ -3,7 +3,9 @@
 
 Phase 6 infrastructure.  FP's ported DCERT1 loader is `Compiler/CertIOV1.lean`
 (namespace `Compiler.CertIO.V1`; on master the unqualified `Compiler.CertIO`
-is DCERT2, read by `Projection/CertLoadAny.lean`); this file is what uses it:
+is DCERT4, read by `Projection/CertLoadAny.lean`); this file is what uses it.
+FP HISTORY: no driver reads DCERT1 (each admits DCERT4 only); the checks below
+stay as the record of FP's codec:
 
   * round-trip and malformed-input regressions for the TRUSTED parser;
   * a per-field support report -- all six `SupportedByProjection` conjuncts

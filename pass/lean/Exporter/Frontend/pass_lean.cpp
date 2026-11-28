@@ -99,7 +99,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   io_meta.top  = base_name;
   const auto dcert_path = output_dir + "/" + base_name + ".dcert";
   if (verified_compiler) {
-    // THREE artifacts, one transaction. The DCERT2 file and the Lean literal
+    // THREE artifacts, one transaction. The DCERT4 file and the Lean literal
     // describe the SAME `CertificateIR`, built once above and walked by both
     // emitters.
     //
@@ -112,7 +112,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     // closing it. The sidecar is in the same group for the reason it always
     // was.
     //
-    // DCERT2 is emitted in `verified_compiler` mode only: the legacy branch
+    // DCERT4 is emitted in `verified_compiler` mode only: the legacy branch
     // emits a different model whose certificate is not a `DesignCert`, and a
     // `.dcert` beside it would name a design the rest of that artifact does not
     // describe.

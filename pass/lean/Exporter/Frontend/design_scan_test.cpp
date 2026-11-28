@@ -1538,14 +1538,14 @@ TEST(DesignScanClocks, OpaqueComputedClockIsRefused) {
 // own input. Four edge vectors cover the whole table -- neither fires, only A,
 // only B, both -- which is what distinguishes a real domain from an ordinal
 // that is carried but never consulted.
-// Scanner-produced DCERT2, written beside the Lean oracle so the two describe
+// Scanner-produced DCERT4, written beside the Lean oracle so the two describe
 // the SAME `CertificateIR`.
 //
 // WHY. Every production certificate the parity and runtime gates had was
 // single-domain: `clocks` of size one, every `FlopDesc.clock` and
 // `MemoryDesc.clock` zero. Those runs cannot distinguish "the ordinal was
 // carried" from "the field defaulted", so they do not cover the metadata
-// DCERT2 exists for. These two oracles are the only places on master where the
+// DCERT2 added (DCERT4 carries it). These two oracles are the only places on master where the
 // REAL scanner resolves more than one domain, so this is where a multi-domain
 // certificate comes from -- not from a hand-built fixture, which would prove
 // something about my typing rather than about the scanner.
@@ -2834,7 +2834,7 @@ TEST(DesignIoMeta, StagingFailureAndFreshTargetsAndSuccess) {
 // The PRODUCTION TRIPLE.
 //
 // `verified_compiler` mode now publishes three artifacts -- the Lean literal,
-// the DCERT2 byte stream and the IO sidecar -- in one `publish_group`. The pair
+// the DCERT4 byte stream and the IO sidecar -- in one `publish_group`. The pair
 // controls above still cover `publish_pair`, which is the two-element case and
 // keeps its own contract; these run the same five failure shapes over three
 // artifacts, and over EVERY slot rather than only the first and last, because
@@ -2963,7 +2963,7 @@ TEST(DesignIoMeta, TripleSurvivesASerialiserThatThrowsMidStream) {
   auto p     = pub_with_existing_triple("triple_mid_stream");
   auto items = triple_items(p, kNew3);
   items[1].emit = [](std::ostream& o) {
-    o << "DCERT2\n0\n0\n";          // a plausible prefix, then a failure
+    o << "DCERT4\n0\n0\n";          // a plausible prefix, then a failure
     throw std::ios_base::failure("write failed");
   };
   EXPECT_THROW(publish_group(items), std::exception);

@@ -63,7 +63,7 @@ NS=$(grep -cE 'LGraphOp.Op_S(LT|GT)' "$OUT/lean/sgn_Lgraph.lean" || true)
 [[ $NS -ge 3 ]] || { echo "FAIL: expected at least 3 signed comparisons (got $NS)"; exit 1; }
 echo "ok: emitted; $NS signed comparison nodes"
 
-# The cert_ult control: DCERT2 node lines are `<opcode> <arg> <width> ...`;
+# The cert_ult control: DCERT4 node lines are `<opcode> <arg> <width> ...`;
 # SLT 16 -> ULT 14, SGT 17 -> UGT 15 (CertIOCodec.opCode).
 sed -E 's/^16 0 /14 0 /; s/^17 0 /15 0 /' "$OUT/lean/sgn.dcert" > "$OUT/sgn_ult.dcert"
 NM=$(diff "$OUT/lean/sgn.dcert" "$OUT/sgn_ult.dcert" | grep -c '^>' || true)

@@ -13,7 +13,7 @@ set -euo pipefail
 # two always blocks writing one entry at the same instant is a Verilog race.
 #
 # Checks:
-#   export   the certificate carries the commit table (Lean literal and DCERT3).
+#   export   the certificate carries the commit table (Lean literal and DCERT4).
 #   IR, VC   cert_trace equals iverilog on every step, under the random
 #            schedule and with both clocks every step.
 #   legacy   the legacy model, with its proof bridge (`_next_refines_fast`,

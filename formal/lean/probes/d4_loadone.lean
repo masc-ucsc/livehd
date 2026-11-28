@@ -4,7 +4,7 @@ One certificate, loaded and run, with the phase timings split out.
 RESTORED from pinned D4 f6ad1fe29f8f15aeda045115864fd81a34c33aef. Two
 adaptations, and nothing else:
 
-  * the format is DCERT2. It carries the clock table, `FlopDesc.clock`,
+  * the format is DCERT4 (DCERT2 when written). It carries the clock table, `FlopDesc.clock`,
     `asyncReset` and `MemoryDesc.clock`, and `parseCert_renderCert` proves the
     codec total and invertible for EVERY `DesignCert`. A historical DCERT1 file
     is refused by magic rather than reinterpreted as a one-clock design.

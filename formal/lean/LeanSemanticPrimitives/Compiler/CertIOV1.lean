@@ -10,15 +10,19 @@ define `Compiler.CertIO`, and they are NOT the same thing:
     carry the commit-side async flag, FP added `asyncOK` -- a TRANSPORT
     constraint, checked after parsing, that refuses a file whose `flopQAsync`
     sources disagree with the flop records it parsed.
-  * D4's is a **DCERT2** codec (`Compiler.CertIO`), which carries all of that,
+  * D4's is a **DCERT2** codec (`Compiler.CertIO`; DCERT4 now, the only version
+    any driver reads), which carries all of that,
     plus the checked-compiler runtime (`runChecked`, `runAdmitted`,
     `runChecked_correct`).
 
 Resolving the collision by deleting either side's constraints was not
 available, so neither is deleted.  FP's lives here, namespaced `V1`, verbatim
 apart from the namespace and the corrections noted below; D4's keeps the
-unqualified name, because DCERT2 is the format the C++ pass now emits.
-`Compiler.CertIOFacade` imports both and routes by magic.
+unqualified name, because DCERT2 was the format the C++ pass emitted (DCERT4
+since). `Compiler.CertIORoute` routes by magic (no driver reads through it), and
+`Compiler.CertIOFacade` proves the routing exclusive. FP HISTORY: every driver and
+proof tool refuses DCERT1; this codec stays for FP's own checks
+(`Projection/CertLoad.lean`, `pass/lean/specialization/tests`).
 
 WHAT PORTING FP STILL REQUIRES.  Any FP call site that `open`s `Compiler.CertIO`
 and calls `parseCert`/`renderCert`/`loadCert` must be repointed at
@@ -507,7 +511,7 @@ private def oneFlop (a : Bool) : DesignCert :=
 /-- Two DIFFERENT certificates with IDENTICAL V1 bytes.
 
 This is what makes a universal round trip impossible for this format over this
-record, and it is why `Compiler.CertIO` is DCERT2. -/
+record, and it is why `Compiler.CertIO` is DCERT2 (DCERT4 now). -/
 theorem renderCert_not_injective :
     ∃ A B : DesignCert, A ≠ B ∧ renderCert A = renderCert B := by
   refine ⟨oneFlop false, oneFlop true, ?_, rfl⟩

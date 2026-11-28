@@ -2,7 +2,7 @@
 What a BYTE comparison against `renderCert` is allowed to conclude.
 
 The C++ pass and the Lean library both walk one `CertificateIR`/`DesignCert`
-and write DCERT2. Comparing their bytes is cheap; what we want from it is a
+and write DCERT4. Comparing their bytes is cheap; what we want from it is a
 statement about FIELDS. That implication is a theorem, not an assumption:
 `renderCert` is injective, because `parseCert` inverts it unconditionally.
 

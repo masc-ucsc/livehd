@@ -13,8 +13,8 @@ import LeanSemanticPrimitives.Compiler.CertIOParity
 namespace Compiler
 namespace CertIO
 
--- `Format`, `detect`, `parseAny` and the admissions live in
--- `Compiler/CertIORoute.lean` (Mathlib-free, same namespace).
+-- `Format`, `detect` and `parseAny` live in `Compiler/CertIORoute.lean` (Mathlib-free, same
+-- namespace); the one admission, `readCertChecked`, in `Compiler/CertIOCodec.lean`.
 
 /-- No buffer is both. The magics differ in their last byte -- `'4'` (52)
 against `'1'` (49) -- so routing on them is total and unambiguous. -/

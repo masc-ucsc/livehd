@@ -1,5 +1,5 @@
 /-
-  Write a tiny, self-contained DCERT2 file.
+  Write a tiny, self-contained DCERT4 file.
 
   The replay-gate controls need a certificate they can corrupt, delete and
   mis-hash on purpose.  Borrowing one from `temp/` would tie a tracked test to
@@ -17,7 +17,7 @@ adaptations, and nothing else:
     codec total and invertible for EVERY `DesignCert`. A historical DCERT1 file
     is refused by magic rather than reinterpreted as a one-clock design.
 
-  This probe WRITES a certificate, so it writes the current format: DCERT2,
+  This probe WRITES a certificate, so it writes the current format (`renderCert`: DCERT4; DCERT2 when written),
   with the clock table stated rather than defaulted. That is not a
   reinterpretation of anything -- no historical bytes are read here.
 -/

@@ -8,16 +8,16 @@
 
 namespace lean_export {
 
-// DCERT2: the binary-ish wire format the Lean codec `Compiler.CertIO` is PROVED
+// DCERT4: the binary-ish wire format the Lean codec `Compiler.CertIO` is PROVED
 // to invert (`parseCert_renderCert`, unconditional over every `DesignCert`).
 //
 // Why this exists next to `emit_design_cert`.  That emitter prints a Lean
 // SOURCE literal, which has to be elaborated: a real design is one array
 // literal with thousands of elements, and the elaborator is where the
-// constructor-arity limit and the multi-GB typecheck costs live.  DCERT2 is
+// constructor-arity limit and the multi-GB typecheck costs live.  DCERT4 is
 // read at RUN time by a total, verified reader instead, so the same design
 // costs a parse.  The two emitters walk the SAME `CertificateIR` and must agree
-// field for field; `dcert_parity_test` is where that is checked.
+// field for field; `scripts/dcert_parity.py` is where that is checked.
 //
 // WHAT THIS DOES NOT DO.  It judges nothing.  Clock ordinals are written as
 // they stand, slots are written as `index_certificate` assigned them, and a

@@ -3,7 +3,7 @@ set -euo pipefail
 # Refinement-map self-test (pass/lean/tools/proof/sym_refmap.lean).
 #
 # Small RTL fixtures, each through the real flow (yosys-slang -> LGraph ->
-# DCERT2), then:
+# DCERT4), then:
 #   accS            spec: one channel `add`, response x, presents acc
 #     spec facts                        SPEC FACTS PROVED (Moore)
 #   acc1 refines accS                   an event every cycle: REFINEMENT PROVED

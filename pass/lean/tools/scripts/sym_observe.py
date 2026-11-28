@@ -11,7 +11,7 @@ observations and the outputs a `.refmap` file reads). `--decl` text is inserted 
 sequential observers (a `reg` and its `always` block) that a port then reads.
 
 The source file is not modified; the patched copy goes through the same flow
-as the original (yosys-slang -> LGraph -> single_edge -> DCERT2). Observers
+as the original (yosys-slang -> LGraph -> single_edge -> DCERT4). Observers
 only ADD outputs: the design's next-state function is unchanged, so a
 property of the patched certificate's state is a property of the original's.
 """

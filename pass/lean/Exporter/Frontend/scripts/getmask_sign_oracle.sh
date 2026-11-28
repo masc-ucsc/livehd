@@ -48,7 +48,7 @@ EOF
   --set formal.lean.mode=verified_compiler > "$OUT/lean.log" 2>&1 \
   || { grep -o '"message":"[^"]*' "$OUT/lean.log" | head -3; echo "FAIL: certificate emission"; exit 1; }
 
-# The cert_zext control. DCERT2 node lines are
+# The cert_zext control. DCERT4 node lines are
 # `<opcode> <arg> <width> <ndeps> <deps...> <origin>`; Sext is opcode 23, Or 8
 # (CertIOCodec.opCode).
 python3 -I - "$OUT/lean/gm1.dcert" "$OUT/gm1_zext.dcert" <<'PY'

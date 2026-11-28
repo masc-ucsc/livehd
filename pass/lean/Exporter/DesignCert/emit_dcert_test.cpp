@@ -23,7 +23,7 @@
 //      exits 0 at 128.
 //
 // What is NOT here: agreement with the LEAN reader. That is cross-language and
-// lives in `scripts/dcert_parity.sh`, which runs the verified `parseCert` over
+// lives in `scripts/dcert_parity.py`, which runs the verified `parseCert` over
 // bytes this code produced.
 #include "emit_dcert.hpp"
 
@@ -489,7 +489,7 @@ TEST(DcertParity, AgreesWithTheLeanLiteralEmitterOnClockMetadata) {
             std::string::npos);
   EXPECT_NE(lit.find("{ name := \"clock\" }"), std::string::npos);
   EXPECT_NE(lit.find("{ name := \"\" }"), std::string::npos);
-  // The literal emitter ESCAPES; DCERT3 does not, and carries the raw bytes.
+  // The literal emitter ESCAPES; DCERT4 does not, and carries the raw bytes.
   EXPECT_NE(lit.find("two words\\nand a newline"), std::string::npos);
   EXPECT_NE(render_dcert(c).find("two words\nand a newline"), std::string::npos);
 }

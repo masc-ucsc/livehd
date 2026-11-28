@@ -495,7 +495,7 @@ def one (shape : String) (n : Nat) (side : String) : IO UInt32 := do
         | .error _ => do IO.eprintln s!"fast {shape} n={n} FAILED"; return 2
       else compare shape D n
 
-/-- Load a real DCERT1 certificate and specialize it, one side or both. -/
+/-- Load a real certificate (DCERT4, `CertLoadAny.admitFile`) and specialize it, one side or both. -/
 def onFile (path : String) (side : String) : IO UInt32 := do
   let D ← CertLoadAny.admitFile path
   IO.println s!"{path}: sources {D.sources.size} nodes {D.nodes.size} \
