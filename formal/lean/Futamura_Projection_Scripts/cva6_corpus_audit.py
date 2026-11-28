@@ -21,8 +21,9 @@ not conflated.
 """
 import argparse, glob, hashlib, json, os, sys
 
-SRC_FIELDS = {0: ('input', 2), 1: ('const', 2), 2: ('flopQ', 2),
-              3: ('flopQAsync', 5), 4: ('memImg', 3)}
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..',
+                                'pass', 'lean', 'Lgraph_IR_Semantics_Simulator', 'tests', 'd4'))
+import dcert_delta  # noqa: E402  the one Python DCERT reader
 
 
 def sha256(p):
@@ -34,39 +35,22 @@ def sha256(p):
 
 
 def parse(path):
-    """sources, nodes count, outputs count, flops -- the whole DCERT1 body."""
-    t = open(path).read().split()
-    if not t or t[0] != 'DCERT1':
-        raise ValueError('bad magic')
-    i = [1]
-
-    def nx():
-        v = int(t[i[0]]); i[0] += 1; return v
-
+    """sources, nodes count, outputs count, flops of a DCERT4 certificate, read by
+    `dcert_delta.read_cert` (it refuses every other version: a ValueError here).
+    Written for DCERT1 (fp history): the frozen corpus it audited was DCERT1."""
+    try:
+        c = dcert_delta.read_cert(path)
+    except dcert_delta.Refused as e:
+        raise ValueError(str(e))
     srcs = []
-    for _ in range(nx()):
-        tag = nx()
-        if tag == 5:                       # memConst: aw dw n cs...
-            aw, dw, n = nx(), nx(), nx()
-            for _ in range(n): nx()
-            srcs.append(('memConst', aw, dw, n))
-        elif tag in SRC_FIELDS:
-            kind, nf = SRC_FIELDS[tag]
-            srcs.append((kind, *[nx() for _ in range(nf)]))
+    for _tag, kind, f in c['sources']:
+        if kind == 'memConst':             # aw dw n cs...
+            srcs.append(('memConst', f[0], f[1], f[2]))
         else:
-            raise ValueError(f'unknown source tag {tag}')
-    nn = nx()
-    for _ in range(nn):
-        nx(); nx(); nx()
-        for _ in range(nx()): nx()
-        nx()
-    no = nx()
-    for _ in range(no): nx(); nx()
-    flops = []
-    for _ in range(nx()):
-        flops.append(dict(zip('width din hasEn en hasRst rst rstVal activeLow'.split(),
-                              [nx() for _ in range(8)])))
-    return srcs, nn, no, flops
+            srcs.append((kind, *f))
+    flops = [dict(zip('width din hasEn en hasRst rst rstVal activeLow'.split(), f[:8]))
+             for f in c['flops']]
+    return srcs, len(c['nodes']), len(c['outputs']), flops
 
 
 def reset_audit(srcs, flops):

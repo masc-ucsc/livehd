@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Controls-only DCERT3 mutator.  NOT part of the measurement path.
+"""Controls-only DCERT4 mutator.  NOT part of the measurement path.
 
 `dcert_delta.py` is read-only by contract, so the negative controls need a
 separate tool to produce the inputs they assert on.  This is that tool, and it
@@ -265,7 +265,7 @@ def mutate(c: dict, kind: str) -> bytes:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Controls-only DCERT3 mutator")
+    ap = argparse.ArgumentParser(description="Controls-only DCERT4 mutator")
     ap.add_argument("src")
     ap.add_argument("dst")
     ap.add_argument("--kind", required=True)

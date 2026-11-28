@@ -6,9 +6,10 @@
 #          on lgraph-sim's in-Lean examples, and the ir route's refusal of the malformed ones), the
 #          certificate format (dcert_version_check: the codec on every version; cert_admit_selftest.sh:
 #          every driver admits DCERT4 and refuses the rest, on certificates built from the committed
-#          fixtures/ram12.dcert), the drivers that need no lhd (quick_selftest.sh: dcert2_memroute's
-#          self-test and fixtures, lgraph-sim's command line), the operator corpus on every engine
-#          against ref (opcorpus_test.sh, interpreted), reach_selftest and judge_selftest.
+#          fixtures/ram12.dcert; dcert_delta_controls.sh: the one Python certificate reader and its
+#          refusals), the drivers that need no lhd (quick_selftest.sh: dcert2_memroute's self-test and
+#          fixtures, lgraph-sim's command line), the operator corpus on every engine against ref
+#          (opcorpus_test.sh, interpreted), reach_selftest and judge_selftest.
 #   full   nightly (about 3 h): quick, then the sym, refmap, run, ckpt and lhd_ckpt_import
 #          self-tests, xpatch, the lake side (CompileOpt, LgraphSim), the census traces, the
 #          Verilog designs against Verilator on every route (vref_test.sh, with TV and legacy), and
@@ -93,6 +94,9 @@ run_test engine_examples '^PASS engine: [1-9][0-9]* runs$' lean_check engine_che
 run_test quick_selftest '^PASS quick_selftest' env OUT="$OUT/out_quick" bash "$SCRIPT_DIR/quick_selftest.sh"
 run_test dcert_version_check '^PASS dcert_version_check' lean_check dcert_version_check "$SCRIPT_DIR/fixtures/ram12.dcert"
 run_test cert_admit_selftest '^PASS cert_admit_selftest' env OUT="$OUT/out_cert_admit" bash "$SCRIPT_DIR/cert_admit_selftest.sh"
+run_test dcert_delta_controls '^PASS: dcert_delta_controls' bash \
+  "$ROOT/pass/lean/Lgraph_IR_Semantics_Simulator/tests/d4/dcert_delta_controls.sh" "$SCRIPT_DIR/fixtures/ram12.dcert" \
+  "$OUT/out_dcert_delta"
 run_test opcorpus '^PASS opcorpus_test' env OUT="$OUT/out_opcorpus" bash "$SCRIPT_DIR/opcorpus_test.sh"
 if [[ -x "$LHD" ]]; then
   run_test reach_selftest '^PASS reach_selftest' env LHD="$LHD" OUT="$OUT/out_reach" bash "$SCRIPT_DIR/reach_selftest.sh"

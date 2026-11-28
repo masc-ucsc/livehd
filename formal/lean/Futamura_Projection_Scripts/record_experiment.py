@@ -453,7 +453,7 @@ def cmd_selftest(_a):
     tmp = tempfile.mkdtemp(prefix='recordtest-', dir=scratch)
     try:
         cert = os.path.join(tmp, 'f.dcert')
-        open(cert, 'w').write('DCERT1\n0\n0\n0\n0\n0\n')
+        open(cert, 'w').write('DCERT4\n0\n0\n0\n0\n0\n1\n5 clock\n')
         manifest = os.path.join(tmp, 'out.jsonl')
 
         def run(logtext, runner, capture=None):

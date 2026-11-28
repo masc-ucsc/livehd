@@ -10,6 +10,12 @@ converted without Lean ever seeing it.
 Validated by producing byte-identical output to `writeCert` on every design
 where both can be run.  In production the change belongs in `pass_lean.cpp`,
 which already walks these exact fields to print the literal.
+
+FP HISTORY.  DCERT1 has no clocks section and no commit-side async flag, and no
+LiveHD driver or proof tool reads it: they admit DCERT4 only
+(`Projection.CertLoadAny.admitFile` = `CertIO.readCertChecked`).  lhd writes DCERT4
+itself (`pass/lean/Exporter/DesignCert/emit_dcert.cpp`).  Kept because the fp
+evidence it produced was recorded with it.
 """
 import re, sys
 

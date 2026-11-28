@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Static shape of a DCERT1 certificate -- no Lean, no specialization.
+"""Static shape of a DCERT4 certificate -- no Lean, no specialization.
+
+The certificate is read by `dcert_delta.read_cert`, the one Python DCERT reader
+(`pass/lean/Lgraph_IR_Semantics_Simulator/tests/d4/dcert_delta.py`), which refuses
+every other version.  This script was written for DCERT1 (fp history); its
+measurements in PHASE6_PERF.md were taken on DCERT1 files.
 
 Reports the two `nthD` chains `I_hw` walks, which section 7 of PHASE6_PERF.md
 shows are what the residual is almost entirely made of:
@@ -44,7 +49,11 @@ SCOPE -- read this before quoting a number:
 
     python3 Futamura_Projection_Scripts/cert_shape.py [--ops] [--summary] FILE.dcert [...]
 """
-import sys, collections
+import os, sys, collections
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..',
+                                'pass', 'lean', 'Lgraph_IR_Semantics_Simulator', 'tests', 'd4'))
+import dcert_delta  # noqa: E402  the one Python DCERT reader
 
 OPNAME = {0:'Const',1:'Sum',2:'Sub',3:'Mult',4:'Div',5:'UDiv',6:'SDiv',7:'And',
           8:'Or',9:'Xor',10:'Ror',11:'Not',12:'LT',13:'GT',14:'ULT',15:'UGT',
@@ -57,49 +66,24 @@ VALIDATED = {1,7,8,9,10,11,14,16,18,19,20,21,22,23,24}
 
 
 def parse(path):
-    toks = open(path).read().split()
-    if not toks or toks[0] != 'DCERT1':
-        raise SystemExit(f'{path}: bad magic')
-    p = [1]
-
-    def nxt():
-        v = int(toks[p[0]]); p[0] += 1; return v
-
+    """(sources, nodes, outputs, number of flops) of a DCERT4 certificate, read by
+    `dcert_delta.read_cert`; a refusal exits with its message."""
+    try:
+        c = dcert_delta.read_cert(path)
+    except dcert_delta.Refused as e:
+        raise SystemExit(str(e))
     srcs = []                      # (kind, vector-chain cost, detail)
-    for _ in range(nxt()):
-        t = nxt()
-        if t == 0:                             # input idx w
-            idx, w = nxt(), nxt()
-            srcs.append(('input', idx, idx))
-        elif t == 1:                           # const w v
-            nxt(); nxt()
-            srcs.append(('const', 0, None))
-        elif t == 2:                           # flopQ idx w
-            idx, w = nxt(), nxt()
-            srcs.append(('flopQ', idx, idx))
-        elif t == 3:                           # flopQAsync idx w ri rv al
-            idx, w, ri, rv, al = nxt(), nxt(), nxt(), nxt(), nxt()
-            srcs.append(('flopQAsync', ri + idx, (ri, idx)))
-        elif t == 4:                           # memImg idx aw dw
-            nxt(); nxt(); nxt()
-            srcs.append(('memImg', 0, None))
-        elif t == 5:                           # memConst aw dw n cs...
-            nxt(); nxt()
-            for _ in range(nxt()): nxt()
-            srcs.append(('memConst', 0, None))
-        else:
-            raise SystemExit(f'{path}: unknown source tag {t}')
-    nodes = []
-    for _ in range(nxt()):
-        c, _arg, _w = nxt(), nxt(), nxt()
-        deps = [nxt() for _ in range(nxt())]
-        nxt()                                  # origin
-        nodes.append((c, deps))
-    outs = [(nxt(), nxt()) for _ in range(nxt())]
-    nflop = nxt()
-    for _ in range(nflop):                     # w din he e hr r rv al
-        for _ in range(8): nxt()
-    return srcs, nodes, outs, nflop
+    for _tag, kind, f in c['sources']:
+        if kind == 'input':                    # input idx w
+            srcs.append(('input', f[0], f[0]))
+        elif kind == 'flopQ':                  # flopQ idx w
+            srcs.append(('flopQ', f[0], f[0]))
+        elif kind == 'flopQAsync':             # flopQAsync idx w ri rv al
+            srcs.append(('flopQAsync', f[2] + f[0], (f[2], f[0])))
+        else:                                  # const, memImg, memConst
+            srcs.append((kind, 0, None))
+    nodes = [(op, list(deps)) for (op, _arg, _w, deps, _origin) in c['nodes']]
+    return srcs, nodes, list(c['outputs']), len(c['flops'])
 
 
 def costs(path):

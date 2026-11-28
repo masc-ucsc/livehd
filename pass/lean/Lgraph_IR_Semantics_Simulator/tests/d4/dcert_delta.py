@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DCERT3 delta analyzer -- READ-ONLY and FAIL-CLOSED.
+"""DCERT4 delta analyzer -- READ-ONLY and FAIL-CLOSED.
 
 Measures how much a certificate changed between two emissions.  It exists to
 answer ONE question that `DIRECTION4_INCREMENTAL.md` section 6 item 6 left
@@ -370,7 +370,7 @@ def read_cert(path: str) -> dict:
         n = min(len(again), len(blob))
         at = next((j for j in range(n) if again[j] != blob[j]), n)
         raise Refused(
-            f"{path}: not canonical DCERT3: re-rendering the parsed certificate "
+            f"{path}: not canonical {c.magic.decode().strip()}: re-rendering the parsed certificate "
             f"differs from the input at byte {at} "
             f"({len(blob)} bytes in, {len(again)} out)"
         )
@@ -599,7 +599,7 @@ def analyze(pa: str, pb: str) -> dict:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="DCERT3 A/B delta (read-only, fail-closed)")
+    ap = argparse.ArgumentParser(description="DCERT4 A/B delta (read-only, fail-closed)")
     ap.add_argument("a")
     ap.add_argument("b")
     ap.add_argument("--json", action="store_true", help="machine-readable output")

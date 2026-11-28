@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Reset-polarity census over DCERT1, DCERT2 and DCERT3 certificates.
+"""Reset-polarity census over DCERT4 certificates.
+
+Read by `dcert_delta.read_cert`, the one Python DCERT reader, which refuses every other
+version.  The census this script was written for (fp history) read DCERT1, DCERT2 and DCERT3.
 
 `DirectCheck.lean` declines to cross-check reset polarity, and states why:
 
@@ -32,8 +35,10 @@ how, they can be compared.
 """
 import argparse, collections, glob, hashlib, json, os, sys
 
-SRC = {0: ('input', 2), 1: ('const', 2), 2: ('flopQ', 2),
-       3: ('flopQAsync', 5), 4: ('memImg', 3)}
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..',
+                                'pass', 'lean', 'Lgraph_IR_Semantics_Simulator', 'tests', 'd4'))
+import dcert_delta  # noqa: E402  the one Python DCERT reader
+
 FLOP_KEYS = 'width din hasEn en hasRst rst rstVal activeLow clock asyncReset'.split()
 
 
@@ -46,40 +51,20 @@ def sha256(p):
 
 
 def parse(path):
-    """(magic, sources, nNodes, nOutputs, flops).  DCERT1 flops have 8 fields,
-    DCERT2, DCERT3 and DCERT4 have 10 -- the two extra are `clock` and `asyncReset`.
-    (DCERT3 and DCERT4 changed only the memory record, which comes after the flops.)"""
-    t = open(path).read().split()
-    if not t or t[0] not in ('DCERT1', 'DCERT2', 'DCERT3', 'DCERT4'):
-        raise ValueError(f'{path}: bad magic')
-    magic, i = t[0], [1]
-
-    def nx():
-        v = int(t[i[0]]); i[0] += 1; return v
-
+    """(magic, sources, nNodes, nOutputs, flops) of a DCERT4 certificate, read by
+    `dcert_delta.read_cert` (it refuses every other version: a ValueError here)."""
+    try:
+        c = dcert_delta.read_cert(path)
+    except dcert_delta.Refused as e:
+        raise ValueError(str(e))
     srcs = []
-    for _ in range(nx()):
-        tag = nx()
-        if tag == 5:                                   # memConst aw dw n cs...
-            aw, dw, n = nx(), nx(), nx()
-            for _ in range(n): nx()
-            srcs.append(('memConst', aw, dw, n))
-        elif tag in SRC:
-            kind, nf = SRC[tag]
-            srcs.append((kind, *[nx() for _ in range(nf)]))
+    for _tag, kind, f in c['sources']:
+        if kind == 'memConst':                         # aw dw n cs...
+            srcs.append(('memConst', f[0], f[1], f[2]))
         else:
-            raise ValueError(f'{path}: unknown source tag {tag}')
-    nn = nx()
-    for _ in range(nn):
-        nx(); nx(); nx()
-        for _ in range(nx()): nx()
-        nx()
-    no = nx()
-    for _ in range(no): nx(); nx()
-    nf = 8 if magic == 'DCERT1' else 10
-    flops = [dict(zip(FLOP_KEYS[:nf], [nx() for _ in range(nf)]))
-             for _ in range(nx())]
-    return magic, srcs, nn, no, flops
+            srcs.append((kind, *f))
+    flops = [dict(zip(FLOP_KEYS, f)) for f in c['flops']]
+    return c['magic'].decode().strip(), srcs, len(c['nodes']), len(c['outputs']), flops
 
 
 def census(path):
