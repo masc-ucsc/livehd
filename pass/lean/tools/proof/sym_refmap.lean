@@ -564,23 +564,30 @@ def specialize (D : DesignCert) (sf wf : Nat) : IO (Except String (Program × Na
     | some b => return .ok (R, b + 16)
     | none => return .error "checkResidual rejected the residual"
 
+/-- Why the invariant's proofs could not be built, by the exit code each takes: a refusal (4), a
+counterexample from the initial state (1), the solver (5). -/
+inductive InvFail where
+  | refused (why : String)
+  | cex (msg : String)
+  | solver (msg : String)
+
 /-- The invariant's proofs, as `sym_verify conj:` builds them. -/
 def proveInv (D : DesignCert) (R : Stepper) (sp : ConjTSpec) (s0 : StateM) (cname : Array String)
     (solver : String) (work : System.FilePath) (jobs : Nat) (cache : Bool) :
-    IO (Except String (ByteArray × List (List ByteArray) × List String × Nat)) := do
-  unless sideOKC D sp.plain s0 do return .error "invariant side conditions"
+    IO (Except InvFail (ByteArray × List (List ByteArray) × List String × Nat)) := do
+  unless sideOKC D sp.plain s0 do return .error (.refused "invariant side conditions")
   let rb := baseRunC D R sp.plain s0
   let (sB, stB) ← match rb with
     | .ok ([s], st) => pure (s, st)
-    | .ok _ => return .error "invariant base run shape"
-    | .error e => return .error s!"invariant base run: {e}"
-  unless scopedB stB do return .error "invariant base definitions not scoped"
-  let some φB := baseOblT sp s0 stB sB | return .error "an invariant conjunct could not be read"
+    | .ok _ => return .error (.refused "invariant base run shape")
+    | .error e => return .error (.refused s!"invariant base run: {e}")
+  unless scopedB stB do return .error (.refused "invariant base definitions not scoped")
+  let some φB := baseOblT sp s0 stB sB | return .error (.refused "an invariant conjunct could not be read")
   let (aB, _, _, ncB) ← solve solver work "inv_base" φB (cache := cache)
   let pfB ← match aB with
     | .unsat p => pure p
-    | .sat _ => return .error "COUNTEREXAMPLE (invariant base): some conjunct fails from the initial state"
-    | .failed w => return .error s!"SOLVER FAILED (invariant base): {w}"
+    | .sat _ => return .error (.cex "COUNTEREXAMPLE (invariant base): some conjunct fails from the initial state")
+    | .failed w => return .error (.solver s!"SOLVER FAILED (invariant base): {w}")
   let allC := sp.allCases
   let mut runList : List (Case × Except String (List StepO × SymSt)) := []
   for c in allC do runList := runList ++ [(c, stepRunT D R sp c)]
@@ -604,14 +611,14 @@ def proveInv (D : DesignCert) (R : Stepper) (sp : ConjTSpec) (s0 : StateM) (cnam
         return (j, ans, nc)))
     for task in tasks do
       match ← IO.wait task with
-      | .error e => return .error s!"task: {e}"
+      | .error e => return .error (.solver s!"SOLVER FAILED (invariant task): {e}")
       | .ok (j, ans, nc) =>
         let (t, m, _) := items[j]!
         total := total + nc
         match ans with
         | .unsat p => pfs := pfs.modify t (·.set! m p)
         | .sat _ => failing := failing ++ [cname.getD t s!"conj{t}"]
-        | .failed w => return .error s!"SOLVER FAILED (invariant): {w}"
+        | .failed w => return .error (.solver s!"SOLVER FAILED (invariant): {w}")
   return .ok (pfB, pfs.toList.map (·.toList), failing, total)
 
 /-! ## Theorem files -/
@@ -865,7 +872,9 @@ def refmapMain (path : String) (rest : List String) (facts : Bool) : IO UInt32 :
         pure (pB, pS)
     | .ok (_, _, failing, _) => do
         say s!"  RESULT: NOT INDUCTIVE (invariant): {failing}"; return 1
-    | .error e => do say s!"  RESULT: {e}"; return 1
+    | .error (.refused why) => do say s!"  RESULT: REFUSED ({why})"; return 4
+    | .error (.cex msg) => do say s!"  RESULT: {msg}"; return 1
+    | .error (.solver msg) => do say s!"  RESULT: {msg}"; return 5
   let t3 ← IO.monoMsNow
   -- the base
   let rb := baseRunRM DI RI sp s0

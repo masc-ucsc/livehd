@@ -146,15 +146,18 @@ slot b !out:ph_o resp:in:x obs:out:rb_o
 
 ## Results
 
-| result | meaning |
-|---|---|
-| `REFINEMENT PROVED` | `runRefMapOf` accepted the proofs: `runRefMapOf_sound` gives `RefMapFacts` on every run |
-| `SPEC FACTS PROVED` | `runSpecFactsOf` accepted the proofs: `runSpecFactsOf_sound` gives `SpecFactsOK` |
-| `NOT INDUCTIVE (invariant)` | an invariant conjunct is not preserved; fix `inv` (see `sym_verify conj:`) |
-| `NOT A REFINEMENT (step): [targets]` | the named targets have a counterexample from an invariant state |
-| `COUNTEREXAMPLE (base)` | `active` or `init` fails at `reset` |
-| `SPEC FACTS FAIL: [targets]` | the spec is not Moore, or two channels do not commute |
-| `REFUSED` | a side condition or the specialization failed |
+| result | exit | meaning |
+|---|---|---|
+| `REFINEMENT PROVED` | 0 | `runRefMapOf` accepted the proofs: `runRefMapOf_sound` gives `RefMapFacts` on every run |
+| `SPEC FACTS PROVED` | 0 | `runSpecFactsOf` accepted the proofs: `runSpecFactsOf_sound` gives `SpecFactsOK` |
+| `NOT INDUCTIVE (invariant)` | 1 | an invariant conjunct is not preserved; fix `inv` (see `sym_verify conj:`) |
+| `COUNTEREXAMPLE (invariant base)` | 1 | an invariant conjunct fails from the initial state |
+| `NOT A REFINEMENT (step): [targets]` | 1 | the named targets have a counterexample from an invariant state |
+| `COUNTEREXAMPLE (base)` | 1 | `active` or `init` fails at `reset` |
+| `SPEC FACTS FAIL: [targets]` | 1 | the spec is not Moore, or two channels do not commute |
+| `REFUSED (...)` | 4 | a side condition or the specialization failed (the invariant's too) |
+| `SOLVER FAILED (...)` | 5 | the solver gave no answer, in any phase (the invariant's too) |
+| `CHECK REJECTED` | 6 | the verified checker did not accept the solver's proofs |
 
 A step counterexample is written to `<work>/cti_<target>.txt`. It lists the slots that fired,
 the nonzero inputs of both cycles, the spec registers on which the spec after the cycle
