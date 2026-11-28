@@ -1,0 +1,27 @@
+stim v1
+at 0 in 1 2 1
+at 0 in 2 1 1
+at 0 in 4 8 17
+at 0 in 5 1 1
+at 1 in 1 2 1
+at 1 in 2 1 1
+at 1 in 3 2 1
+at 1 in 4 8 34
+at 1 in 5 1 1
+at 2 in 1 2 1
+at 2 in 2 1 1
+at 2 in 3 2 2
+at 2 in 4 8 51
+at 2 in 5 1 1
+at 3 in 1 2 1
+at 4 in 1 2 1
+at 4 in 2 1 1
+at 5 in 1 2 1
+at 5 in 2 1 1
+at 5 in 3 2 3
+at 5 in 4 8 68
+at 5 in 5 1 1
+at 6 in 1 2 1
+at 6 in 2 1 1
+at 7 in 1 2 1
+at 7 in 2 1 1

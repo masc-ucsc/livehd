@@ -2,9 +2,12 @@
 # run_tier.sh quick|full: the Lean tools' tests, by tier, in one run.
 #
 #   quick  every commit (about 30 min): .build-proj.sh (every module, DirectTests' guards, the axiom
-#          gate), the Lean-only checks, reach_selftest and judge_selftest.
-#   full   nightly (about 2 to 3 h): quick, then the sym, refmap, run, ckpt and lhd_ckpt_import
-#          self-tests, xpatch, the lake side (CompileOpt, LgraphSim), and the census traces.
+#          gate), the Lean-only checks, the operator corpus on every engine against ref
+#          (opcorpus_test.sh, interpreted), reach_selftest and judge_selftest.
+#   full   nightly (about 3 h): quick, then the sym, refmap, run, ckpt and lhd_ckpt_import
+#          self-tests, xpatch, the lake side (CompileOpt, LgraphSim), the census traces, the
+#          Verilog designs against Verilator on every route (vref_test.sh, with TV and legacy), and
+#          the operator corpus natively on every route and TV (opcorpus_test.sh).
 #
 # One line per test, then a summary:
 #   PASS <test> (<seconds> s)
@@ -21,7 +24,9 @@
 #   CENSUS_ROWS  folder of census rows (<family>/rows/<design>/{lean/*.dcert,stim.txt}) and
 #   STAGE0       folder of their reference traces (out_<design>_<route>_32.txt), for the census
 #                traces (full); without them the test is a SKIP
-#   NATROOT      build-opt.sh ROOT for the census traces' native cert_trace (default $OUT/natroot)
+#   NATROOT      build-opt.sh ROOT for the native cert_trace and per-design simulators of the census
+#                traces, vref_test and opcorpus_test (default $OUT/natroot)
+#   verilator on PATH for vref_test (full); without it the test is a SKIP
 set -uo pipefail
 TIER="${1:-}"
 [[ "$TIER" == quick || "$TIER" == full ]] || { echo "usage: run_tier.sh quick|full" >&2; exit 2; }
@@ -31,6 +36,7 @@ L="$ROOT/formal/lean"
 OUT="${OUT:-$ROOT/generated/run_tier/$TIER}"
 LHD="${LHD:-$ROOT/bazel-bin/lhd/lhd}"
 STRICT="${STRICT:-0}"
+NATROOT="${NATROOT:-$OUT/natroot}"
 mkdir -p "$OUT"
 SUMMARY="$OUT/summary.tsv"
 printf 'test\tresult\tseconds\tnote\n' > "$SUMMARY"
@@ -78,6 +84,7 @@ for c in native_symbolic fp_symbolic mem_addr_check getmask_fast_check wide_fast
          residual_inc_check stim_tab_check ckpt_check; do
   run_test "$c" '^PASS' lean_check "$c"
 done
+run_test opcorpus '^PASS opcorpus_test' env OUT="$OUT/out_opcorpus" bash "$SCRIPT_DIR/opcorpus_test.sh"
 if [[ -x "$LHD" ]]; then
   run_test reach_selftest '^PASS reach_selftest' env LHD="$LHD" OUT="$OUT/out_reach" bash "$SCRIPT_DIR/reach_selftest.sh"
   run_test judge_selftest 'judge self-test: all passed' env LHD="$LHD" OUT="$OUT/out_judge" bash "$SCRIPT_DIR/judge_selftest.sh"
@@ -108,7 +115,7 @@ if [[ "$TIER" == full ]]; then
   run_test lake - bash -c "cd '$L' && lake build LeanSemanticPrimitives.Compiler.CompileOpt LgraphSim"
   if [[ -n "${CENSUS_ROWS:-}" && -n "${STAGE0:-}" ]]; then
     census_traces() {
-      local nr="${NATROOT:-$OUT/natroot}" bad=0 n=0
+      local nr="$NATROOT" bad=0 n=0
       (cd "$L" && OPT=-O2 ROOT="$nr" bash Futamura_Projection_Scripts/build-opt.sh \
         Futamura_Projection_Scripts/cert_trace.lean) || return 1
       for d in "$CENSUS_ROWS"/*/rows/*; do
@@ -130,6 +137,16 @@ if [[ "$TIER" == full ]]; then
     run_test census_traces 'census traces: [1-9][0-9]* compared, 0 differ' census_traces
   else
     record census_traces SKIP 0 "CENSUS_ROWS and STAGE0 are not set"
+  fi
+  run_test opcorpus_native '^PASS opcorpus_test' env OUT="$OUT/out_opcorpus_native" NATROOT="$NATROOT" NATIVE=1 \
+    PERDESIGN=1 ENGINE_CHECK=0 bash "$SCRIPT_DIR/opcorpus_test.sh"
+  if ! command -v verilator > /dev/null; then
+    record vref_test SKIP 0 "verilator is not on PATH"
+  elif [[ ! -x "$LHD" ]]; then
+    record vref_test SKIP 0 "no lhd at $LHD"
+  else
+    run_test vref_test '^PASS vref_test' env LHD="$LHD" OUT="$OUT/out_vref" NATROOT="$NATROOT" PERDESIGN=1 \
+      bash "$SCRIPT_DIR/vref_test.sh"
   fi
 fi
 
