@@ -79,6 +79,7 @@ import HDLProof.Sym.ConjT
 import LeanSemanticPrimitives.Projection.CertLoadAny
 import Lean.Data.Json
 import HDLProof.Kit.Driver
+import HDLProof.Kit.ConjRun
 import HDLProof.Kit.SymRoute
 import HDLProof.Sym.Closed
 -- init:ckpt: a checkpoint as the start state
@@ -510,148 +511,31 @@ flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
   let nObl := (List.range n).foldl (fun acc t => acc + (sp.casesOf t).length) 0
   say s!"  conjunctive invariant: {lines.length} lines, {n} conjuncts, {allC.length} case(s), {nObl} step obligations; \
 k = 1; jobs {jobs}; initial state all-zero"
-  unless sideOKC D sp.plain s0 do say "  RESULT: REFUSED (side conditions)"; return 4
-  -- the base run, the plain step run (layout), and one run per case, in parallel
-  let tb ← IO.asTask (prio := .dedicated) (IO.lazyPure fun _ => baseRunC D rt.S sp.plain s0)
-  let tp ← IO.asTask (prio := .dedicated) (IO.lazyPure fun _ => stepRunC D rt.S sp.plain)
-  -- case runs, `runs` at a time (each holds a symbolic run in memory until the final check)
-  let runJobs := max 1 (((opt "runs").bind (·.toNat?)).getD jobs)
-  let mut runList : List (Case × Except String (List StepO × SymSt)) := []
-  for batch in chunksOf (List.range allC.length) runJobs do
-    let mut tcs := #[]
-    for j in batch do
-      let c := allC.getD j []
-      tcs := tcs.push (c, ← IO.asTask (prio := .dedicated) (IO.lazyPure fun _ => stepRunT D rt.S sp c))
-    for (c, task) in tcs.toList do
-      match ← IO.wait task with
-      | .ok r => runList := runList ++ [(c, r)]
-      | .error e => do say s!"  RESULT: REFUSED ({e})"; return 4
-  let rb ← match ← IO.wait tb with | .ok r => pure r | .error e => do say s!"  RESULT: REFUSED ({e})"; return 4
-  let r0 ← match ← IO.wait tp with | .ok r => pure r | .error e => do say s!"  RESULT: REFUSED ({e})"; return 4
-  let t2 ← IO.monoMsNow
-  say s!"  symbolic runs built in {t2 - t1} ms (base, plain step, {allC.length} case run(s))"
-  let (sB, stB) ← match rb with
-    | .ok ([s], st) => pure (s, st)
-    | .ok _ => do say "  RESULT: REFUSED (base run shape)"; return 4
-    | .error e => do say s!"  RESULT: REFUSED (base run: {e})"; return 4
-  match r0 with
-  | .ok (a :: _, st) =>
-      unless scopedB st && decide (stateShapeOf a.2.2 = some sp.L) do
-        say "  RESULT: REFUSED (the step leaves the layout)"; return 4
-  | .ok _ => do say "  RESULT: REFUSED (plain step run shape)"; return 4
-  | .error e => do say s!"  RESULT: REFUSED (plain step run: {e})"; return 4
-  for (c, r) in runList do
-    match r with
-    | .ok ([_, _], st) => unless scopedB st do say s!"  RESULT: REFUSED (case {showCase flopNames c}: definitions not scoped)"; return 4
-    | .ok _ => do say "  RESULT: REFUSED (case run shape)"; return 4
-    | .error e => do say s!"  RESULT: REFUSED (case {showCase flopNames c}: {e})"; return 4
-  unless scopedB stB do say "  RESULT: REFUSED (base definitions not scoped)"; return 4
-  let some φB := baseOblT sp s0 stB sB | say "  RESULT: REFUSED (a conjunct could not be read)"; return 4
-  let (aB, bbB, satB, ncB) ← solve solver work "conj_base" φB
-  say s!"  base: {ncB} clauses; bit-blast+CNF+write {bbB} ms, solver {satB} ms"
-  let pfB ← match aB with
-    | .unsat p => pure p
-    | .sat _ => do say "  RESULT: COUNTEREXAMPLE (base): some conjunct fails from the initial state"; return 1
-    | .failed w => do say s!"  RESULT: SOLVER FAILED (base): {w}"; return 5
-  -- every (target, case) obligation, `jobs` at a time
-  let mut items : Array (Nat × Nat × Case) := #[]
-  for t in List.range n do
-    for (c, m) in (sp.casesOf t).zipIdx do
-      items := items.push (t, m, c)
-  let mut pfs : Array (Array ByteArray) :=
-    (List.range n).toArray.map fun t => Array.replicate (sp.casesOf t).length ByteArray.empty
-  let mut failing : List String := []
-  let mut totalC := 0
-  let mut maxC := 0
-  for batch in chunksOf (List.range items.size) jobs do
-    let mut tasks := #[]
-    for j in batch do
-      let (t, m, c) := items[j]!
-      let task ← IO.asTask (prio := .dedicated) (do
-        let some (.ok ([a, b], st)) := findRun runList c
-          | return (j, SatAnswer.failed "no run for the case", 0, 0, 0, none)
-        let some φ := stepOblT sp c st a b t
-          | return (j, SatAnswer.failed "the obligation could not be built", 0, 0, 0, none)
-        let (ans, bb, sat, nc) ← solve solver work s!"conj_{t}_{m}" φ
-        return (j, ans, bb, sat, nc, some φ))
-      tasks := tasks.push task
-    for task in tasks do
-      match ← IO.wait task with
-      | .error e => do say s!"  RESULT: SOLVER FAILED (task: {e})"; return 5
-      | .ok (j, ans, bb, sat, nc, φo) =>
-        let (t, m, c) := items[j]!
-        let tag := if (sp.casesOf t).length == 1 then cname[t]! else s!"{cname[t]!} | {showCase flopNames c}"
-        totalC := totalC + nc
-        maxC := max maxC nc
-        match ans with
-        | .unsat p =>
-            pfs := pfs.modify t (·.set! m p)
-            say s!"  [{tag}] {nc} clauses; bit-blast+CNF+write {bb} ms, solver {sat} ms: UNSAT"
-        | .sat model =>
-            failing := failing ++ [tag]
-            say s!"  [{tag}] {nc} clauses; bit-blast+CNF+write {bb} ms, solver {sat} ms: SAT (not preserved)"
-            if let some φ := φo then
-              if let some (.ok ([a, b], st)) := findRun runList c then
-                -- the model's primary values: the cycle-0 state (through the case's
-                -- template) and both cycles' inputs; every cut variable then follows
-                -- from the run's definitions (extendSt, as in the soundness proofs), so
-                -- every conjunct and register is evaluated exactly, without simulating
-                let (st0, ins) := decodeStepT φ (parseModel model) sp.L sp.inW (sp.tmplOf c)
-                let xs := (stateVals st0 ++ inputVals ins[0]! ++ inputVals ins[1]!).toArray
-                let σa := extendD xs st
-                let get := fun i => σa.getD i ⟨0#0⟩
-                let s0V := stateVarT sp.L (sp.tmplOf c) 0
-                let falseAt (sv so : SVal) : List String := (List.range n).filterMap fun i =>
-                  match holdsE sv so (conjs[i]!) with
-                  | some e => if evalLD get e then none else some (cname[i]!)
-                  | none => some s!"{cname[i]!}(unreadable)"
-                let f0 := falseAt s0V a.2.1
-                let f1 := falseAt a.2.2 b.2.1
-                let fl1 : Array BV := (List.range sp.L.fws.length).toArray.map fun f =>
-                  match flopE a.2.2 f with
-                  | some ⟨w, e⟩ => mk_bv w (Int.ofNat (evalD get e).toNat)
-                  | none => mk_bv 1 0
-                let regs0 := groupedState flopNames st0
-                let regs1 := groupedState flopNames { flops := fl1, mems := #[] }
-                let changed := (regs0.zip regs1).filterMap fun ((r, v0), (_, v1)) =>
-                  if v0 == v1 then none else some s!"  {r}: {v0} -> {v1}"
-                let inNames ← ioNames cert "inputs"
-                let safe := tag.map fun ch => if ch.isAlphanum || ch == '_' then ch else '_'
-                let f := work / s!"cti_{safe}.txt"
-                let inLine (i : RuntimeInput) : String := " ".intercalate ((List.range i.size).filterMap fun k =>
-                  let v := bv_uint i[k]!
-                  if v == 0 then none else some s!"{inNames.getD k s!"in{k}"}={v}")
-                IO.FS.writeFile f s!"counterexample to induction for {tag}\n\
-conjuncts FALSE at cycle 0: {f0}\nconjuncts FALSE at cycle 1: {f1}\n\
-nonzero inputs, cycle 0: {inLine ins[0]!}\nnonzero inputs, cycle 1: {inLine ins[1]!}\n\
-registers that change from cycle 0 to cycle 1:\n{"\n".intercalate changed}\n\
-state at cycle 0:\n{"\n".intercalate (regs0.map fun (r, v) => s!"  {r} = {v}")}\n"
-                say s!"  [{tag}] counterexample: false at cycle 0 {f0}, at cycle 1 {f1}; state, inputs and changes in {f}"
-                -- optional concrete cross-check on the projection's simulator (slow on big designs)
-                if rest.contains "replay" then
-                  match (rt.fpProgramE sf wf D).map (fun R => replay2 D R st0 ins) with
-                  | .error e => say s!"  [{tag}] replay: no simulator ({e} at sf:{sf} wf:{wf}; rerun with more fp fuel)"
-                  | .ok none => say s!"  [{tag}] replay: the simulator refused the residual or the decoded state"
-                  | .ok (some (o0, st1, o1)) =>
-                    let broke := !(sp.conjs.getD t default).holds st1.flops o1
-                    let hs := (sp.hypsOf t).all fun i => (sp.conjs.getD i default).holds st0.flops o0
-                    say s!"  [{tag}] replay: hypotheses at cycle 0 {hs}, broken at cycle 1 {broke}"
-        | .failed w => do say s!"  [{tag}] RESULT: SOLVER FAILED: {w}"; return 5
-  let t3 ← IO.monoMsNow
-  say s!"  steps: {items.size} obligations, {totalC} clauses in total, largest {maxC}; {t3 - t2} ms"
-  unless failing.isEmpty do
-    say s!"  RESULT: NOT INDUCTIVE (step): not preserved under their hypotheses: {failing}"
-    return 1
-  let pfL := pfs.toList.map (·.toList)
-  let ok ← IO.lazyPure (fun _ => sideOKC D sp.plain s0 && checkT sp s0 rb r0 runList pfB pfL)
-  let t4 ← IO.monoMsNow
-  say s!"  verified check (runConjTOf = sideOKC && checkT over the runs above; LRAT-check all) in {t4 - t3} ms"
-  if ok then
-    say s!"  RESULT: INVARIANT PROVED (conjunctive, k=1) -- runConjTOf_sound_ref: on every run from the all-zero state, every conjunct holds at every cycle whose assumptions held"
-    return 0
-  else
-    say "  RESULT: CHECK REJECTED (the verified checker did not accept the proofs)"
-    return 6
+  -- the runs, the obligations and their counterexample reports: Kit.ConjRun's loop, which the
+  -- `inv` phase of sym_refmap runs too
+  let job : ConjJob :=
+    { D, S := rt.S, sp, s0, names := cname, flopNames, inNames := (← ioNames cert "inputs"), solver, work, jobs
+    , runJobs := max 1 (((opt "runs").bind (·.toNat?)).getD jobs), filePre := "conj"
+    , replay := if rest.contains "replay" then some ((fun _ => rt.fpProgramE sf wf D), s!"sf:{sf} wf:{wf}") else none }
+  match ← proveConj job with
+  | .refused why => say s!"  RESULT: REFUSED ({why})"; return 4
+  | .baseCex => say "  RESULT: COUNTEREXAMPLE (base): some conjunct fails from the initial state"; return 1
+  | .solverBase w => say s!"  RESULT: SOLVER FAILED (base): {w}"; return 5
+  | .solverStep tag w => say s!"  [{tag}] RESULT: SOLVER FAILED: {w}"; return 5
+  | .solverTask e => say s!"  RESULT: SOLVER FAILED (task: {e})"; return 5
+  | .notInductive failing =>
+      say s!"  RESULT: NOT INDUCTIVE (step): not preserved under their hypotheses: {failing}"; return 1
+  | .proved pfB pfL rb r0 runList _ =>
+    let t3 ← IO.monoMsNow
+    let ok ← IO.lazyPure (fun _ => sideOKC D sp.plain s0 && checkT sp s0 rb r0 runList pfB pfL)
+    let t4 ← IO.monoMsNow
+    say s!"  verified check (runConjTOf = sideOKC && checkT over the runs above; LRAT-check all) in {t4 - t3} ms"
+    if ok then
+      say s!"  RESULT: INVARIANT PROVED (conjunctive, k=1) -- runConjTOf_sound_ref: on every run from the all-zero state, every conjunct holds at every cycle whose assumptions held"
+      return 0
+    else
+      say "  RESULT: CHECK REJECTED (the verified checker did not accept the proofs)"
+      return 6
 
 def main (args : List String) : IO UInt32 := do
   match args with
