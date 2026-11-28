@@ -14,7 +14,7 @@ memory route.
     three routes (scalar `≤`, Direct exact, memory per element).
 
 Which drivers apply them: the ones that produce coverage evidence --
-`cert_runner_any` (`CertLoadAny.runOneAny`), `total_probe`, `gen_probe`,
+`total_probe`, `gen_probe`,
 `gen_probe_v2`, `gen_readiness_v2`, `dcert2_memroute`.  The measurement probes
 (`proto_probe`, `s2`, `s2a`, `s3`) never produce coverage credit and include a
 reset-polarity CENSUS mode that must read conflicted files, so they do not.

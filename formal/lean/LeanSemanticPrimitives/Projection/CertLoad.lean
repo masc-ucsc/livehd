@@ -9,15 +9,16 @@ is DCERT2, read by `Projection/CertLoadAny.lean`); this file is what uses it:
   * a per-field support report -- all six `SupportedByProjection` conjuncts
     reported SEPARATELY, because "supported" is not one fact and a failure in
     one field says something quite different from a failure in another;
-  * a command-line runner that loads one certificate, reports that, specializes
-    ONCE with `mkSim`, and then runs the projected simulator and the direct
-    `interpretDesign` on identical deterministic stimuli.
+  * the small IO helpers (`peakRSS`, `ms`, `say`) the fp tools print with.
+
+The command-line runner that ran `mkSim`'s simulator against `interpretDesign` on one
+certificate (`cert_runner`, `run_cert.sh`) was removed on 2026-11-27: nothing called it, and
+`dcert2_memroute` checks every design it could, cycle by cycle against the reference.
 
 The theorem boundary does not move.  `stepOf_correct` is still conditional on
 `SimWF`, which contains `projectDesign D = .ok R` -- a KERNEL equation that the
-specializer does not reduce.  Agreement observed by the runner is EXECUTION
-EVIDENCE about one file, not a proof about it, and nothing below claims
-otherwise.
+specializer does not reduce.  Agreement observed on a run is EXECUTION EVIDENCE about one file, not a
+proof about it, and nothing below claims otherwise.
 -/
 
 import LeanSemanticPrimitives.Projection.ProjectedStep
@@ -163,7 +164,7 @@ def rejects (s : String) : Bool := (parseCert s.toUTF8).toOption.isNone
 -- …and the minimal WELL-formed file is accepted
 #guard (parseCert "DCERT1\n0\n0\n0\n0\n0\n".toUTF8).toOption.isSome
 
-/-! ## The runner -/
+/-! ## IO helpers -/
 
 def peakRSS : IO String := do
   try
@@ -176,104 +177,6 @@ def peakRSS : IO String := do
 @[inline] def ms : IO Nat := do pure (← IO.monoMsNow)
 
 def say (s : String) : IO Unit := IO.println s
-
-/-- Load one certificate, report it, specialize once, run both paths on the
-same deterministic stimuli, and compare. -/
-def runOne (path : String) (cycles : Nat) (seed : Nat) : IO UInt32 := do
-  say s!"=== {path}"
-  -- 1. parse
-  let t0 ← ms
-  let bytes ← IO.FS.readBinFile path
-  let t1 ← ms
-  let D ← match parseCert bytes with
-          | .ok D    => pure D
-          | .error e => do say s!"  PARSE FAILED: {e}"; return 1
-  let t2 ← ms
-  say s!"  bytes {bytes.size}  read {t1 - t0} ms  parse {t2 - t1} ms"
-  say s!"  sources {D.sources.size}  nodes {D.nodes.size}  outputs {D.outputs.size} \
-flops {D.flops.size}  memories {D.memories.size}  clocks {D.clocks.size}"
-  -- 2. support, field by field
-  let t3 ← ms
-  let r := supportReport D
-  let t4 ← ms
-  say s!"  support: wf {r.wf}  memFree {r.memFree}  sources {r.sources}  ops {r.ops} \
-arities {r.arities}  flopClocks {r.flopClocks}   ({t4 - t3} ms)"
-  say s!"  asyncOK (DCERT1 v1 cannot carry FlopDesc.asyncReset): {asyncOK D}"
-  if !asyncOK D then
-    say "  REFUSED: the file has flopQAsync sources but v1 gives every flop \
-asyncReset = false, so this would simulate a DIFFERENT design."
-    return 2
-  if !r.allOK then
-    say "  REFUSED: see the per-field report above."
-    return 3
-  -- 3. specialize once
-  let t5 ← ms
-  let sim ← match mkSim D with
-            | some sim => pure sim
-            | none     => do
-                say "  SPECIALIZATION or FRAGMENT CHECK FAILED"
-                return 4
-  let t6 ← ms
-  say s!"  specialize+check {t6 - t5} ms   residual funs {sim.prog.funs.length} \
-size {(sim.prog.funs.map (fun fd => tsize fd.body)).foldl (·+·) 0}  bound {sim.bound}"
-  say s!"  surviving caseT tags {tagsIn sim.prog}   (tagState = {tagState})"
-  -- 4. one cycle, both paths
-  let (inp, st) := stimulus D seed
-  let e := allEdges D
-  let t7 ← ms
-  let projected := stepOf sim D e inp st
-  let t8 ← ms
-  let direct := interpretDesign D e inp st
-  let t9 ← ms
-  match projected with
-  | .error _ => do say "  ONE CYCLE: projected path refused"; return 5
-  | .ok pr   =>
-      say s!"  one cycle: projected {t8 - t7} ms  direct {t9 - t8} ms"
-      if digest pr != digest direct then
-        say s!"  MISMATCH\n    projected {digest pr}\n    direct    {digest direct}"
-        return 6
-      say s!"  one cycle AGREES: {digest pr}"
-  -- 5. a trace, both paths
-  let stim : List Stim := (List.range cycles).map (fun k => (e, (stimulus D (seed + k)).1))
-  let t10 ← ms
-  let ptrace := stepTrace (stepOf sim) D st stim
-  let t11 ← ms
-  let dtrace := refTrace D st stim
-  let t12 ← ms
-  match ptrace with
-  | .error _ => do say "  TRACE: projected path refused"; return 7
-  | .ok rs   =>
-      say s!"  trace {cycles} cycles: projected {t11 - t10} ms  direct {t12 - t11} ms"
-      if rs.map digest != dtrace.map digest then
-        say "  TRACE MISMATCH"; return 8
-      say s!"  trace AGREES ({rs.length} results)"
-  say s!"  peak RSS {← peakRSS}"
-  say "  NOTE: agreement here is EXECUTION EVIDENCE about this file, not a \
-kernel proof about it; `SimWF` is still undischarged for a loaded certificate."
-  return 0
-
-/-- Write the two shared fixtures out as DCERT1 files, so the pipeline can be
-smoke-tested on something whose answer is already known before it is pointed at
-a real design. -/
-def emitFixtures (dir : String) : IO Unit := do
-  IO.FS.createDirAll dir
-  for (name, D) in [("tiny", Projection.Acceptance.tinyD),
-                    ("seq",  Projection.Acceptance.seqD),
-                    ("wide", wideD)] do
-    let p := s!"{dir}/{name}.dcert"
-    IO.FS.writeBinFile p (renderCert D)
-    say s!"wrote {p}"
-
-def main (args : List String) : IO UInt32 := do
-  match args with
-  | "--emit" :: dir :: _ => do emitFixtures dir; return 0
-  | path :: rest =>
-      let cycles := (rest.head?.bind String.toNat?).getD 4
-      let seed   := ((rest.drop 1).head?.bind String.toNat?).getD 1
-      runOne path cycles seed
-  | [] => do
-      say "usage: cert_runner <file.dcert> [cycles] [seed]"
-      return 64
 
 end CertLoad
 end Projection

@@ -113,7 +113,7 @@ generated/master_port/
 /pass/lean/d3_scaling2.tsv
 
 # Lean build OUTPUT for the projection probes. `.build-proj.sh` writes the
-# oleans into .olean-dev and `run_cert.sh` reads them back through LEAN_PATH;
+# oleans into .olean-dev and the self-tests read them back through LEAN_PATH;
 # `build-native.sh` writes .native-dev and calls itself a diagnostic that
 # nothing in the project depends on. Three FP commits (73dee5673, df8b7c8ec,
 # d8d84afbd) swept 46 .olean files -- 78 MB -- into the repository; they are

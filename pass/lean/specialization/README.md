@@ -329,7 +329,7 @@ The Lean code stays in the Lean project:
   specializer, the proofs, the memory route and the axiom gate;
 - `formal/lean/Futamura_Projection_Scripts/`: every file is this direction's.
   It holds the drivers (`dcert2_*`, `gen_probe_v2`, `gen_readiness_v2`,
-  `cert_runner_any`, `cert_trace`, ...), the build scripts `build-opt.sh` and
+  `cert_trace`, ...), the build scripts `build-opt.sh` and
   `build-native.sh`, the helpers next to them, and the state and stimulus files
   in `memstate/`. It was `formal/lean/scripts/`; recorded runs keep that path.
   Two other users: the proof tools build with its `build-opt.sh`, and the

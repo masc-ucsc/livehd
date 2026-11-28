@@ -3,7 +3,8 @@
 
 `CertLoad.supportReport` is the production support/readiness report, and it is
 **untouched**.  Its `memFree` conjunct is a refusal: a memory-bearing design is
-unsupported BY THAT ROUTE, and `runOne` refuses it with code 3.  That stays
+unsupported BY THAT ROUTE (the old scalar runner `runOne`, removed 2026-11-27,
+refused it with code 3).  That stays
 exactly as it is, because the scalar route's predicates
 (`SourceSupported`, `OpSupported`, `SupportedByProjection`) are what the scalar
 adequacy theorems are stated about, and broadening them would subtract meaning
@@ -17,7 +18,7 @@ refusal still says WHICH route refused and why.
 
 ## What this module does NOT do
 
-It does not modify `supportReport`, `SupportReport.allOK`, `runOne`, or any
+It does not modify `supportReport`, `SupportReport.allOK`, or any
 scalar predicate; `report` CARRIES the scalar verdict unchanged so the two are
 comparable.  It gives no whole-unit admission credit: a design passing `report`
 is a design the memory route's own theorems apply to, nothing more.
@@ -147,7 +148,7 @@ theorem run_of_report_init {D : DesignCert} {i : RuntimeInput} {e : ClockEdges}
 /-! ## 3. Readiness lines
 
 Pure, so they are testable; the `IO` wrapper matches `CertLoad.say`'s shape so a
-driver can print them without any change to `runOne`'s own reporting. -/
+driver can print them beside the scalar report. -/
 
 def Report.line (r : Report) : String :=
   s!"  memroute: accepts {r.accepts}  typed {r.typed}  sized {r.sized} \
