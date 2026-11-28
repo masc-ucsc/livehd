@@ -24,7 +24,9 @@ set -euo pipefail
 # Controls (12 x 8): a flipped register value resumes to a different state; a key no field has is
 # refused, and imported with `fill` (a note names it); a memory word changed in state.bin resumes
 # to a different state; a map file that names a missing memory is refused; the same two
-# refusals in the earlier layout.
+# refusals in the earlier layout; a layout import-lhd does not know is refused with nothing
+# written (a meta.json without `words`, a .dut.json field whose `bits` is renamed), while the
+# unmodified copy imports.
 # emit-map and fill (RS-17): the map `emit-map` prints, given back as map:, reproduces the import;
 # a map naming a missing memory is imported with `fill` (a note names it) and the memory is then
 # the power-on image, not the testbench's (it wrote word 3).
@@ -230,5 +232,31 @@ mkdir -p "$K/oldmiss"; cp -r "$O" "$K/oldmiss/ckp20"; sed -i 's/"t.cnt"/"t.cnt_o
 expect 1 "REFUSED: flop 1 (cnt): regs.json has no key \`t.cnt\`" ck import-lhd "$C" "$K/oldmiss/ckp20" "$K/oldmiss.ckpt"
 printf 'mem 0 t.nosuch.hex\n' > "$K/oldbad.map"
 expect 1 "REFUSED: memory 0 (arr_1): no file \`t.nosuch.hex\`" ck import-lhd "$C" "$O" "$K/x.ckpt" map:"$K/oldbad.map"
+# a layout import-lhd does not know (case C15): neither layout carries a version, so a key of the
+# current one that is missing (meta.json's `words`; a .dut.json field's `bits`, renamed) is
+# refused, naming the file and the key, and nothing is written; the unmodified copy imports
+cpy plain
+expect 0 "OK: imported cycle 20" ck import-lhd "$C" "$K/plain/top_run/c20" "$K/plain.ckpt" sim:"$SIM"
+cpy nowords
+python3 - "$K/nowords/top_run/c20/meta.json" <<'EOF' || { echo "FAIL: the no-words control was not made"; exit 1; }
+import json, sys
+m = json.load(open(sys.argv[1])); del m['words']; json.dump(m, open(sys.argv[1], 'w'))
+EOF
+expect 2 "meta.json: no \`words\`: not a layout import-lhd knows" \
+  ck import-lhd "$C" "$K/nowords/top_run/c20" "$K/nowords.ckpt" sim:"$SIM"
+[[ ! -e "$K/nowords.ckpt" ]] || { echo "FAIL: import-lhd wrote $K/nowords.ckpt for a layout it refused"; exit 1; }
+mkdir -p "$K/simbits"; cp "$SIM"/*.json "$K/simbits/"
+python3 - "$K/simbits" <<'EOF' || { echo "FAIL: the renamed-bits control was not made"; exit 1; }
+import glob, json, sys
+for p in glob.glob(f'{sys.argv[1]}/*.dut.json'):
+    d = json.load(open(p))
+    f = next(f for f in d['fields'] if f['kind'] == 2 and f['bits'] > 0)
+    f['width'] = f.pop('bits')
+    json.dump(d, open(p, 'w'))
+EOF
+expect 2 "no \`bits\`: not a layout import-lhd knows" \
+  ck import-lhd "$C" "$K/plain/top_run/c20" "$K/nobits.ckpt" sim:"$K/simbits"
+[[ ! -e "$K/nobits.ckpt" ]] || { echo "FAIL: import-lhd wrote $K/nobits.ckpt for a layout it refused"; exit 1; }
+echo "ok: a checkpoint layout import-lhd does not know is refused (meta.json without words, a field without bits)"
 
 echo "PASS lhd_ckpt_import_test: $N driver runs"

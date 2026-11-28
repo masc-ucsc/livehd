@@ -171,7 +171,10 @@ It reads both layouts `lhd sim` has written:
   Memory entry `e` lies `e * stride` bits further: the stride is the entry's storage width (8,
   16, 32 bits or whole words), or `bits` for a memory of at most 128 bits whose width is not a
   storage width (packed). `sim:<dir>` names the `sim` folder when the checkpoint was moved (the
-  folder above the checkpoint must keep the test's name).
+  folder above the checkpoint must keep the test's name). Neither layout carries a version, so
+  every key named here must be there, `words` matching `state.bin`'s size: a missing key is a
+  layout this reader does not know, refused (exit 2) with the file and the key named and
+  nothing written, never read as 0.
 - The earlier one: `<workdir>/ckpt/<test>/ckp<N>/` with `regs.json` (registers by name), one
   `<inst>.<memory>.hex` per memory (`$readmemh` words), and `meta.json` (the cycle). `lhd sim` has
   not written it since 2026-11-21. `pass/lean/xpatch/transport.py` still writes it: xpatch builds

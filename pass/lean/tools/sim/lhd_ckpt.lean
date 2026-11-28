@@ -40,6 +40,11 @@ Names come from the `_io.json` beside the certificate:
   are listed. A field whose width is not the certificate's is refused.
 - Values are hex (`0x...`) or decimal, a negative one modulo `2 ^ width`; a memory word past
   the memory's depth must be 0. The cycle is `meta.json`'s `cycle`.
+- Neither layout carries a version, so in the current one every key it reads must be there:
+  `meta.json`'s `cycle` and `words` (which must match `state.bin`'s size), a `.dut.json`'s
+  `fields`, and each field's `name`, `kind`, `bits`, `word` and `entries`. A missing one is a
+  layout this reader does not know: refused (exit 2), naming the file and the key, with nothing
+  written.
 
 `<cert>` is a DCERT4 file, admitted with `CertIO.readCertChecked`. Exit codes: 0 ok / SAME, 1 refused / DIFFER,
 2 usage or I/O, 3 the checkpoint does not parse.
@@ -171,6 +176,11 @@ def readSnapState (dir : System.FilePath) (simDir : Option String) : IO (Except 
     | .error e => return .error e
   let some cycle := (metaJ.getObjValAs? Nat "cycle").toOption
     | fail s!"{dir}/meta.json: no cycle"
+  -- neither layout carries a version: a key of the layout that is missing means a layout this
+  -- reader does not know, never a default (lhd sim's own reader requires every one of them)
+  let unknown (file key : String) : String := s!"{file}: no `{key}`: not a layout import-lhd knows"
+  let some words := (metaJ.getObjValAs? Nat "words").toOption
+    | fail (unknown s!"{dir}/meta.json" "words")
   -- `<simroot>/ckpt/<test>/c<N>`: the test's folder and the simulation root
   let some testDir := dir.parent | fail s!"{dir}: not inside a test's checkpoint folder"
   let some testName := testDir.fileName | fail s!"{dir}: not inside a test's checkpoint folder"
@@ -187,9 +197,8 @@ def readSnapState (dir : System.FilePath) (simDir : Option String) : IO (Except 
     | fail s!"{sim}/drv.tb.json: no test whose checkpoint folder is `{testName}`"
   let insts := ((t.getObjValAs? (Array Lean.Json) "instances").toOption).getD #[]
   let st ← IO.FS.readBinFile (dir / "state.bin")
-  if let some w := (metaJ.getObjValAs? Nat "words").toOption then
-    if w * 8 != st.size then
-      return .error s!"{dir}/state.bin: {st.size} bytes, meta.json says {w} words"
+  if words * 8 != st.size then
+    return .error s!"{dir}/state.bin: {st.size} bytes, meta.json says {words} words"
   -- each instance's fields, and every flop's value
   let mut regs : Array (String × String) := #[]
   let mut bits : Array (String × Nat) := #[]
@@ -203,10 +212,18 @@ def readSnapState (dir : System.FilePath) (simDir : Option String) : IO (Except 
     let dut ← match ← readJson (sim / s!"{stem}.dut.json") with
       | .ok j => pure j
       | .error e => return .error e
-    for f in ((dut.getObjValAs? (Array Lean.Json) "fields").toOption).getD #[] do
-      let get (k : String) : Nat := ((f.getObjValAs? Nat k).toOption).getD 0
-      let fd : DutField := { name := ((f.getObjValAs? String "name").toOption).getD "",
-                             kind := get "kind", bits := get "bits", word := get "word", entries := get "entries" }
+    let dutFile := s!"{sim}/{stem}.dut.json"
+    let some fields := (dut.getObjValAs? (Array Lean.Json) "fields").toOption
+      | return .error (unknown dutFile "fields")
+    for f in fields do
+      let some name := (f.getObjValAs? String "name").toOption
+        | return .error (unknown s!"{dutFile}: a field" "name")
+      let mut vals : Array Nat := #[]
+      for k in ["kind", "bits", "word", "entries"] do
+        match (f.getObjValAs? Nat k).toOption with
+        | some v => vals := vals.push v
+        | none => return .error (unknown s!"{dutFile}: field `{name}`" k)
+      let fd : DutField := { name, kind := vals[0]!, bits := vals[1]!, word := vals[2]!, entries := vals[3]! }
       let key := s!"{var}.{fd.name}"
       if fd.kind == 2 && fd.bits > 0 then
         let off := (base + fd.word) * 64
