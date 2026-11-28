@@ -3754,7 +3754,7 @@ bool Cgen_llvm::speculate_input(Value value, uint64_t inactive) {
 }
 
 bool Cgen_llvm::add_state_output(size_t word, size_t previous_word, Value value, const std::vector<Dirty_mask>& dirty,
-                                 std::string& error, int byte) {
+                                 std::string& error, int byte, bool immediate) {
   if (byte < -1
       || (byte >= 0
           && (value.width == 0 || value.width > 32 || byte > 7
@@ -3774,12 +3774,21 @@ bool Cgen_llvm::add_state_output(size_t word, size_t previous_word, Value value,
       return false;
     }
   }
+  if (immediate && dirty.empty()) {  // the store seal() would make, now
+    if (byte >= 0) {
+      auto* type = impl_->builder.getIntNTy(std::bit_ceil(std::max(8u, value.width)));
+      impl_->builder.CreateStore(impl_->builder.CreateZExtOrBitCast(impl_->get(value), type), impl_->spill_ptr(word, byte));
+    } else {
+      impl_->store_packed(impl_->get(value), impl_->outputs, word, value.width);
+    }
+    return true;
+  }
   impl_->state_outputs.push_back({word, previous_word, byte, value, dirty});
   return true;
 }
 
 bool Cgen_llvm::add_state_output_if(Value guard, bool when_zero, size_t word, Value value, std::string& error,
-                                    const std::vector<Dirty_mask>& dirty) {
+                                    const std::vector<Dirty_mask>& dirty, bool immediate) {
   if (!impl_->state_abi || value.width == 0 || guard.width == 0 || word > impl_->state_words
       || word_count(value.width) > impl_->state_words - word || impl_->get(value) == nullptr || impl_->get(guard) == nullptr) {
     error = "invalid guarded LLVM state output";
@@ -3790,6 +3799,24 @@ bool Cgen_llvm::add_state_output_if(Value guard, bool when_zero, size_t word, Va
       error = "LLVM dirty mask is outside its allocation";
       return false;
     }
+  }
+  if (immediate && dirty.empty()) {  // the branch seal() would make for this guard, now
+    auto& b     = impl_->builder;
+    auto* cond  = impl_->get(guard);
+    auto* zero  = llvm::ConstantInt::get(cond->getType(), 0);
+    auto* taken = when_zero ? b.CreateICmpEQ(cond, zero) : b.CreateICmpNE(cond, zero);
+    auto* fn    = b.GetInsertBlock()->getParent();
+    auto* then  = llvm::BasicBlock::Create(impl_->context, "state.update", fn);
+    auto* cont  = llvm::BasicBlock::Create(impl_->context, "state.keep", fn);
+    // A guarded store is a register update: most are skipped most cycles. Marking the update unlikely moves it out of
+    // line, so the common path falls through instead of jumping over every one.
+    llvm::MDBuilder md_w(impl_->context);
+    b.CreateCondBr(taken, then, cont, livehd::debug::env<"LHD_SIM_LLVM_LIKELY_UPDATE">() != nullptr ? nullptr : md_w.createBranchWeights(1, 255));
+    b.SetInsertPoint(then);
+    impl_->store_packed(impl_->get(value), impl_->outputs, word, value.width);
+    b.CreateBr(cont);
+    b.SetInsertPoint(cont);
+    return true;
   }
   impl_->guarded_outputs.push_back({guard, when_zero, word, value, dirty});
   return true;
@@ -4361,7 +4388,8 @@ bool Cgen_llvm::seal(std::string& error, bool track_changed) {
         auto*       fn    = b.GetInsertBlock()->getParent();
         auto*       then  = llvm::BasicBlock::Create(impl_->context, "state.update", fn);
         auto*       cont  = llvm::BasicBlock::Create(impl_->context, "state.keep", fn);
-        b.CreateCondBr(taken, then, cont);
+        llvm::MDBuilder md_w(impl_->context);
+        b.CreateCondBr(taken, then, cont, livehd::debug::env<"LHD_SIM_LLVM_LIKELY_UPDATE">() != nullptr ? nullptr : md_w.createBranchWeights(1, 255));
         b.SetInsertPoint(then);
         Impl::Changes moved;  // compared here, under the guard: a register that is not enabled costs nothing
         for (const auto index : members[key]) {

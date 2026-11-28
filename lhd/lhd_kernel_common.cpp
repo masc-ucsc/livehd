@@ -3063,8 +3063,19 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
       request.odir         = odir;
       request.incremental  = opts.incremental;
       request.dump_bitcode = opts.sim_dump_bitcode;
+      request.prune_dead   = !opts.sim_observe && !opts.sim_testbench_file.empty();
+      if (request.prune_dead) {
+        std::string err;
+        if (!prp_tb::discover_cells(opts.sim_testbench_file, request.observed_cells, err)) {
+          throw Lhd_error{"unsupported", err, ""};
+        }
+      }
       if (auto uz = labels.find("unknown_zero"); uz != labels.end()) {
         request.unknown_zero = str_tools::parse_bool(uz->second).value_or(false);
+      }
+      // sim.tune.dirty (the resolved tune vector): "true"/"false" when pinned, "auto" otherwise
+      if (auto d = labels.find("color_dirty"); d != labels.end() && d->second != "auto") {
+        request.dirty = str_tools::parse_bool(d->second).value_or(false) ? "on" : "off";
       }
       for (const auto& [k, v] : opts.sets) {
         if (k == "pass.lg2lnast.passes") {

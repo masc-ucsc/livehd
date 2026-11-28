@@ -26,6 +26,9 @@ struct Sim_request {
   bool                                      dump_bitcode = false;
   bool                                      incremental  = true;
   bool                                      unknown_zero = false;  // sim.unknown_zero: `?` bits are 0, else drawn once per run
+  std::string                               dirty        = "auto";  // sim.tune.dirty: on | off | auto (activity gating of the kernels)
+  std::vector<std::string>                  observed_cells;  // paths relative to each DUT
+  bool                                      prune_dead   = false;   // drop registers no output can see (nothing observes internal state)
 };
 
 struct Sim_emitted {

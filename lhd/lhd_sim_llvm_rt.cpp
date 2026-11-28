@@ -88,9 +88,43 @@ struct Dut {
   std::vector<Undef_site>  undefined;
   std::string              stem;
   size_t                   words = 0;
+  std::vector<std::string> kernel_names;
   std::vector<std::string> objects, clocks;
   std::vector<Field>       fields;
 };
+
+// Kernel objects in the order the step calls them (e2 before e10): the JIT places the objects in the order they are
+// loaded, so consecutive kernels then sit in consecutive code pages instead of a random permutation of them.
+bool natural_less(const std::string& a, const std::string& b) {
+  size_t i = 0, j = 0;
+  while (i < a.size() && j < b.size()) {
+    if (std::isdigit(static_cast<unsigned char>(a[i])) != 0 && std::isdigit(static_cast<unsigned char>(b[j])) != 0) {
+      size_t i2 = i, j2 = j;
+      while (i2 < a.size() && std::isdigit(static_cast<unsigned char>(a[i2])) != 0) {
+        ++i2;
+      }
+      while (j2 < b.size() && std::isdigit(static_cast<unsigned char>(b[j2])) != 0) {
+        ++j2;
+      }
+      const auto na = a.substr(i, i2 - i), nb = b.substr(j, j2 - j);
+      if (na.size() != nb.size()) {
+        return na.size() < nb.size();
+      }
+      if (na != nb) {
+        return na < nb;
+      }
+      i = i2;
+      j = j2;
+    } else {
+      if (a[i] != b[j]) {
+        return a[i] < b[j];
+      }
+      ++i;
+      ++j;
+    }
+  }
+  return a.size() - i < b.size() - j;
+}
 
 Dut load_dut(const std::string& simdir, const std::string& stem) {
   const auto          text = slurp(simdir + "/" + stem + ".dut.json");
@@ -99,6 +133,15 @@ Dut load_dut(const std::string& simdir, const std::string& stem) {
   Dut u;
   u.stem  = stem;
   u.words = d["words"].GetUint64();
+  for (const char* list : {"edge", "fall", "settle"}) {
+    for (const auto& e : d[list].GetArray()) {
+      u.kernel_names.emplace_back(e.GetString());
+    }
+  }
+  for (const char* one : {"commit", "fall_commit"}) {
+    const bool named = d.HasMember(one) && d[one].IsString() && d[one].GetStringLength() != 0;
+    u.kernel_names.emplace_back(named ? d[one].GetString() : std::string("<") + one + ">");
+  }
   for (const auto& o : d["objects"].GetArray()) {
     u.objects.emplace_back(o.GetString());
   }
@@ -1975,14 +2018,25 @@ int main(int argc, char** argv) {
   for (const auto& [stem, d] : duts) {
     if (hash_design) {
       design_hash = fnv1a64(slurp(simdir + "/" + stem + ".dut.json"), design_hash);
-    }
-    for (const auto& o : d.objects) {
-      if (hash_design) {
+      // Preserve the descriptor order in checkpoint IDs even when JIT placement uses a different order.
+      for (const auto& o : d.objects) {
         design_hash = fnv1a64(slurp(simdir + "/" + o), design_hash);
       }
+    }
+    auto load_order = d.objects;
+    std::ranges::stable_sort(load_order, natural_less);
+    for (const auto& o : load_order) {
       if (!objects.load(simdir + "/" + o, error)) {
         std::fprintf(stderr, "lhd sim: %s\n", error.c_str());
         return 1;
+      }
+    }
+    // The JIT places an object when its first symbol is looked up: look the kernels up in the order the step calls
+    // them, so that one cycle walks the code upward instead of jumping across the whole address space.
+    for (const auto& fname : d.kernel_names) {
+      if (!fname.starts_with('<')) {
+        std::string e2;
+        (void)objects.lookup(fname, e2);
       }
     }
   }
@@ -1993,6 +2047,7 @@ int main(int argc, char** argv) {
 
   std::string rj         = "[";
   bool        rj_first   = true;
+  std::string kernel_profile;
   long        fail_tests = 0;
   std::set<std::string> consumed;
   for (const auto& t : man["tests"].GetArray()) {
@@ -2301,9 +2356,32 @@ int main(int argc, char** argv) {
                 continue;
               }
               const auto       word      = inst["eval_word"].GetUint64();
-              const auto       attempted = state.at(word);
-              const auto       executed  = state.at(word + 1);
               std::string_view instance  = inst["var"].GetString();
+              if (word > state.size() || state.size() - word < 2) {
+                fails = -1;
+                err   = "invalid aggregate profiling layout on instance '" + std::string(instance) + "'";
+                break;
+              }
+              const auto attempted = state[word];
+              const auto executed  = state[word + 1];
+              if (inst.HasMember("eval_kernel_count")) {
+                const auto& dut = duts.at(inst["stem"].GetString());
+                const auto count = inst["eval_kernel_count"].GetUint64();
+                if (count != dut.kernel_names.size() || count > (state.size() - word - 2) / 2) {
+                  fails = -1;
+                  err   = "invalid per-kernel profiling layout on instance '" + std::string(instance) + "'";
+                  break;
+                }
+                std::set<std::string_view> seen;
+                size_t slot = 0;
+                for (const auto& kernel : dut.kernel_names) {
+                  if (seen.insert(kernel).second) {
+                    kernel_profile += std::format("{}\t{}\t{}\t{}\t{}\n", name, instance, kernel,
+                                                  state[word + 2 + 2 * slot], state[word + 3 + 2 * slot]);
+                    ++slot;
+                  }
+                }
+              }
               const auto       skipped   = attempted - executed;
               std::print("sim eval {}.{} attempted={} executed={} skipped={}\n", name, instance, attempted, executed, skipped);
               if (!eval_json.empty()) {
@@ -2393,6 +2471,9 @@ int main(int argc, char** argv) {
       rj += ",\"sim_cycles\":" + std::to_string(sim_cycles) + ",\"sim_ns\":" + std::to_string(sim_ns) + "}";
     }
     std::fflush(stdout);
+  }
+  if (!kernel_profile.empty()) {
+    std::ofstream(simdir + "/eval_kernels.txt") << kernel_profile;
   }
   for (const auto& [k, v] : plus) {
     if (!consumed.contains(k)) {

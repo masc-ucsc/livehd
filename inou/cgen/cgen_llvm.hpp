@@ -284,15 +284,19 @@ public:
   // register), store into `word`, and OR dirty masks when the value changes.
   // For a private little-endian spill, byte selects its aligned offset in both
   // words. A narrow spill owns the full 8, 16 or 32 bits of its storage lane.
+  // `immediate` (only without `dirty` masks): store right here instead of with every other output when the kernel
+  // is sealed, so the value is not kept live for the rest of the kernel. The caller guarantees that nothing later in
+  // the kernel reads the words or depends on the order of the stores.
   bool add_state_output(size_t word, size_t previous_word, Value value, const std::vector<Dirty_mask>& dirty, std::string& error,
-                        int byte = -1);
+                        int byte = -1, bool immediate = false);
   // The same store, performed only while `guard` is non-zero (`when_zero`: only while it is zero): a
   // register that keeps its value when its enable is off is not rewritten, and what only its new
   // value needs can sink under the test. Outputs of one guard share one branch, taken after every
   // unconditional output is stored. No dirty masks: the caller owns change tracking for these.
   // `dirty`: masks ORed in when the store changes the word (compared inside the guarded block).
+  // `immediate` (only without `dirty` masks): its own branch right here, as add_state_output.
   bool add_state_output_if(Value guard, bool when_zero, size_t word, Value value, std::string& error,
-                           const std::vector<Dirty_mask>& dirty = {});
+                           const std::vector<Dirty_mask>& dirty = {}, bool immediate = false);
   // Phase-barrier copy. Source and destination spans must not overlap.
   // Commit a dense shadow bank to disjoint ranges of the instance frames.
   struct State_span {

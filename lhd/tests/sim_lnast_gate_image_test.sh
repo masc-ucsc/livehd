@@ -41,7 +41,7 @@ test icg_good.profile {
 PRP
 LHD_SIM_LNAST_GATE=1 "$LHD" sim "lg:$W/good/" "$W/profile.prp" --workdir "$W/profile" \
   --set sim.eval_counts=true --result-json "$W/counts.json" >"$W/profile.out" 2>&1 || { cat "$W/profile.out"; fail "profile"; }
-python3 - "$W/counts.json" <<'PYCOUNTS'
+python3 - "$W/counts.json" "$W/profile/sim/eval_kernels.txt" <<'PYCOUNTS'
 import json, sys
 test, = json.load(open(sys.argv[1]))["tests"]
 counts = {row["instance"]: row for row in test["evaluations"]}
@@ -50,11 +50,39 @@ for row in counts.values():
     assert row["attempted"] == row["executed"] + row["skipped"], counts
 assert counts["busy"]["attempted"] == counts["idle"]["attempted"], counts
 assert counts["busy"]["executed"] > counts["idle"]["executed"], counts
+with open(sys.argv[2]) as report:
+    rows = [row.rstrip("\n").split("\t") for row in report]
+assert all(len(row) == 5 and row[0] == test["test"] for row in rows), rows
+assert {row[1] for row in rows} == {"busy", "idle"}, rows
+kernels = {instance: {row[2] for row in rows if row[1] == instance} for instance in counts}
+assert kernels["busy"] == kernels["idle"] and kernels["busy"], rows
 PYCOUNTS
 if "$LHD" sim "lg:$W/good/" "$D/icg_good_tb.prp" --run-only --workdir "$W/sgood" --set sim.eval_counts=true >"$W/run_counts.out" 2>&1; then
   fail "sim.eval_counts=true on an uninstrumented --run-only workdir should fail"
 fi
 grep -q "sim.eval_counts requires simulator setup" "$W/run_counts.out" || { cat "$W/run_counts.out"; fail "expected setup error for --run-only sim.eval_counts"; }
+# Simulate the old descriptor layout with two counter words at the end of the
+# single uninstrumented instance. The old runtime used the same schema version.
+python3 - "$W/sgood/sim/drv.tb.json" <<'PYLEGACY'
+import json, sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+manifest = json.loads(path.read_text())
+for test in manifest["tests"]:
+    instance, = test["instances"]
+    instance["eval_word"] = test["state_words"]
+    test["state_words"] += 2
+path.write_text(json.dumps(manifest))
+PYLEGACY
+"$LHD" sim "lg:$W/good/" "$D/icg_good_tb.prp" --run-only --workdir "$W/sgood" \
+  --result-json "$W/legacy.json" >"$W/legacy.out" 2>&1 || { cat "$W/legacy.out"; fail "legacy aggregate profiling"; }
+python3 - "$W/legacy.json" <<'PYLEGACY'
+import json, sys
+test, = json.load(open(sys.argv[1]))["tests"]
+row, = test["evaluations"]
+assert row["attempted"] == row["executed"] == 0, row
+PYLEGACY
 echo "ok clean clock gate"
 
 if "$LHD" sim "lg:$W/bad/" "$D/icg_bad_tb.prp" --workdir "$W/sbad" >"$W/bad.out" 2>&1; then

@@ -96,6 +96,13 @@ struct Sim_objects {
   // true: instrument the undefined accesses sim.warn_undefined reports (Result::undefined).
   bool        warn_undefined = false;
   bool        dump_bitcode   = false;
+  // sim.tune.dirty: "on" gates the kernels by activity, "off" never does, "auto" decides from the size of the design
+  // (see Gen::run).
+  std::string dirty          = "auto";
+  // Drop the registers that cannot influence any output or memory (the cones that feed only them go too). Their fields
+  // stay in the catalog but are never updated, so it is only for runs that observe outputs (no VCD, probe or query).
+  bool        prune_dead     = false;
+  std::vector<std::string> observed_cells;
 };
 Result generate_sim(const Lnast& ln, const std::vector<std::shared_ptr<Lnast>>& lib, const Sim_objects& out);
 

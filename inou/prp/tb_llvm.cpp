@@ -272,6 +272,36 @@ const Dut* resolve_dut(TSNode rv, const std::string& src, const std::string& fil
   return found;
 }
 
+bool split_dot(const std::string& src, TSNode n, std::string& base, std::string& fld) {
+  if (ts_node_is_null(n) || ntype(n) != "dot_expression" || ts_node_named_child_count(n) < 2) {
+    return false;
+  }
+  const auto unq = [](std::string t) {
+    if (t.size() >= 2 && t.front() == '`' && t.back() == '`') {
+      return t.substr(1, t.size() - 2);
+    }
+    return t;
+  };
+  base = unq(text_of(src, ts_node_named_child(n, 0)));
+  fld.clear();
+  for (uint32_t k = 1; k < ts_node_named_child_count(n); ++k) {
+    fld += (fld.empty() ? "" : ".") + unq(text_of(src, ts_node_named_child(n, k)));
+  }
+  return true;
+}
+
+TSNode ref_argument(TSNode call) {
+  const auto args = field(call, "argument");
+  if (ts_node_is_null(args) || ts_node_named_child_count(args) == 0) {
+    return {};
+  }
+  auto arg = ts_node_named_child(args, 0);
+  while (ts_node_named_child_count(arg) == 1 && (ntype(arg) == "expression_item" || ntype(arg) == "constant")) {
+    arg = ts_node_named_child(arg, 0);
+  }
+  return arg;
+}
+
 template <typename Visitor>
 void visit_instances(TSNode n, const std::string& src, const std::string& file_short, const std::map<std::string, TSNode>& fconsts,
                      const std::vector<Dut>& duts, const Visitor& visit) {
@@ -481,13 +511,41 @@ public:
         b_.CreateStore(b_.CreateAdd(b_.CreateLoad(i64_, p), ConstantInt::get(i64_, amount)), p);
       }
     };
+    // sim.eval_counts also profiles every kernel: two words each (calls, cycle-counter ticks) after the two
+    // aggregate counters, slot by kernel name (<sim dir>/eval_kernels.txt lists them in call order).
+    std::map<std::string, size_t> profile_slot;
+    if (eval_counts) {  // the slots follow the descriptor: edge, fall, settle kernels, then the two commits
+      for (const auto* list : {&d.edge, &d.fall, &d.settle}) {
+        for (const auto& name : *list) {
+          profile_slot.try_emplace(name, profile_slot.size());
+        }
+      }
+      profile_slot.try_emplace(d.commit.empty() ? std::string{"<commit>"} : d.commit, profile_slot.size());
+      profile_slot.try_emplace(d.fall_commit.empty() ? std::string{"<fall_commit>"} : d.fall_commit, profile_slot.size());
+    }
+    const auto invoke = [&](Function* self, const std::string& name, llvm::FunctionCallee callee, Value* s) {
+      auto* null_ptr = llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr_));
+      if (!eval_counts) {
+        b_.CreateCall(callee, {s, null_ptr});
+        return;
+      }
+      const auto slot = profile_slot.try_emplace(name, profile_slot.size()).first;
+      auto*      t0   = b_.CreateIntrinsic(i64_, llvm::Intrinsic::readcyclecounter, {});
+      b_.CreateCall(callee, {s, null_ptr});
+      auto*      t1   = b_.CreateIntrinsic(i64_, llvm::Intrinsic::readcyclecounter, {});
+      const auto base = d.words + 1 + 2 + 2 * slot->second;
+      auto*      n    = b_.CreateGEP(i64_, self->getArg(0), {ConstantInt::get(i64_, base)});
+      auto*      tk   = b_.CreateGEP(i64_, self->getArg(0), {ConstantInt::get(i64_, base + 1)});
+      b_.CreateStore(b_.CreateAdd(b_.CreateLoad(i64_, n), ConstantInt::get(i64_, 1)), n);
+      b_.CreateStore(b_.CreateAdd(b_.CreateLoad(i64_, tk), b_.CreateSub(t1, t0)), tk);
+    };
     size_t     bit  = 0;
     const auto call = [&](Function* self, const std::string& name) {
       llvm::FunctionCallee callee = kernel(name);
       Value*               s      = self->getArg(0);
       if (d.gate_bits == 0) {
         add_evaluations(self, 1, 1);
-        b_.CreateCall(callee, {s, llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr_))});
+        invoke(self, name, callee, s);
         return;
       }
       const size_t   word = d.gate_word + bit / 64;
@@ -503,13 +561,12 @@ public:
       Value* w2 = b_.CreateLoad(i64_, gp);
       b_.CreateStore(b_.CreateAnd(w2, ConstantInt::get(i64_, ~mask)), gp);
       add_evaluations(self, 1, 1);
-      b_.CreateCall(callee, {s, llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr_))});
+      invoke(self, name, callee, s);
       b_.CreateBr(cont);
       b_.SetInsertPoint(cont);
     };
     const auto plain = [&](Function* self, const std::string& name) {
-      llvm::FunctionCallee callee = kernel(name);
-      b_.CreateCall(callee, {self->getArg(0), llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr_))});
+      invoke(self, name, kernel(name), self->getArg(0));
     };
     // A zero dirty word skips its entire group. Within a live group re-read every
     // bit in order: a kernel can mark a later kernel during this same phase.
@@ -641,7 +698,7 @@ public:
     size_t base = 0;
     for (auto& inst : insts_) {
       inst.base = base;
-      base      += inst.dut->words + 1 + (m_.eval_counts ? 2 : 0);
+      base      += inst.dut->words + 1 + (m_.eval_counts ? 2 + 2 * (inst.dut->edge.size() + inst.dut->fall.size() + inst.dut->settle.size() + 2) : 0);
       m_.emit_dut(*inst.dut, inst.explicit_clk);
     }
     r.instances   = insts_;
@@ -1151,13 +1208,9 @@ private:
   // The instance variable and field path a `regref` call names.
   void ref_target(const std::string& alias, std::string& base, std::string& fld) const {
     TSNode call = refs_.at(alias);
-    TSNode args = field(call, "argument");
-    if (ts_node_is_null(args) || ts_node_named_child_count(args) < 1) {
+    const auto a0 = ref_argument(call);
+    if (ts_node_is_null(a0)) {
       fail("regref needs a signal: a dotted `acc.field` or a \"unit/field\" path");
-    }
-    TSNode a0 = ts_node_named_child(args, 0);
-    while (ts_node_named_child_count(a0) == 1 && (ntype(a0) == "expression_item" || ntype(a0) == "constant")) {
-      a0 = ts_node_named_child(a0, 0);
     }
     if (inst_dot(a0, base, fld)) {
       return;
@@ -1470,19 +1523,8 @@ private:
   }
 
   bool inst_dot(TSNode n, std::string& base, std::string& fld) const {
-    if (ts_node_is_null(n) || ntype(n) != "dot_expression" || ts_node_named_child_count(n) < 2) {
+    if (!split_dot(src_, n, base, fld)) {
       return false;
-    }
-    const auto unq = [](std::string t) {
-      if (t.size() >= 2 && t.front() == '`' && t.back() == '`') {
-        return t.substr(1, t.size() - 2);
-      }
-      return t;
-    };
-    base = unq(text_of(src_, ts_node_named_child(n, 0)));
-    fld.clear();
-    for (uint32_t k = 1; k < ts_node_named_child_count(n); ++k) {
-      fld += (fld.empty() ? "" : ".") + unq(text_of(src_, ts_node_named_child(n, k)));
     }
     if (inst_index(base) < 0) {
       if (const auto dot = base.find('.'); dot != std::string::npos && inst_index(base.substr(0, dot)) >= 0) {
@@ -3048,6 +3090,48 @@ bool discover_duts(const std::string& file, const std::vector<std::string>& modu
   return false;
 }
 
+bool discover_cells(const std::string& file, std::vector<std::string>& cells, std::string& err) {
+  try {
+    const auto              src = slurp(file);
+    prpparse::Source_buffer buf(file, src);
+    prpparse::Parser        parser(buf);
+    TSNode                  root{parser.parse_ast(), &buf};
+    std::set<std::string>   paths;
+    const auto visit = [&](auto&& self, TSNode node) -> void {
+      std::string base, path;
+      if (split_dot(src, node, base, path)) {
+        // Keep candidates even for expressions that turn out to be local tuples, rather than DUT instances.
+        if (const auto dot = base.find('.'); dot != std::string::npos) {
+          paths.insert(base.substr(dot + 1) + "." + path);
+        }
+        paths.insert(std::move(path));
+      } else if (ntype(node) == "function_call_expression" && text_of(src, field(node, "function")) == "regref") {
+        const auto target = text_of(src, ref_argument(node));
+        if (target.size() >= 2 && (target.front() == '"' || target.front() == '\'') && target.back() == target.front()) {
+          if (const auto slash = target.find('/'); slash != std::string::npos && slash + 1 < target.size()) {
+            paths.insert(target.substr(slash + 1, target.size() - slash - 2));
+          }
+        }
+      }
+      for (const auto child : ts_node_named_children(node)) {
+        self(self, child);
+      }
+    };
+    for (const auto node : ts_node_named_children(root)) {
+      if (ntype(node) == "test_statement") {
+        visit(visit, node);
+      }
+    }
+    cells.assign(paths.begin(), paths.end());
+    return true;
+  } catch (const Gen_error& e) {
+    err = e.msg;
+  } catch (const std::exception& e) {
+    err = e.what();
+  }
+  return false;
+}
+
 int generate(const std::string& file, const std::string& simdir, const std::string& test_sel,
              std::vector<prp_sim::Test_info>& tests, std::string& err, bool also_trace, bool dump_bitcode, bool eval_counts,
              std::optional<uint64_t> cache_salt) {
@@ -3176,7 +3260,9 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
                                             json_str(instance.dut->stem),
                                             instance.base);
         if (eval_counts) {
-          j += std::format(",\"eval_word\":{}", instance.base + instance.dut->words + 1);
+          j += std::format(",\"eval_word\":{},\"eval_kernel_count\":{}",
+                           instance.base + instance.dut->words + 1,
+                           instance.dut->edge.size() + instance.dut->fall.size() + instance.dut->settle.size() + 2);
         }
         j += "}";
       }

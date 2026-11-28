@@ -378,6 +378,9 @@ Sim_emitted emit_sim(const Sim_request& request) {
     objects.incremental    = request.incremental;
     objects.dump_bitcode   = request.dump_bitcode;
     objects.unknown_zero   = request.unknown_zero;
+    objects.dirty          = request.dirty;
+    objects.prune_dead     = request.prune_dead;
+    objects.observed_cells = request.observed_cells;
     // sim.warn_undefined is a run-time switch (drv.bin --set sim.warn_undefined=false), so the sites
     // are always instrumented, as inou.cgen.sim does.
     objects.warn_undefined = true;

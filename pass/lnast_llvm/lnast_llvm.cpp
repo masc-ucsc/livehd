@@ -815,6 +815,101 @@ public:
     }
   }
 
+  // Global value numbering of the pure ops. Instances are inlined into this one tape, so what a module computes from its
+  // own inputs (`~mask`, `valid & !kill`) is recomputed in every instance fed by the same signals: 22% of the 1.75M
+  // ops of the 16-hart SoC repeat an earlier op, most of them in another kernel (LLVM only merges within one). Returns
+  // id -> representative (the earliest equal op) and rewrites every operand to it. Ops inside loops are left alone, and
+  // an op whose operands are not all defined before it (wires, latches) is not merged.
+  std::vector<uint32_t> value_number() {
+    const auto            n = static_cast<uint32_t>(ops.size());
+    std::vector<uint32_t> canon(n);
+    for (uint32_t i = 0; i < n; ++i) {
+      canon[i] = i;
+    }
+    std::vector<uint8_t> in_loop(n, 0);
+    for (const auto& [lb, le] : loops) {
+      for (uint32_t j = lb; j <= le && j < n; ++j) {
+        in_loop[j] = 1;
+      }
+    }
+    absl::flat_hash_map<std::string, uint32_t> seen;
+    size_t                                     merged = 0;
+    for (uint32_t i = 0; i < n; ++i) {
+      const auto& o = ops[i];
+      if (in_loop[i] != 0) {
+        continue;
+      }
+      switch (o.kind) {
+        case K::resize:
+        case K::concat:
+        case K::unary_not:
+        case K::reduce_or:
+        case K::count_bits:
+        case K::bitfield_insert:
+        case K::sign_extend:
+        case K::binary:
+        case K::mux:
+        case K::lane_get: break;
+        default         : continue;
+      }
+      std::string key;
+      key.reserve(64);
+      const auto put = [&](uint64_t x) { key.append(reinterpret_cast<const char*>(&x), sizeof x); };
+      put(static_cast<uint64_t>(o.kind));
+      put(o.bop);
+      put(o.unsign ? 1 : 0);
+      put(o.width);
+      put(o.imm);
+      bool ok = true;
+      for (const Ref* r : {&o.a, &o.b, &o.c}) {
+        if (r->id == none) {
+          put(~uint64_t{0});
+          continue;
+        }
+        ok = ok && r->id < i;
+        put(ok ? canon[r->id] : 0);
+        put(r->width);
+        put(r->unsign ? 1 : 0);
+      }
+      if (o.kind == K::concat) {
+        for (uint32_t j = 0; j < o.n && ok; ++j) {
+          const auto& r = refs[o.x + j];
+          ok            = r.id != none && r.id < i;
+          put(ok ? canon[r.id] : 0);
+          put(r.width);
+          put(r.unsign ? 1 : 0);
+        }
+      }
+      if (!ok) {
+        continue;
+      }
+      const auto [it, added] = seen.try_emplace(std::move(key), i);
+      if (!added) {
+        canon[i] = it->second;
+        ++merged;
+      }
+    }
+    if (merged == 0) {
+      return canon;
+    }
+    for (auto& o : ops) {
+      for (Ref* r : {&o.a, &o.b, &o.c}) {
+        if (r->id != none && !(o.kind == K::loop_begin && r == &o.c)) {
+          r->id = canon[r->id];
+        }
+      }
+      if (o.kind == K::concat || o.kind == K::loop_begin || o.kind == K::loop_end) {
+        for (uint32_t j = 0; j < o.n; ++j) {
+          auto& r = refs[o.x + j];
+          if (r.id != none) {
+            r.id = canon[r.id];
+          }
+        }
+      }
+    }
+    return canon;
+  }
+
 private:
   V add(Op o, uint32_t width, bool unsign) {
     o.width  = width;
@@ -3549,7 +3644,10 @@ uint32_t chunk_target(bool gated, size_t operations, uint64_t words) {
   if (forced != 0 || gated) {
     return forced != 0 ? forced : 150u;
   }
-  return operations > 30000 && words > 2 * operations ? 3000u : 10000u;
+  // A design of 300,000 operations or more (the 16-hart mixed SoC: 1.9M) is cut anyway; 3,000-word kernels run as fast
+  // as 10,000-word ones there (13.4 s against 14.3 s for 36,000 cycles) and compile in parallel more evenly (28 s
+  // against 31 s of LLVM).
+  return (operations > 30000 && words > 2 * operations) || operations > 300000 ? 3000u : 10000u;
 }
 
 // Words of code: an op on a 512-bit value is eight words.
@@ -3660,6 +3758,26 @@ void order_view(const Tape& t, View& v) {
       }
     }
   };
+  // A register under a clock gate that is constant in this view (`r' = gate ? (en ? x : r) : r`, the gate on) is
+  // published under the enable that is left: the hold mux inside is the condition, not logic to compute and store
+  // every cycle. 95,000 of the 123,000 registers of the 16-hart SoC were stored unconditionally this way.
+  if (livehd::debug::env<"LHD_SIM_LNAST_NO_GUARD">() == nullptr && livehd::debug::env<"LHD_SIM_LNAST_NO_PEEL">() == nullptr) {
+    for (auto& root : v.roots) {
+      for (int depth = 0; depth < 8 && root.guarded && root.q != Tape::none; ++depth) {
+        (void)fold(t, v, root.guard.id);
+        if (root_mode(v, root) != 1) {
+          break;
+        }
+        const auto& d = t.ops[root.data.id];
+        if (d.kind != K::mux || d.width != root.value.width || d.unsign != root.value.unsign || (d.b.id == root.q) == (d.c.id == root.q)) {
+          break;
+        }
+        root.when_zero = d.c.id == root.q;
+        root.guard     = d.a;
+        root.data      = root.when_zero ? d.b : d.c;
+      }
+    }
+  }
   for (const auto& root : v.roots) {
     if (root.guarded) {
       (void)fold(t, v, root.guard.id);
@@ -4165,6 +4283,144 @@ void build_kernel(const Tape& t, const Kernel_job& job, const Activity& gate, si
     }
     map[id] = value;
   };
+  std::string error;
+  const bool  immediate   = !gate.on && livehd::debug::env<"LHD_SIM_LNAST_LATE_PUBLISH">() == nullptr;
+  const auto  store_spill = [&](uint32_t i) {
+    if (v.spill[i] != 0 && !v.folded(i)) {
+      const auto& d = t.ops[i];
+      if (!k.add_state_output(t.locs[slot[i]],
+                              t.locs[slot[i]],
+                              val(Tape::Ref{i, d.width, d.unsign}),
+                              gate.marks(slot[i], self),
+                              error,
+                              t.spill_byte[slot[i]],
+                              immediate)) {
+        bail("kernel boundary value: " + error);
+      }
+    }
+  };
+  const auto publish = [&](const Root* root, bool now) {
+    const auto word = t.locs[root->loc];
+    const auto mode = root_mode(v, *root);
+    bool       ok   = false;
+    // What changes is the register (at the commit, when the value goes to a pending word first).
+    const auto changes = is_pending(*root) ? root->home : root->loc;
+    const auto was     = t.locs[changes];
+    const auto marks   = gate.marks(changes, self, is_pending(*root));
+    if (!root->guarded) {
+      ok = k.add_state_output(word, was, val(root->value), marks, error, -1, now);
+    } else if (mode == 1) {  // the guard is a constant that is on
+      ok = k.add_state_output(word, was, k.resize(val(root->data), root->value.width, root->value.unsign), marks, error, -1, now);
+    } else if (root->loc == root->home) {
+      ok = k.add_state_output_if(val(root->guard),
+                                 root->when_zero,
+                                 word,
+                                 k.resize(val(root->data), root->value.width, root->value.unsign),
+                                 error,
+                                 marks,
+                                 now);
+    } else {
+      const V keep = val(root->hold), data = val(root->data);
+      ok = k.add_state_output(word,
+                              was,
+                              k.mux(val(root->guard),
+                                    root->when_zero ? data : keep,
+                                    root->when_zero ? keep : data,
+                                    root->value.width,
+                                    root->value.unsign),
+                              marks,
+                              error,
+                              -1,
+                              now);
+    }
+    if (!ok) {
+      bail("state output: " + error);
+    }
+  };
+  // Early publication. A result stored where it is computed keeps no live range across the rest of the kernel
+  // (a 10,000-word kernel otherwise holds thousands of next-state values until its last line: more than half of
+  // the machine code was spill traffic). A register is written in place, so a store may only precede no read of
+  // the same words in this kernel: no later op reads them (the loads are made where they are first used) and no
+  // other result of the kernel reads or writes them (a chain of copies keeps its order, at the end).
+  absl::flat_hash_set<const Root*>          early_done;
+  std::vector<std::vector<const Root*>>     early_at(job.end - job.begin);
+  if (immediate) {
+    const auto words_of = [&](size_t word, uint32_t bits) { return std::pair<size_t, size_t>{word, std::max<size_t>(1, (bits + 63) / 64)}; };
+    absl::flat_hash_map<size_t, uint32_t> last_read;     // state word -> last position of an op reading it
+    absl::flat_hash_map<size_t, uint32_t> root_reads;    // state word -> reads by the results of this kernel
+    absl::flat_hash_map<size_t, uint32_t> root_writes;   // state word -> results of this kernel storing there
+    const auto                            input_range = [&](const Tape::Ref& r, auto&& fn) {
+      const auto& d = t.ops[r.id];
+      if (d.kind == K::input) {
+        const auto [w0, n] = words_of(t.locs[d.imm], d.width);
+        for (size_t w = w0; w < w0 + n; ++w) {
+          fn(w);
+        }
+      }
+    };
+    for (uint32_t p = job.begin; p < job.end; ++p) {
+      view_operands(t, v, v.order[p], [&](const Tape::Ref& r) {
+        input_range(r, [&](size_t w) { last_read[w] = p; });
+      });
+    }
+    for (const auto* root : v.published[job.index]) {
+      root_operands(v, *root, [&](const Tape::Ref& r) {
+        input_range(r, [&](size_t w) { ++root_reads[w]; });
+      });
+      if (root->guarded && root->loc != root->home && root_mode(v, *root) == 2) {
+        input_range(root->hold, [&](size_t w) { ++root_reads[w]; });
+      }
+      const auto [w0, n] = words_of(t.locs[root->loc], root->value.width);
+      for (size_t w = w0; w < w0 + n; ++w) {
+        ++root_writes[w];
+      }
+    }
+    for (const auto* root : v.published[job.index]) {
+      std::optional<uint32_t> ready;
+      bool                    usable = true;
+      root_operands(v, *root, [&](const Tape::Ref& r) {
+        if (here(r.id) && !v.folded(r.id) && !Tape::is_free(t.ops[r.id].kind)) {
+          ready = std::max(ready.value_or(0), v.pos[r.id]);
+        }
+      });
+      if (root->guarded && root->loc != root->home && root_mode(v, *root) == 2 && t.ops[root->hold.id].kind != K::input) {
+        usable = false;  // keep the order of what is read at publication
+      }
+      if (!ready || !usable) {
+        continue;
+      }
+      const auto [w0, n] = words_of(t.locs[root->loc], root->value.width);
+      for (size_t w = w0; w < w0 + n && usable; ++w) {
+        const auto lr = last_read.find(w);
+        const auto rr = root_reads.find(w);
+        const auto rw = root_writes.find(w);
+        usable        = (lr == last_read.end() || lr->second <= *ready) && rr == root_reads.end() && rw != root_writes.end() && rw->second == 1;
+      }
+      if (usable) {
+        early_at[*ready - job.begin].push_back(root);
+        early_done.insert(root);
+      }
+    }
+  }
+  std::vector<uint32_t> held_spills;  // values defined inside a native loop: stored once it is closed
+  int                   loop_depth = 0;
+  uint32_t              flushed    = job.begin;
+  const auto            after_op   = [&](uint32_t p, uint32_t i) {
+    if (loop_depth != 0) {
+      held_spills.push_back(i);
+      return;
+    }
+    for (const auto held : held_spills) {
+      store_spill(held);
+    }
+    held_spills.clear();
+    store_spill(i);
+    for (; flushed <= p; ++flushed) {  // results whose value became available inside a loop too
+      for (const auto* root : early_at[flushed - job.begin]) {
+        publish(root, true);
+      }
+    }
+  };
   for (uint32_t p = job.begin; p < job.end; ++p) {
     const auto  i = v.order[p];
     const auto& o = t.ops[i];
@@ -4336,55 +4592,17 @@ void build_kernel(const Tape& t, const Kernel_job& job, const Activity& gate, si
         }
         break;
     }
-  }
-  std::string error;
-  for (uint32_t p = job.begin; p < job.end; ++p) {
-    const auto i = v.order[p];
-    if (v.spill[i] != 0 && !v.folded(i)) {
-      const auto& d = t.ops[i];
-      if (!k.add_state_output(t.locs[slot[i]],
-                              t.locs[slot[i]],
-                              val(Tape::Ref{i, d.width, d.unsign}),
-                              gate.marks(slot[i], self),
-                              error,
-                              t.spill_byte[slot[i]])) {
-        bail("kernel boundary value: " + error);
-      }
+    if (o.kind == K::loop_begin) {
+      ++loop_depth;
+    } else if (o.kind == K::loop_end) {
+      --loop_depth;
     }
+    after_op(p, i);
   }
+  // What is left: the results that were not stored as soon as their value existed (see below).
   for (const auto* root : v.published[job.index]) {
-    const auto word = t.locs[root->loc];
-    const auto mode = root_mode(v, *root);
-    bool       ok   = false;
-    // What changes is the register (at the commit, when the value goes to a pending word first).
-    const auto changes = is_pending(*root) ? root->home : root->loc;
-    const auto was     = t.locs[changes];
-    const auto marks   = gate.marks(changes, self, is_pending(*root));
-    if (!root->guarded) {
-      ok = k.add_state_output(word, was, val(root->value), marks, error);
-    } else if (mode == 1) {  // the guard is a constant that is on
-      ok = k.add_state_output(word, was, k.resize(val(root->data), root->value.width, root->value.unsign), marks, error);
-    } else if (root->loc == root->home) {
-      ok = k.add_state_output_if(val(root->guard),
-                                 root->when_zero,
-                                 word,
-                                 k.resize(val(root->data), root->value.width, root->value.unsign),
-                                 error,
-                                 marks);
-    } else {
-      const V keep = val(root->hold), data = val(root->data);
-      ok = k.add_state_output(word,
-                              was,
-                              k.mux(val(root->guard),
-                                    root->when_zero ? data : keep,
-                                    root->when_zero ? keep : data,
-                                    root->value.width,
-                                    root->value.unsign),
-                              marks,
-                              error);
-    }
-    if (!ok) {
-      bail("state output: " + error);
+    if (!early_done.contains(root)) {
+      publish(root, false);
     }
   }
   if (!k.encode_kernel(bitcode, binding, error)) {
@@ -4572,6 +4790,110 @@ Result Gen::run(const Sim_objects& out) {
     }
     bypass_exclusive_latches();
     timer.lap("walk");
+    if (livehd::debug::env<"LHD_SIM_LNAST_NO_VN">() == nullptr) {
+      const auto canon = tape.value_number();
+      const auto fix   = [&](V& v) {
+        if (v.width != 0 && v.id < canon.size()) {
+          v.id = canon[v.id];
+        }
+      };
+      for (auto& v : next_) {
+        fix(v);
+      }
+      for (auto& u : latch_updates_) {
+        fix(u.guard);
+        fix(u.data);
+      }
+      for (auto& item : reset_items_) {
+        fix(item.active);
+      }
+      for (auto& [name, v] : env) {
+        fix(v);
+      }
+      for (auto& [name, v] : reset_active_) {
+        fix(v);
+      }
+      timer.lap("value numbering");
+    }
+    // Sequential dead logic: a register no output (and no memory) can see through other registers is not simulated.
+    // Verilator removes the same variables; here 49% of the 160,000 registers of the 16-hart SoC are unobservable.
+    std::vector<uint8_t> dead_reg(regs_.size(), 0);
+    if (out.prune_dead && livehd::debug::env<"LHD_SIM_LNAST_KEEP_DEAD">() == nullptr) {
+      const size_t                                      n = tape.ops.size();
+      std::vector<uint8_t>                              seen(n, 0), reg_live(regs_.size(), 0);
+      std::vector<uint32_t>                             work;
+      absl::flat_hash_map<size_t, size_t>               reg_of_loc;
+      absl::flat_hash_map<size_t, std::vector<size_t>>  latch_of_loc;
+      absl::flat_hash_map<size_t, std::vector<size_t>>  resets_of_reg;
+      for (size_t i = 0; i < regs_.size(); ++i) {
+        reg_of_loc.emplace(regs_[i].field.word, i);
+      }
+      for (size_t u = 0; u < latch_updates_.size(); ++u) {
+        latch_of_loc[latch_updates_[u].loc].push_back(u);
+      }
+      for (size_t r = 0; r < reset_items_.size(); ++r) {
+        resets_of_reg[reset_items_[r].idx].push_back(r);
+      }
+      const auto push = [&](size_t id) {
+        if (id < n && seen[id] == 0) {
+          seen[id] = 1;
+          work.push_back(static_cast<uint32_t>(id));
+        }
+      };
+      const absl::flat_hash_set<std::string_view> observed(out.observed_cells.begin(), out.observed_cells.end());
+      for (size_t i = 0; i < regs_.size(); ++i) {
+        if (held_[i].width != 0 && observed.contains(regs_[i].field.name)) {
+          push(held_[i].id);
+        }
+      }
+      for (const auto& f : top_->out) {
+        if (auto it = env.find(f.name); it != env.end() && it->second.width != 0) {
+          push(it->second.id);
+        }
+      }
+      for (size_t i = 0; i < n; ++i) {  // memory writes (the undefined-access sites among them) are effects
+        if (tape.ops[i].kind == Tape::K::array_write || tape.ops[i].kind == Tape::K::array_clear) {
+          push(i);
+        }
+      }
+      while (!work.empty()) {
+        const auto  id = work.back();
+        work.pop_back();
+        const auto& o = tape.ops[id];
+        if (o.kind == Tape::K::input) {
+          if (auto it = reg_of_loc.find(static_cast<size_t>(o.imm)); it != reg_of_loc.end() && reg_live[it->second] == 0) {
+            const auto i = it->second;
+            reg_live[i]  = 1;
+            if (regs_[i].mem_size == 0 && !regs_[i].latch && next_[i].width != 0) {
+              push(next_[i].id);
+            }
+            if (auto lu = latch_of_loc.find(static_cast<size_t>(o.imm)); lu != latch_of_loc.end()) {
+              for (const auto u : lu->second) {
+                push(latch_updates_[u].guard.id);
+                push(latch_updates_[u].data.id);
+              }
+            }
+            if (auto rs = resets_of_reg.find(i); rs != resets_of_reg.end()) {
+              for (const auto r : rs->second) {
+                push(reset_items_[r].active.id);
+              }
+            }
+          }
+          continue;
+        }
+        tape.for_each_operand(o, [&](const Tape::Ref& r) { push(r.id); });
+      }
+      size_t dead = 0;
+      for (size_t i = 0; i < regs_.size(); ++i) {
+        dead_reg[i] = regs_[i].mem_size == 0 && !regs_[i].latch && reg_live[i] == 0 ? 1 : 0;
+        dead       += dead_reg[i];
+      }
+      std::erase_if(reset_items_, [&](const Reset_item& item) { return dead_reg[item.idx] != 0; });
+      if (timer.on) {
+        std::fprintf(stderr, "lnast_llvm: dead registers dropped: %zu of %zu\n", dead, regs_.size());
+      }
+      timer.lap("dead registers");
+    }
 
     // The views of one clock period: `rise` runs with the clock low and ends in the rising edge
     // (posedge registers, memory writes); `fall` runs with it high and ends in the falling edge
@@ -4598,6 +4920,9 @@ Result Gen::run(const Sim_objects& out) {
       }
       if (next_[i].width == 0) {
         bail("register '" + regs_[i].field.name + "' has no next state");
+      }
+      if (dead_reg[i] != 0) {
+        continue;
       }
       pending[i] = tape.new_loc(regs_[i].field.bits);
       Root root;
@@ -4734,7 +5059,22 @@ Result Gen::run(const Sim_objects& out) {
       // Gating pays only where most kernels sleep most cycles: minion (219k words) gains 4.6x, boom (95k) a few percent,
       // while a dense design of 100-170k words (matched_filter and gemmini Pyrope2, every kernel active each cycle)
       // lost 6x to 30x in 150-word kernels. 200k words and above.
-      gated            = text != nullptr ? text[0] != '0' : size > 200000;
+      //
+      // The upper bound is measured too: the 16-hart Rocket/BOOM/Gemmini mixed SoC (lhdsuite mixed_soc, 2.1M words of
+      // code, 11,205 kernels) boots in 3,000 cycles and then keeps every core fetching a loop, so 93% of the kernels
+      // are woken every cycle (no kernel sleeps more than 8% of the run): gated it runs 36,000 cycles in 46 s, with
+      // the same code in 150 big ungated kernels in 14 s (Verilator 5 s). A design that large is ungated by default;
+      // sim.tune.dirty=on gates it anyway.
+      constexpr uint64_t kGateMinWords = 200000, kGateMaxWords = 1000000;
+      if (text != nullptr) {
+        gated = text[0] != '0';
+      } else if (out.dirty == "on") {
+        gated = true;
+      } else if (out.dirty == "off") {
+        gated = false;
+      } else {
+        gated = size > kGateMinWords && size <= kGateMaxWords;
+      }
       // Readers of a register before its writer (rank_readers_first): a few rounds, each from the
       // order the one before produced. What an order costs is counted where it is paid, after the
       // cut: a word of register that is not written in place and a word crossing kernels (a store,
@@ -4949,6 +5289,329 @@ Result Gen::run(const Sim_objects& out) {
         }
       }
       if (timer.on) {
+        std::vector<std::pair<size_t, size_t>> by_readers;  // (readers, loc)
+        for (size_t loc = 0; loc < gate.readers.size(); ++loc) {
+          by_readers.emplace_back(gate.readers[loc].size(), loc);
+        }
+        std::ranges::sort(by_readers, std::greater<>{});
+        absl::flat_hash_map<size_t, std::string> loc_name;
+        for (const auto& reg : regs_) {
+          loc_name.emplace(reg.field.word, reg.field.name);
+        }
+        for (const auto& f : top_->in) {
+          loc_name.emplace(f.word, "input " + f.name);
+        }
+        for (size_t i = 0; i < std::min<size_t>(20, by_readers.size()); ++i) {
+          const auto it = loc_name.find(by_readers[i].second);
+          std::fprintf(stderr, "lnast_llvm: loc %zu read by %zu kernels: %s\n", by_readers[i].second, by_readers[i].first,
+                       it == loc_name.end() ? "(boundary slot)" : it->second.c_str());
+        }
+        {  // where the ops live: emission run lengths per root, grouped by the register's hierarchical name
+          absl::flat_hash_map<size_t, std::string> loc_to_name;
+          for (const auto& reg : regs_) {
+            loc_to_name.emplace(reg.field.word, reg.field.name);
+          }
+          absl::flat_hash_map<uint32_t, std::string> start_name;
+          for (const auto& root : rise.roots) {
+            const auto it = loc_to_name.find(root.home != Tape::none ? root.home : root.loc);
+            if (it == loc_to_name.end()) {
+              continue;
+            }
+            for (const auto id : {root.value.id, root.data.id, root.guard.id}) {
+              if (id != Tape::none) {
+                start_name.emplace(id, it->second);
+              }
+            }
+          }
+          absl::flat_hash_map<std::string, uint64_t> per;
+          uint64_t                                   unknown = 0;
+          for (size_t g = 0; g < rise.groups.size(); ++g) {
+            const uint32_t end  = g + 1 < rise.groups.size() ? rise.groups[g + 1].second : static_cast<uint32_t>(rise.order.size());
+            const auto     size = static_cast<uint64_t>(end - rise.groups[g].second);
+            const auto     it   = start_name.find(rise.groups[g].first);
+            if (it == start_name.end()) {
+              unknown += size;
+              continue;
+            }
+            std::string key;
+            size_t      dots = 0;
+            for (const char ch : it->second) {
+              if (ch == '.' && ++dots == (it->second.starts_with("chip.system.tile_prci") ? 5u : (it->second.starts_with("chip.system.sbus") ? 6u : 3u))) {
+                break;
+              }
+              key += ch;
+            }
+            per[key] += size;
+          }
+          std::vector<std::pair<uint64_t, std::string>> rows;
+          for (const auto& [k, n] : per) {
+            rows.emplace_back(n, k);
+          }
+          std::ranges::sort(rows, std::greater<>{});
+          std::fprintf(stderr, "lnast_llvm: ops by module (unattributed %llu):\n", static_cast<unsigned long long>(unknown));
+          for (size_t i = 0; i < std::min<size_t>(60, rows.size()); ++i) {
+            std::fprintf(stderr, "lnast_llvm:   %9llu %s\n", static_cast<unsigned long long>(rows[i].first), rows[i].second.c_str());
+          }
+        }
+        {  // plain results that read their own register: hold-like logic the guard detection did not take
+          size_t self_ref = 0, self_ref_1bit = 0, not_self = 0, mux_top = 0;
+          absl::flat_hash_set<uint32_t> sels;
+          std::vector<std::pair<uint32_t, int>> work;
+          for (const auto& root : rise.roots) {
+            if (root.guarded || root_mode(rise, root) == 0) {
+              continue;
+            }
+            bool found = false;
+            work.clear();
+            work.emplace_back(root.value.id, 0);
+            while (!work.empty() && !found) {
+              const auto [id, depth] = work.back();
+              work.pop_back();
+              if (id == root.q) {
+                found = true;
+                break;
+              }
+              if (depth >= 4 || Tape::is_free(tape.ops[id].kind)) {
+                continue;
+              }
+              tape.for_each_operand(tape.ops[id], [&](const Tape::Ref& r) { work.emplace_back(r.id, depth + 1); });
+            }
+            if (found) {
+              ++self_ref;
+              self_ref_1bit += root.value.width == 1 ? 1 : 0;
+              if (tape.ops[root.value.id].kind == Tape::K::mux) {
+                ++mux_top;
+                sels.insert(tape.ops[root.value.id].a.id);
+              }
+            } else {
+              ++not_self;
+            }
+          }
+          size_t on_total = 0, on_mux_q = 0, on_self = 0, on_unconditional = 0;
+          absl::flat_hash_set<uint32_t> on_sels;
+          for (const auto& root : rise.roots) {
+            if (!root.guarded || root_mode(rise, root) != 1) {
+              continue;
+            }
+            ++on_total;
+            const auto& d = tape.ops[root.data.id];
+            if (d.kind == Tape::K::mux && (d.b.id == root.q || d.c.id == root.q)) {
+              ++on_mux_q;
+              on_sels.insert(d.a.id);
+            }
+            bool found = false;
+            work.clear();
+            work.emplace_back(root.data.id, 0);
+            while (!work.empty() && !found) {
+              const auto [id, depth] = work.back();
+              work.pop_back();
+              if (id == root.q) {
+                found = true;
+                break;
+              }
+              if (depth >= 4 || Tape::is_free(tape.ops[id].kind)) {
+                continue;
+              }
+              tape.for_each_operand(tape.ops[id], [&](const Tape::Ref& r) { work.emplace_back(r.id, depth + 1); });
+            }
+            on_self += found ? 1 : 0;
+            on_unconditional += (root.q == Tape::none) ? 1 : 0;
+          }
+          std::fprintf(stderr, "lnast_llvm: always-on guarded results: %zu, data = mux with own register arm: %zu (%zu distinct selects), reads own register within 4 ops: %zu, no register read op: %zu\n",
+                       on_total, on_mux_q, on_sels.size(), on_self, on_unconditional);
+          {
+            absl::flat_hash_map<uint64_t, size_t> members;
+            for (const auto& root : rise.roots) {
+              if (root.guarded && root_mode(rise, root) == 2) {
+                ++members[(static_cast<uint64_t>(root.guard.id) << 1) | (root.when_zero ? 1u : 0u)];
+              }
+            }
+            size_t ones = 0, big = 0, mid = 0, total = 0;
+            std::vector<size_t> counts;
+            for (const auto& [key, n] : members) {
+              counts.push_back(n);
+              ones += n == 1 ? 1 : 0;
+              mid += n >= 8 ? 1 : 0;
+              big += n >= 64 ? 1 : 0;
+              total += n;
+            }
+            std::ranges::sort(counts, std::greater<>{});
+            std::fprintf(stderr, "lnast_llvm: guard sharing: %zu guarded results under %zu guards, %zu guards with one result, %zu with >=8, %zu with >=64; largest:", total, members.size(), ones, mid, big);
+            for (size_t i = 0; i < std::min<size_t>(8, counts.size()); ++i) {
+              std::fprintf(stderr, " %zu", counts[i]);
+            }
+            std::fprintf(stderr, "\n");
+          }
+          {  // structural duplicates over the flattened tape (value numbering of the pure ops)
+            using K3 = Tape::K;
+            absl::flat_hash_map<uint32_t, uint32_t> vn;  // op id -> representative id
+            absl::flat_hash_map<std::string, uint32_t> seen;
+            size_t dup = 0, considered = 0, dup_by_kind[32] = {0}, count_by_kind[32] = {0};
+            const auto rep = [&](const Tape::Ref& r) {
+              const auto it = vn.find(r.id);
+              return it == vn.end() ? r.id : it->second;
+            };
+            for (const auto i : rise.order) {
+              const auto& o = tape.ops[i];
+              switch (o.kind) {
+                case K3::resize: case K3::concat: case K3::unary_not: case K3::reduce_or: case K3::count_bits: case K3::bitfield_insert:
+                case K3::sign_extend: case K3::binary: case K3::mux: case K3::lane_get: break;
+                default: continue;
+              }
+              ++considered;
+              ++count_by_kind[static_cast<size_t>(o.kind) & 31];
+              std::string key;
+              key.reserve(48);
+              const auto put = [&](uint64_t x) { key.append(reinterpret_cast<const char*>(&x), sizeof x); };
+              put(static_cast<uint64_t>(o.kind));
+              put(o.bop);
+              put(o.unsign);
+              put(o.width);
+              put(o.imm);
+              for (const auto* r : {&o.a, &o.b, &o.c}) {
+                put(r->id == Tape::none ? ~uint64_t{0} : rep(*r));
+                put(r->width);
+                put(r->unsign);
+              }
+              if (o.kind == K3::concat) {
+                for (uint32_t j = 0; j < o.n; ++j) {
+                  put(rep(tape.refs[o.x + j]));
+                  put(tape.refs[o.x + j].width);
+                }
+              }
+              auto [it, added] = seen.try_emplace(std::move(key), i);
+              if (!added) {
+                vn[i] = it->second;
+                ++dup;
+                ++dup_by_kind[static_cast<size_t>(o.kind) & 31];
+              }
+            }
+            std::fprintf(stderr, "lnast_llvm: value numbering: %zu of %zu pure ops duplicate an earlier op (mux %zu/%zu, binary %zu/%zu, concat %zu/%zu, resize %zu/%zu)\n", dup, considered,
+                         dup_by_kind[static_cast<size_t>(K3::mux)], count_by_kind[static_cast<size_t>(K3::mux)], dup_by_kind[static_cast<size_t>(K3::binary)],
+                         count_by_kind[static_cast<size_t>(K3::binary)], dup_by_kind[static_cast<size_t>(K3::concat)], count_by_kind[static_cast<size_t>(K3::concat)],
+                         dup_by_kind[static_cast<size_t>(K3::resize)], count_by_kind[static_cast<size_t>(K3::resize)]);
+          }
+          {  // ops needed only under one guard: they could be computed inside its branch
+            constexpr uint32_t kNone = ~uint32_t{0}, kMany = ~uint32_t{0} - 1, kSeveral = ~uint32_t{0} - 2;
+            std::vector<uint32_t> tag(tape.ops.size(), kNone);
+            const auto merge = [&](uint32_t id, uint32_t g) {
+              if (tape.ops[id].kind == Tape::K::input || Tape::is_free(tape.ops[id].kind)) {
+                return;
+              }
+              auto& t = tag[id];
+              if (t == kMany || g == kMany) {
+                t = kMany;
+              } else if (t == kNone) {
+                t = g;
+              } else if (t != g) {
+                t = kSeveral;
+              }
+            };
+            for (const auto& root : rise.roots) {
+              const auto mode = root_mode(rise, root);
+              if (mode == 0) {
+                continue;
+              }
+              if (root.guarded && mode == 2) {
+                merge(root.guard.id, kMany);
+                merge(root.data.id, root.guard.id * 2 + (root.when_zero ? 1 : 0));
+                if (root.loc != root.home) {
+                  merge(root.hold.id, kMany);
+                }
+              } else {
+                root_operands(rise, root, [&](const Tape::Ref& r) { merge(r.id, kMany); });
+              }
+            }
+            for (size_t p = rise.order.size(); p-- > 0;) {
+              const auto  i = rise.order[p];
+              const auto& o = tape.ops[i];
+              if (tag[i] == kNone) {
+                continue;
+              }
+              view_operands(tape, rise, i, [&](const Tape::Ref& r) { merge(r.id, tag[i]); });
+              (void)o;
+            }
+            size_t only_one = 0, many = 0, dead = 0, several = 0;
+            for (const auto i : rise.order) {
+              only_one += tag[i] != kNone && tag[i] != kMany && tag[i] != kSeveral ? 1 : 0;
+              several += tag[i] == kSeveral ? 1 : 0;
+              many += tag[i] == kMany ? 1 : 0;
+              dead += tag[i] == kNone ? 1 : 0;
+            }
+            std::fprintf(stderr, "lnast_llvm: ops needed under exactly one guard: %zu, under several guards only: %zu, always: %zu, other: %zu (of %zu)\n", only_one, several, many, dead, rise.order.size());
+          }
+          {  // sequential liveness: what can influence an output (through registers and memories)?
+            using K4 = Tape::K;
+            std::vector<uint8_t> seen(tape.ops.size(), 0), reg_live(rise.roots.size(), 0);
+            absl::flat_hash_map<size_t, std::vector<size_t>> roots_of_home;  // register field loc -> its roots in rise
+            for (size_t r = 0; r < rise.roots.size(); ++r) {
+              roots_of_home[rise.roots[r].home != Tape::none ? rise.roots[r].home : rise.roots[r].loc].push_back(r);
+            }
+            absl::flat_hash_map<uint64_t, std::vector<uint32_t>> writes_of_array;
+            for (uint32_t i = 0; i < tape.ops.size(); ++i) {
+              if (tape.ops[i].kind == K4::array_write || tape.ops[i].kind == K4::array_clear) {
+                writes_of_array[tape.ops[i].imm].push_back(i);
+              }
+            }
+            absl::flat_hash_set<uint64_t> array_live;
+            std::vector<uint32_t> live_work;
+            const auto push = [&](uint32_t id) {
+              if (id != Tape::none && seen[id] == 0) {
+                seen[id] = 1;
+                live_work.push_back(id);
+              }
+            };
+            for (const auto& root : settle.roots) {
+              root_operands(settle, root, [&](const Tape::Ref& r) { push(r.id); });
+            }
+            for (const auto& [array, list] : writes_of_array) {  // conservative: every memory write stays
+              array_live.insert(array);
+              for (const auto w : list) {
+                push(w);
+              }
+            }
+            while (!live_work.empty()) {
+              const auto id = live_work.back();
+              live_work.pop_back();
+              const auto& o = tape.ops[id];
+              if (o.kind == K4::input) {
+                if (auto it = roots_of_home.find(static_cast<size_t>(o.imm)); it != roots_of_home.end()) {
+                  for (const auto r : it->second) {
+                    if (reg_live[r] == 0) {
+                      reg_live[r] = 1;
+                      const auto& root = rise.roots[r];
+                      if (root.guarded) {
+                        push(root.guard.id);
+                        push(root.data.id);
+                      } else {
+                        push(root.value.id);
+                      }
+                      push(root.q);
+                    }
+                  }
+                }
+                continue;
+              }
+              if (o.kind == K4::array_read && array_live.insert(o.imm).second) {
+                for (const auto w : writes_of_array[o.imm]) {
+                  push(w);
+                }
+              }
+              tape.for_each_operand(o, [&](const Tape::Ref& r) { push(r.id); });
+            }
+            size_t live_roots = 0, live_ops = 0, total_ops = 0;
+            for (size_t r = 0; r < rise.roots.size(); ++r) {
+              live_roots += reg_live[r];
+            }
+            for (const auto i : rise.order) {
+              ++total_ops;
+              live_ops += seen[i];
+            }
+            std::fprintf(stderr, "lnast_llvm: observable from the outputs: %zu of %zu register results, %zu of %zu rise ops (%zu arrays read)\n", live_roots, rise.roots.size(), live_ops, total_ops, array_live.size());
+          }
+          std::fprintf(stderr, "lnast_llvm: plain results: %zu read their own register within 4 ops (%zu 1-bit, %zu top-level mux on %zu distinct selects), %zu do not\n",
+                       self_ref, self_ref_1bit, mux_top, sels.size(), not_self);
+        }
         size_t plain = 0, guarded = 0, pend = 0, spills = 0, unread = 0;
         for (View* v : {&rise, &fall, &settle}) {
           for (const auto& root : v->roots) {
@@ -5217,6 +5880,34 @@ Result Gen::run(const Sim_objects& out) {
                    q_words[0],
                    q_words[1],
                    latch_ops_.size());
+      // What the rise view publishes: results by shape, and how many distinct enables the guarded ones share.
+      size_t                          plain = 0, guarded = 0, guarded_in_place = 0, folded_on = 0;
+      absl::flat_hash_set<uint32_t>   guards;
+      absl::flat_hash_map<uint32_t, size_t> kind_count;
+      for (const auto& root : rise.roots) {
+        const auto mode = root_mode(rise, root);
+        if (mode == 0) {
+          continue;
+        }
+        if (!root.guarded) {
+          ++plain;
+        } else {
+          ++guarded;
+          folded_on += mode == 1 ? 1 : 0;
+          guarded_in_place += root.loc == root.home ? 1 : 0;
+          guards.insert(root.guard.id);
+        }
+      }
+      for (const auto i : rise.order) {
+        ++kind_count[static_cast<uint32_t>(tape.ops[i].kind)];
+      }
+      std::fprintf(stderr, "lnast_llvm: rise roots: %zu plain, %zu guarded (%zu in place, %zu always on, %zu distinct guards)\n", plain,
+                   guarded, guarded_in_place, folded_on, guards.size());
+      std::string kinds;
+      for (const auto& [k, n] : kind_count) {
+        kinds += std::format(" k{}={}", k, n);
+      }
+      std::fprintf(stderr, "lnast_llvm: rise ops by kind:%s\n", kinds.c_str());
     }
 
     std::vector<Field> state_inputs;
