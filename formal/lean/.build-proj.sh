@@ -46,8 +46,16 @@ ROOTS=(
   # lake builds them only with lgraph-sim (`lake build LgraphSim`), which nothing runs.
   LeanSemanticPrimitives.Compiler.DirectSim
   LeanSemanticPrimitives.Compiler.DirectTests
-  # the certificate format: the DCERT4 codec's and admission's #guards (CertIOChecks)
+  # the certificate format: the DCERT4 codec's and admission's #guards (CertIOChecks), and the
+  # format theorems, each with its axiom-gate line in its own module: checkpoints save and
+  # restore (CkptSound), no admitted address reaches past a memory's depth (MemAddrSound), a
+  # resumed run is exact (CkptResume) and a checkpoint denotes its state (CkptStateM). Named
+  # here so they are built, and their gates run, whatever else imports them.
   LeanSemanticPrimitives.Compiler.CertIOChecks
+  LeanSemanticPrimitives.Compiler.CkptSound
+  LeanSemanticPrimitives.Projection.MemAddrSound
+  LeanSemanticPrimitives.Projection.CkptResume
+  LeanSemanticPrimitives.Projection.CkptStateM
   # translation validation's reifier (a meta-program; the per-design TV drivers use it)
   LeanSemanticPrimitives.Compiler.ReifyGen
   # the legacy models' fast operators (the per-design legacy drivers import it; interpreted runs
