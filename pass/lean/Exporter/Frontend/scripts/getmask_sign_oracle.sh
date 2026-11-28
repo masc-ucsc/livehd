@@ -7,19 +7,22 @@ set -euo pipefail
 # native lowering reads it at a carrier wide enough to hold the window
 # (inou/cgen/cgen_sim.cpp). The certificate's Get_mask reads zero-extended, so
 # the exporter inserts a Sext to the window's top bit first. The Yosys readers
-# produce exactly this shape from a 0 / all-ones mask: a signed 1-bit Mux read
-# by Get_mask windows at [17,18), [28,32) and [13,21).
+# produce exactly this shape from a 0 / all-ones mask: a signed 1-bit value read
+# by Get_mask windows at [17,18), [28,32) and [13,21). That value was a Mux; the
+# compile's aegraph now writes `sel ? all-ones : 0` as `Sext(sel)` (mux.rules,
+# mux_gate_word), a signed 1-bit Sext node.
 #
 # This compares the certificate's `interpretDesign`
 # (Futamura_Projection_Scripts/cert_trace.lean) against iverilog on the
 # ORIGINAL RTL, step by step. One control must DIFFER from the RTL:
-#   cert_zext  the same certificate with every Sext rewritten to a
-#              zero-extending Or of its source -- the read before 897049f16.
-#              Each window carries TWO: the scan's adapter (897049f16) and the
-#              CertificateBuilder's own widening of the adapter's signed 1-bit
-#              operand. Either one alone restores the sign, so rewriting only
-#              one of them leaves every value unchanged; this fixture has no
-#              other Sext, so all of them go.
+#   cert_zext  the same certificate with every Sext that widens to a window's
+#              top bit rewritten to a zero-extending Or of its source -- the
+#              read before 897049f16. Each window carries TWO: the scan's
+#              adapter (897049f16) and the CertificateBuilder's own widening of
+#              the adapter's signed 1-bit operand. Either one alone restores
+#              the sign, so rewriting only one of them leaves every value
+#              unchanged; so all six go. The mask's own 1-bit Sext widens
+#              nothing (at width 1 it equals its source) and is kept.
 #
 # The Lean toolchain pin lives in formal/lean; lean runs from there.
 
@@ -52,17 +55,25 @@ EOF
 # `<opcode> <arg> <width> <ndeps> <deps...> <origin>`; Sext is opcode 23, Or 8
 # (CertIOCodec.opCode).
 python3 -I - "$OUT/lean/gm1.dcert" "$OUT/gm1_zext.dcert" <<'PY'
-import sys
-lines, n = open(sys.argv[1]).read().split("\n"), 0
+import collections, sys
+lines = open(sys.argv[1]).read().split("\n")
+tops = {"18", "32", "21"}   # the windows' top bits: [17,18), [28,32), [13,21)
+wide, other = collections.Counter(), []
 for i, l in enumerate(lines):
     f = l.split()
     if len(f) == 7 and f[0] == "23" and f[3] == "2":
-        lines[i] = " ".join(["8", "0", f[2], "1", f[4], f[6]])
-        n += 1
-if n != 6:
-    sys.exit(f"FAIL: expected two Sext per window over three windows (6), found {n}")
+        if f[2] in tops:
+            lines[i] = " ".join(["8", "0", f[2], "1", f[4], f[6]])
+            wide[f[2]] += 1
+        else:
+            other.append(f[2])
+if wide != collections.Counter({t: 2 for t in tops}):
+    sys.exit(f"FAIL: expected two Sext per window over three windows (6), found {dict(wide)} by width")
+if any(w != "1" for w in other):
+    sys.exit(f"FAIL: a Sext widens to width(s) {other}, not a window's top bit")
 open(sys.argv[2], "w").write("\n".join(lines))
-print(f"ok: emitted; {n} Sext widenings over the three windows (the shape under test)")
+print(f"ok: emitted; {sum(wide.values())} Sext widenings over the three windows (the shape under test), "
+      f"{len(other)} other Sext of width 1 (the mask itself)")
 PY
 
 python3 -I - "$OUT" "$CYCLES" <<'PY'
