@@ -66,12 +66,14 @@ The earlier words `edges:all` (which here meant `edges:third`; `cert_trace`'s
 a message naming the new word, so a run never changes meaning when it moves
 between drivers.  The `memstate v1` start files and the `react` stimulus lines
 are gone: a start state is a checkpoint, as in every other driver, and a
-stimulus is the `stim v1` every other driver reads.
+stimulus is the `stim v1` every other driver reads, through the same reader
+(`HDLProof/Run/Stim`: `parseStim`, `StimTab`); `edges:file:<path>` reads an
+`edges v1` schedule with its `edges v1` reader, as `cert_trace` does.
 
 CHECKPOINTS (`lhdcert-ckpt v1`, `Compiler/Ckpt.lean`, `pass/lean/tools/formats/ckpt.md`).
-The start `ckpt:<file>` reads a checkpoint, validates it against the certificate (design
-hash, shapes, values; a refusal is a configuration refusal, exit 2) and builds the FP state
-from it (`CkptStateM.toStateM`, which denotes `restore c` by `toStateM_denote`). The run then
+The start `ckpt:<file>` reads a checkpoint with `Run/Kit.readCkpt`, the loader of every other
+trace driver, which validates it against the certificate (design hash, shapes, values; here a
+refusal is a configuration refusal, exit 2), and builds the FP state from it (`CkptStateM.toStateM`, which denotes `restore c` by `toStateM_denote`). The run then
 starts at the checkpoint's cycle `c`: cycle numbers are absolute, for the stimulus's `at`
 lines, the edge schedule and the `outputs` lines alike. `ckpt-at:<k>:<file>` writes the state
 reached after `k` steps (`c <= k <= c + cycles`, repeatable) and `ckpt-out:<file>` the final
@@ -96,6 +98,8 @@ import LeanSemanticPrimitives.Projection.Proto.RunnerSupport
 import LeanSemanticPrimitives.Compiler.CertIORoute   -- DCERT2 + DCERT1, routed by magic (Mathlib-free)
 import LeanSemanticPrimitives.Compiler.RunAdmission   -- C3 edges / C4 reset polarity
 import LeanSemanticPrimitives.Compiler.DirectSemantics -- the reference step, computed in one dense pass
+import HDLProof.Run.Stim   -- the stim v1 and edges v1 readers every trace driver uses
+import HDLProof.Run.Kit    -- the start-checkpoint loader every trace driver uses
 
 open Compiler Projection Projection.Hw Projection.HwMem Projection.MemProjection
 open Projection.Runner
@@ -410,7 +414,9 @@ def narrowStateOf (D : DesignCert) : StateM :=
 exercises the route, but it cannot drive a design that needs a particular input
 to do anything -- a CPU held in reset never writes its register file, and
 reporting "0 words differ" for it is honest but uninformative.  A stimulus file
-supplies the vector instead:
+supplies the vector instead, the `stim v1` file every trace driver reads, with
+the same reader and the same per-cycle rules (`HDLProof/Run/Stim`: `parseStim`,
+`StimTab.inputAt`):
 
 ```
 stim v1
@@ -421,63 +427,14 @@ at <cycle> in <ordinal> <width> <value>
 `in` holds for every cycle, `at` for one cycle (it wins); unlisted ordinals keep
 their declared width and value 0.  It is SUPPLIED, and the report says so. -/
 
-/-- A stimulus is two things: constants and per-cycle overrides (`at`).  A core
-that needs a RESET PULSE cannot be driven by constants alone, which is what `at`
-is for. -/
-def parseStim (txt : String) :
-    Except String (List (Nat × Nat × Int) × List (Nat × Nat × Nat × Int)) := do
-  let body := ((txt.splitOn "\n").map (fun l => (l.splitOn "\r").headD "")).filter
-                (fun l => l != "" && !l.startsWith "#")
-  match body with
-  | [] => .error "empty stimulus file"
-  | hdr :: rest =>
-    if hdr != "stim v1" then .error s!"line 1: expected \"stim v1\", got {repr hdr}"
-    else
-      let mut out : List (Nat × Nat × Int) := []
-      let mut ats : List (Nat × Nat × Nat × Int) := []
-      let mut n := 1
-      for l in rest do
-        n := n + 1
-        match (l.splitOn " ").filter (fun w => w != "") with
-        | ["at", c, "in", i, w, v] =>
-            let some c' := c.toNat? | throw s!"line {n}: cycle {repr c} is not a number"
-            let some i' := i.toNat? | throw s!"line {n}: ordinal {repr i} is not a number"
-            let some w' := w.toNat? | throw s!"line {n}: width {repr w} is not a number"
-            let some v' := v.toInt? | throw s!"line {n}: value {repr v} is not an integer"
-            ats := ats ++ [(c', i', w', v')]
-        | ["in", i, w, v] =>
-            let some i' := i.toNat? | throw s!"line {n}: ordinal {repr i} is not a number"
-            let some w' := w.toNat? | throw s!"line {n}: width {repr w} is not a number"
-            let some v' := v.toInt? | throw s!"line {n}: value {repr v} is not an integer"
-            out := out ++ [(i', w', v')]
-        | _ => throw s!"line {n}: unrecognised {repr l}"
-      .ok (out, ats)
-
-/-- The supplied vector: a per-cycle override wins over the constant, then zero
-at the declared width. -/
-def stimInput (D : DesignCert) (spec : List (Nat × Nat × Int))
-    (ats : List (Nat × Nat × Nat × Int)) (cyc : Nat) : RuntimeInput :=
-  let n := max (maxInputIdx D) ((spec.map (fun t => t.1 + 1)).foldl max 0)
-  (List.range n).toArray.map (fun i =>
-    let w := match spec.find? (fun t => t.1 == i) with
-             | some (_, w, _) => w
-             | none           => inputWidth D i
-    match ats.find? (fun t => t.1 == cyc && t.2.1 == i) with
-    | some (_, _, w', v) => mk_bv w' v
-    | none =>
-      match spec.find? (fun t => t.1 == i) with
-      | some (_, _, v) => mk_bv w v
-      | none           => mk_bv w 0)
-
 structure Cfg where
   stepFuel : Nat
   workFuel : Nat
   cycles   : Nat
   init     : InitMode
   compare  : Bool
-  /-- a supplied stimulus, applied every cycle, or `none` for the generated one -/
-  stim     : Option (List (Nat × Nat × Int)) := none
-  ats      : List (Nat × Nat × Nat × Int) := []
+  /-- a supplied stimulus (`Run/Stim`), or `none` for the generated one -/
+  stim     : Option HDLProof.Run.Stim := none
   stimProv : String := "generated: mkInputFor (synthetic, width-derived)"
   /-- stop after the support report -- used to compare two certificates'
   admission without paying for specialization -/
@@ -501,6 +458,9 @@ structure Cfg where
   domains INDEPENDENTLY (`edges:indep`) when the certificate declares more than
   one clock. RunnerSupport's `EdgeMode.all` is the word `edges:third` here. -/
   edgeMode : EdgeMode := .auto
+  /-- `edges:file:<path>`: an `edges v1` schedule (`Run/Stim.parseEdges`, as `cert_trace` reads
+  it), with its rows once read; it wins over `edgeMode` -/
+  edgeFile : Option (String × List (Nat × Array Bool)) := none
   /-- which memory interpreter is specialized: `fused` (default:
   `MemFused.projectMemFDesignAt`, `env0` inlined and the node fold fused into
   its readers, `runMemSim(W)F_correct`), `var` (`MemVariant`, `env0` inlined
@@ -535,6 +495,19 @@ structure Cfg where
   no value: the step is `runMemSim` itself (`ShareTails.runMemSimS_eq`, `stepEnc_eq`). -/
   share : Bool := true
 
+/-- The clocks that fire on cycle `k`: an `edges v1` file's row (a cycle it does not list fires
+every clock, `Run/Stim.edgesAt`), else the mode's schedule. -/
+def Cfg.edgesAt (cfg : Cfg) (D : DesignCert) (k : Nat) : ClockEdges :=
+  match cfg.edgeFile with
+  | some (_, rows) => HDLProof.Run.edgesAt D (.file rows) k
+  | none => scheduleEdges cfg.edgeMode D k
+
+def Cfg.describeEdges (cfg : Cfg) (D : DesignCert) : String :=
+  match cfg.edgeFile with
+  | some (p, rows) => s!"edges v1 file {p} ({rows.length} listed cycle(s); a cycle it does not \
+list fires every clock)"
+  | none => cfg.edgeMode.describe D
+
 /-- The step budget bounds how deep the specializer recurses, and the depth grows
 with the design: the smallest budget that worked on the four largest rows was
 1.70 to 1.82 x (nodes + sources) (Vortex top 200,118 for 118,058; nyuzi 172,788
@@ -551,7 +524,7 @@ def autoWorkFuel : Nat := 2000
 def say (s : String) : IO Unit := IO.println s
 
 def runRoute (label : String) (certHash : String) (D : DesignCert) (cfg : Cfg)
-    (st0 : StateM) (stateProv : String) : IO UInt32 := do
+    (st0 : StateM) (stateProv : String) (hash : Thunk Nat) : IO UInt32 := do
   let cfg := { cfg with stepFuel := if cfg.autoStep then autoStepFuel D else cfg.stepFuel,
                         workFuel := if cfg.autoWork then autoWorkFuel else cfg.workFuel }
   let t0 ← IO.monoMsNow
@@ -710,7 +683,7 @@ unchanged -- refusing rather than running on a state the encoder altered"
         | some ws => say s!"  TRACE slots write {ws.write} addr {ws.addr} datum {ws.datum} \
 effEn {ws.effEn} origEn {ws.origEn} mask {ws.mask} pred {ws.pred} phaseSrc {ws.phaseSrc}"
       say s!"  stimulus: {cfg.stimProv}"
-      say s!"  edges: {cfg.edgeMode.describe D}"
+      say s!"  edges: {cfg.describeEdges D}"
       say s!"  executing {cfg.cycles} cycle(s) of the residual at the checked bound"
       -- checkpoints: every one names a cycle of this run, and is written from the
       -- state the residual reached (`saveM`: the bytes the IR and VC routes write)
@@ -719,7 +692,9 @@ effEn {ws.effEn} origEn {ws.origEn} mask {ws.mask} pred {ws.pred} phaseSrc {ws.p
           IO.eprintln s!"  ckpt-at:{k}:{p}: cycle {k} is outside this run \
 ({cfg.start} .. {cfg.start + cfg.cycles})"
           return 2
-      let ckptHash := if cfg.ckptAt.isEmpty && cfg.ckptOut.isNone then 0 else Ckpt.designHash D
+      let ckptHash := if cfg.ckptAt.isEmpty && cfg.ckptOut.isNone then 0 else hash.get
+      -- the stimulus as tables, built once (`Run/Stim.StimTab`, `inputAt`'s rules)
+      let tab := cfg.stim.map (HDLProof.Run.StimTab.of D)
       let saveAt (k : Nat) (st : StateM) (ok : Bool) : IO Unit := do
         let due := (cfg.ckptAt.filter (·.1 == k)).map (·.2) ++
           (if k == cfg.start + cfg.cycles then cfg.ckptOut.toList else [])
@@ -760,11 +735,11 @@ did not step or was refused"
             st := (StateM.decStateM sv).getD st
             stKnown := true
           saveAt k st (!bad && !policyBad)
-          let e := scheduleEdges cfg.edgeMode D k
+          let e := cfg.edgesAt D k
           if let some rc := (← RunAdmission.refuseEdges? D k e) then return rc
-          let i := match cfg.stim with
-                   | some spec => stimInput D spec cfg.ats k
-                   | none      => mkInputFor D k
+          let i := match tab with
+                   | some t => t.inputAt k
+                   | none   => mkInputFor D k
           let mut pass := false
           if stateOK then
             let key := (i.size, fl.size, e.size)
@@ -811,11 +786,11 @@ did not step or was refused"
       else
         for k in List.range' cfg.start cfg.cycles do
           saveAt k st (!bad && !policyBad)
-          let e := scheduleEdges cfg.edgeMode D k
+          let e := cfg.edgesAt D k
           if let some rc := (← RunAdmission.refuseEdges? D k e) then return rc
-          let i := match cfg.stim with
-                   | some spec => stimInput D spec cfg.ats k
-                   | none      => mkInputFor D k
+          let i := match tab with
+                   | some t => t.inputAt k
+                   | none   => mkInputFor D k
           if runtimeFullOKB D i st e != true then
             tags := "policy-refused" :: tags
             policyBad := true
@@ -923,9 +898,18 @@ def fixtureOf (n : String) : Option DesignCert :=
                        , .input 2 1, .input 3 32 ] }
   else none
 
-/-- Resolve a `stim:<path>` request into the supplied vector, or leave the
-generated one in place. -/
+/-- Read the files the options name: a `stim:<path>` request into the supplied stimulus
+(`Run/Stim.parseStim`, else the generated one stays), and an `edges:file:<path>` schedule
+(`Run/Stim.readEdgeSpec`). -/
 def resolveStim (cfg : Cfg) : IO (Except String Cfg) := do
+  let cfg ← match cfg.edgeFile with
+    | some (p, []) =>
+      let r ← try HDLProof.Run.readEdgeSpec s!"edges:file:{p}" catch e => pure (.error s!"{p}: {e}")
+      match r with
+      | .ok (.file rows) => pure { cfg with edgeFile := some (p, rows) }
+      | .ok _ => pure cfg
+      | .error e => return .error e
+    | _ => pure cfg
   if !(cfg.stimProv.startsWith "PENDING stim:") then pure (.ok cfg)
   else
     let path := cfg.stimProv.drop "PENDING stim:".length |>.toString
@@ -937,52 +921,42 @@ def resolveStim (cfg : Cfg) : IO (Except String Cfg) := do
       match String.fromUTF8? bytes with
       | none => pure (.error s!"{path}: not valid UTF-8")
       | some txt =>
-        match parseStim txt with
+        match HDLProof.Run.parseStim txt with
         | .error e => pure (.error s!"{path}: {e}")
-        | .ok (spec, ats) =>
-            let prov := s!"SUPPLIED file {path}, {bytes.size} bytes, fnv1a {fnv1a bytes}, {spec.length} constant(s), {ats.length} per-cycle override(s)"
-            pure (.ok { cfg with stim := some spec, ats := ats, stimProv := prov })
+        | .ok st =>
+            let prov := s!"SUPPLIED file {path}, {bytes.size} bytes, fnv1a {fnv1a bytes}, {st.every.length} constant(s), {st.at_.length} per-cycle override(s)"
+            pure (.ok { cfg with stim := some st, stimProv := prov })
 
-/-- Build the initial state: the power-on state, a synthetic control (generated
-here and SAID to be synthetic), or a checkpoint validated against the certificate. -/
-def buildState (D : DesignCert) (im : InitMode) : IO (Except String (StateM × String)) := do
+/-- Build the initial state and the cycle it is at: the power-on state, a synthetic control
+(generated here and SAID to be synthetic), or a checkpoint (`Run/Kit.readCkpt`: parsed, then
+validated against the certificate), at its own cycle. -/
+def buildState (D : DesignCert) (hash : Thunk Nat) (im : InitMode) :
+    IO (Except String (StateM × String × Nat)) := do
   match im with
   | .ckptFile path => do
-      let bytes? ← try (do let b ← IO.FS.readBinFile path; pure (some b))
-                    catch e => do IO.eprintln s!"checkpoint unreadable: {e}"; pure none
-      match bytes? with
+      let r? ← try (do let r ← HDLProof.Run.readCkpt D hash path; pure (some r))
+                catch e => do IO.eprintln s!"checkpoint unreadable: {e}"; pure none
+      match r? with
       | none => pure (.error s!"cannot read checkpoint {path}")
-      | some bytes =>
-        match Ckpt.parse bytes with
-        | .error e => pure (.error s!"{path}: {e}")
-        | .ok c =>
-          match Ckpt.validate D (Ckpt.designHash D) c with
-          | some e => pure (.error s!"{path}: {e}")
-          | none =>
-            let note := if c.exts.isEmpty then "" else s!", {c.exts.size} ext section(s) not read"
-            pure (.ok (CkptStateM.toStateM c,
-              s!"checkpoint {path}, {bytes.size} bytes, cycle {c.cycle}{note}"))
-  | .reset         => pure (.ok (initStateOf D, "generated: initStateOf (the power-on state)"))
-  | .rampSynthetic => pure (.ok (rampStateOf D, "generated: ramp pattern (synthetic)"))
-  | .narrowControl => pure (.ok (narrowStateOf D, "generated: narrow control (synthetic)"))
-
-/-- The absolute cycle a run starts at: a checkpoint's own, else 0. -/
-def startOf (im : InitMode) : IO Nat := do
-  match im with
-  | .ckptFile path =>
-      match Ckpt.parse (← IO.FS.readBinFile path) with
-      | .ok c    => pure c.cycle
-      | .error _ => pure 0   -- buildState has already refused it
-  | _ => pure 0
+      | some (.error r) => pure (.error r.msg)
+      | some (.ok c) =>
+        let size := (← (System.FilePath.mk path).metadata).byteSize
+        let note := if c.exts.isEmpty then "" else s!", {c.exts.size} ext section(s) not read"
+        pure (.ok (CkptStateM.toStateM c,
+          s!"checkpoint {path}, {size} bytes, cycle {c.cycle}{note}", c.cycle))
+  | .reset         => pure (.ok (initStateOf D, "generated: initStateOf (the power-on state)", 0))
+  | .rampSynthetic => pure (.ok (rampStateOf D, "generated: ramp pattern (synthetic)", 0))
+  | .narrowControl => pure (.ok (narrowStateOf D, "generated: narrow control (synthetic)", 0))
 
 def usage : String :=
   "usage: dcert2_memroute (<cert.dcert>|--fixture <name>|--selftest) <stepFuel|auto> \
-<workFuel|auto> [cycles] [init] [nocompare] [trace] [outputs] [stim:<file>] [edges:auto|third|indep] \
+<workFuel|auto> [cycles] [init] [nocompare] [trace] [outputs] [stim:<file>] [edges:auto|third|indep|file:<path>] \
 [no-plain-write] [support-only] [route:fused|var|plain]\n  \
 auto: step = max 20000 (4 x (nodes + sources)), work = 2000, one retry at 10x after an out-of-fuel\n  \
 fixtures: full mixed twomem lane\n\
   fixtures (negative): romwrite\n  init: init:reset (default) | ramp | narrow | ckpt:<path>\n  \
-edges: auto (default: third on one clock, indep on more) | third (cert_trace's edges:third) | indep\n  \
+edges: auto (default: third on one clock, indep on more) | third (cert_trace's edges:third) | indep \
+| file:<path> (an edges v1 schedule, as cert_trace reads it)\n  \
 checkpoints: ckpt-at:<cycle>:<file> (repeatable) ckpt-out:<file>\n  \
 loop:full: every cycle through runMemSim with the full state check (the default loop keeps the state \
 encoded and checks the state once; compare and trace use the full loop)\n  \
@@ -1032,9 +1006,13 @@ def parseCfg (rest : List String) : Except String Cfg := do
                 | some t => s!"PENDING {t}"
                 | none   => "generated: mkInputFor (synthetic, width-derived)"
     let edgeTok := tl.findSome? (fun t => (t.dropPrefix? "edges:").map (·.toString))
-    let em ← match edgeTok with
-      | some w => parseEdgeWord w
-      | none => pure .auto
+    -- `edges:file:<path>` is read with the stimulus, before the certificate (`resolveStim`)
+    let edgeFile := edgeTok.bind fun w =>
+      (w.dropPrefix? "file:").map fun p => (p.toString, ([] : List (Nat × Array Bool)))
+    let em ← match edgeTok, edgeFile with
+      | _, some _ => pure .auto
+      | some w, none => parseEdgeWord w
+      | none, none => pure .auto
     let route := (tl.findSome? (fun t => (t.dropPrefix? "route:").map (·.toString))).getD "fused"
     unless ["fused", "var", "plain"].contains route do
       .error s!"route:{route} is not one of fused | var | plain"
@@ -1049,9 +1027,12 @@ def parseCfg (rest : List String) : Except String Cfg := do
           | some k => ckptAt := ckptAt ++ [(k, ":".intercalate q)]
           | none => .error s!"ckpt-at: {repr k} is not a number"
         | _ => .error s!"ckpt-at expects <cycle>:<file>, got {repr t}"
-    let cfg : Cfg := ⟨sf, wf, cyc, im, cmp, none, [], prov, sup, tr, pw, em, route, op, autoStep, autoWork,
-      0, [], none, tl.contains "loop:full", !(tl.contains "share:off")⟩
-    .ok { cfg with ckptAt, ckptOut }
+    let cfg : Cfg :=
+      { stepFuel := sf, workFuel := wf, cycles := cyc, init := im, compare := cmp,
+        stimProv := prov, supportOnly := sup, trace := tr, plainWrite := pw, edgeMode := em,
+        route := route, outputs := op, autoStep := autoStep, autoWork := autoWork,
+        fullLoop := tl.contains "loop:full", share := !(tl.contains "share:off") }
+    .ok { cfg with ckptAt := ckptAt, ckptOut := ckptOut, edgeFile := edgeFile }
   | _ => .error usage
 
 /-! ## Comparison self-test
@@ -1124,9 +1105,9 @@ def selftest : IO UInt32 := do
   ok := (← check "cert_trace's init:zero is refused" ((cfgOf ["4", "init:zero"]).toOption.isNone) true) && ok
   -- the stimulus reader takes `in` and `at` lines and refuses anything else (a `react` line)
   ok := (← check "stim v1 with in and at lines is read"
-            ((parseStim "stim v1\nin 0 8 3\nat 2 in 1 4 5").toOption.isSome) true) && ok
+            ((HDLProof.Run.parseStim "stim v1\nin 0 8 3\nat 2 in 1 4 5").toOption.isSome) true) && ok
   ok := (← check "a react line is refused"
-            ((parseStim "stim v1\nin 0 8 3\nreact 3 8").toOption.isNone) true) && ok
+            ((HDLProof.Run.parseStim "stim v1\nin 0 8 3\nreact 3 8").toOption.isNone) true) && ok
   IO.println s!"  SELFTEST {if ok then "PASS" else "FAIL"}"
   pure (if ok then 0 else 1)
 
@@ -1141,11 +1122,11 @@ def main (args : List String) : IO UInt32 := do
           match ← resolveStim cfg0 with
           | .error e => do IO.eprintln s!"REFUSING: {e}"; return 2
           | .ok cfg =>
-            match ← buildState D cfg.init with
+            let hash := HDLProof.Run.designHashLazy D
+            match ← buildState D hash cfg.init with
             | .error e => do IO.eprintln s!"REFUSING: {e}"; return 2
-            | .ok (st0, prov) =>
-                let cfg := { cfg with start := ← startOf cfg.init }
-                runRoute s!"fixture:{name}" "n/a(in-repo fixture)" D cfg st0 prov
+            | .ok (st0, prov, start) =>
+                runRoute s!"fixture:{name}" "n/a(in-repo fixture)" D { cfg with start } st0 prov hash
   | path :: rest =>
       match parseCfg rest with
       | .error e => do IO.eprintln s!"REFUSING: {e}"; return 2
@@ -1165,9 +1146,9 @@ def main (args : List String) : IO UInt32 := do
           | .ok (fmt, D) => do
               IO.println s!"  format {repr fmt} (routed by magic; admitted under \
 that format's own policy)"
-              match ← buildState D cfg.init with
+              let hash := HDLProof.Run.designHashLazy D
+              match ← buildState D hash cfg.init with
               | .error e => do IO.eprintln s!"REFUSING: {e}"; return 2
-              | .ok (st0, prov) =>
-                  let cfg := { cfg with start := ← startOf cfg.init }
-                  runRoute path (toString (fnv1a bytes)) D cfg st0 prov
+              | .ok (st0, prov, start) =>
+                  runRoute path (toString (fnv1a bytes)) D { cfg with start } st0 prov hash
   | _ => do IO.eprintln usage; return 2

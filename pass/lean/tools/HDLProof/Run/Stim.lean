@@ -1,10 +1,12 @@
 /-
 # Stimulus and edge files, as ticks
 
-The `stim v1` and `edges v1` formats that `cert_trace` reads (and the legacy driver, and
-`dcert2_memroute` for `stim v1`), as a library, so a driver can turn a file into the `Tick` list
-`Compiler.Direct.refTrace` takes. The readers and the per-cycle rules are `cert_trace`'s, copied
-unchanged (cert_trace keeps its own copy):
+The `stim v1` and `edges v1` formats, as a library, so a driver can turn a file into the `Tick`
+list `Compiler.Direct.refTrace` takes. These are the one reader of each and the one set of
+per-cycle rules for every trace driver: `cert_trace`, `cert_run`, the per-design TV and legacy
+`--trace` drivers (`Run/Trace`), and `dcert2_memroute` (its stimulus and its `edges:file:`). The
+legacy generator's older `--stim` mode still writes its own copy into each driver it generates.
+The formats and rules:
 
 * `stim v1`: `in <ordinal> <width> <value>` (every cycle) and `at <cycle> in <ordinal> <width>
   <value>` (that cycle wins); an unlisted input is 0 at its declared width.
@@ -76,7 +78,7 @@ def inputAt (D : DesignCert) (st : Stim) (k : Nat) : RuntimeInput :=
 names it (its first `in` line, else 0 at its declared width), and the `at` lines grouped by
 cycle, in file order. `StimTab.inputAt` gives `inputAt`'s inputs (the same first-match rules)
 without scanning the stimulus and the design's sources on every cycle
-(`tests/stim_tab_check.lean` checks the two against each other). cert_trace keeps a copy. -/
+(`tests/stim_tab_check.lean` checks the two against each other). -/
 structure StimTab where
   base : RuntimeInput
   at_  : Std.HashMap Nat (Array (Nat × Nat × Int))

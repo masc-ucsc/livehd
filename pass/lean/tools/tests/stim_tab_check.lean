@@ -9,7 +9,8 @@ Both are checked on pseudo-random stimuli over designs whose input ordinals have
 with other widths (the first declaration wins), and a reset ordinal no `input` source declares
 (width 1); the stimuli repeat inputs within a cycle and across `in` lines (the first line
 wins), name ordinals past the last input, and use negative and wide values. Every trace driver
-(cert_trace, cert_run, the per-design TV and legacy drivers) reads stimuli through these.
+(cert_trace, cert_run, the per-design TV and legacy `--trace` drivers, dcert2_memroute) reads
+stimuli through these; the legacy generator's older `--stim` mode writes its own copy.
 
 Prints `PASS stim_tab: <n> cases` or one `FAIL` line per case that went wrong.
 -/
