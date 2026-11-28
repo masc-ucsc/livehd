@@ -32,6 +32,9 @@ every driver on:
 | `noclk.dcert` | the base with no clock domains |
 | `badout.dcert` | the base with output 0 reading a slot past the design |
 | `junk.dcert` | `not a certificate` |
+| `ok4full.dcert` | the base with every memory at depth `2 ^ aw`: what `ok3.dcert` means |
+| `ok3space.dcert` | `ok3` with one separator doubled (parses, but is not what a writer writes) |
+| `ok3trunc.dcert` | `ok3` without its last 10 bytes |
 
 Prints `PASS dcert_version_check: <n> cases` and exits 0, or exits 1.
 -/
@@ -177,6 +180,15 @@ def main (args : List String) : IO UInt32 := do
       match byName.lookup nm with
       | some bs => IO.FS.writeBinFile (System.FilePath.mk dir / s!"{file}.dcert") bs
       | none => fail s!"write: no case {nm}"; fails := fails + 1
+    -- for dcert_upgrade (cases C6 and C7)
+    let full := { D with memories := D.memories.map fun m => { m with depth := 2 ^ m.aw } }
+    IO.FS.writeBinFile (System.FilePath.mk dir / "ok4full.dcert") (renderCert full)
+    let b3 := render3 D
+    -- the first separator after the magic and the source count, doubled
+    let sp := ((List.range b3.size).find? fun k => k > 7 && b3[k]! == 32).getD 8
+    IO.FS.writeBinFile (System.FilePath.mk dir / "ok3space.dcert")
+      ((b3.extract 0 sp).push 32 ++ b3.extract sp b3.size)
+    IO.FS.writeBinFile (System.FilePath.mk dir / "ok3trunc.dcert") (b3.extract 0 (b3.size - 10))
   if fails > 0 then
     IO.println s!"FAIL dcert_version_check: {fails} of {n} cases"
     return 1

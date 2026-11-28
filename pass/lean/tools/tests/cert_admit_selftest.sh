@@ -22,6 +22,17 @@
 #   sym_verify <c> ok_rd k:1                sym_refmap refmap <impl <c>, spec a memory-free design>
 #   sym_probe <c> sim:ir                    dcert2_memroute <c> auto auto 3
 #
+# Then dcert_upgrade (pass/lean/tools/sim/dcert_upgrade.lean), DCERT3 to DCERT4 (case C7), and the
+# design hash across the conversion (case C6):
+#   dcert_upgrade ok3 up             exit 0; up is ok4full byte for byte (every memory at depth
+#                                    2^aw, the DCERT3 meaning); the two files differ only in the
+#                                    magic and one ` <depth>` per memory record; dcert_delta.py reads
+#                                    up; a second run onto the existing up is refused (exit 2)
+#   dcert_upgrade ok3space|ok3trunc|v2|v1flop|ok4|junk   refused (exit 1), nothing written
+#   lhd_ckpt init ok4full a.ckpt; lhd_ckpt check up a.ckpt    OK: the same design hash
+#   lhd_ckpt check ok3 a.ckpt        WANT_OK3_CKPT (today: OK, DCERT3 is read)
+#   lhd_ckpt check ok4 a.ckpt        REFUSED, design hash (ok4's memory has depth 12)
+#
 # Expect: on ok4 every driver exits 0 and prints its normal result. Every input WANT names with a
 # reason is refused: the driver exits nonzero, prints `<file>: ` and the reason, and prints no
 # result of a run. An input WANT marks `admitted` is not refused at load (today's policy; the
@@ -131,6 +142,57 @@ for d in $DRIVERS; do
   done
 done
 
+# ---- dcert_upgrade (C7) and the design hash across it (C6)
+WANT_OK3_CKPT=ok   # today: lhd_ckpt reads DCERT3
+up_run() { lean_run "$T/sim/dcert_upgrade.lean" "$@"; }
+U="$OUT/upgrade"; mkdir -p "$U"
+up_run "$FX/ok3.dcert" "$U/up.dcert" > "$U/ok3.log" 2>&1; rc=$?
+if [[ $rc -eq 0 ]] && grep -q 'same record: yes' "$U/ok3.log" && grep -q '^RESULT: CONVERTED' "$U/ok3.log" \
+   && cmp -s "$U/up.dcert" "$FX/ok4full.dcert"; then
+  echo "ok: dcert_upgrade ok3 -> ok4full, byte for byte"
+else echo "FAIL dcert_upgrade ok3: exit $rc ($(tail -2 "$U/ok3.log" | tr '\n' ' '))"; fails=$((fails + 1)); fi
+# the bytes differ in the magic and by one ` <depth>` at the end of each memory record, nothing else
+if python3 - "$FX/ok3.dcert" "$U/up.dcert" <<'EOF'
+import sys
+a, b = (open(p, 'rb').read().split(b'\n') for p in sys.argv[1:3])
+assert len(a) == len(b) and a[0] == b'DCERT3' and b[0] == b'DCERT4', 'magic or line count'
+d = [(x, y) for x, y in zip(a[1:], b[1:]) if x != y]
+assert d and all(y.startswith(x + b' ') and y[len(x) + 1:].isdigit() for x, y in d), d[:3]
+EOF
+then echo "ok: the conversion changes only the magic and appends each memory's depth"
+else echo "FAIL dcert_upgrade: the bytes differ in more than the magic and the depths"; fails=$((fails + 1)); fi
+if python3 "$ROOT/pass/lean/Lgraph_IR_Semantics_Simulator/tests/d4/dcert_delta.py" "$U/up.dcert" "$U/up.dcert" \
+     > "$U/delta.log" 2>&1; then echo "ok: dcert_delta.py reads the converted certificate"
+else echo "FAIL dcert_delta.py refuses the converted certificate: $(tail -1 "$U/delta.log")"; fails=$((fails + 1)); fi
+up_run "$FX/ok3.dcert" "$U/up.dcert" > "$U/again.log" 2>&1; rc=$?
+if [[ $rc -eq 2 ]] && cmp -s "$U/up.dcert" "$FX/ok4full.dcert"; then echo "ok: an existing output is refused (exit 2)"
+else echo "FAIL dcert_upgrade onto an existing file: exit $rc"; fails=$((fails + 1)); fi
+for c in ok3space ok3trunc v2 v1flop ok4 junk; do
+  case $c in
+    ok3space) why='not canonical DCERT3' ;; ok3trunc) why='parse: malformed' ;;
+    ok4) why='already DCERT4' ;; *) why='parse: bad magic: expected DCERT3' ;;
+  esac
+  up_run "$FX/$c.dcert" "$U/$c.dcert" > "$U/$c.log" 2>&1; rc=$?
+  if [[ $rc -eq 1 && ! -e "$U/$c.dcert" ]] && grep -q "$c.dcert: $why" "$U/$c.log"; then
+    echo "ok: dcert_upgrade refuses $c ($why), nothing written"
+  else echo "FAIL dcert_upgrade $c: want exit 1, '$why', no file; got exit $rc ($(head -1 "$U/$c.log"))"; fails=$((fails + 1)); fi
+done
+ck() { lean_run "$T/sim/lhd_ckpt.lean" "$@"; }
+ck init "$FX/ok4full.dcert" "$U/a.ckpt" > "$U/init.log" 2>&1 || { echo "FAIL lhd_ckpt init ok4full"; fails=$((fails + 1)); }
+ck check "$U/up.dcert" "$U/a.ckpt" > "$U/check_up.log" 2>&1; rc=$?
+if [[ $rc -eq 0 ]] && grep -q '^OK: cycle 0' "$U/check_up.log"; then echo "ok: a checkpoint of ok4full checks against the converted certificate"
+else echo "FAIL lhd_ckpt check up: exit $rc ($(tail -1 "$U/check_up.log"))"; fails=$((fails + 1)); fi
+ck check "$FX/ok3.dcert" "$U/a.ckpt" > "$U/check_ok3.log" 2>&1; rc=$?
+if [[ $WANT_OK3_CKPT == ok ]]; then
+  if [[ $rc -eq 0 ]] && grep -q '^OK: cycle 0' "$U/check_ok3.log"; then echo "ok: the DCERT3 file has the same design hash (today: DCERT3 is read)"
+  else echo "FAIL lhd_ckpt check ok3: exit $rc ($(tail -1 "$U/check_ok3.log"))"; fails=$((fails + 1)); fi
+elif [[ $rc -ne 0 ]] && grep -qE "$WANT_OK3_CKPT" "$U/check_ok3.log"; then echo "ok: lhd_ckpt refuses the DCERT3 file"
+else echo "FAIL lhd_ckpt check ok3: want a refusal '$WANT_OK3_CKPT', got exit $rc"; fails=$((fails + 1)); fi
+ck check "$FX/ok4.dcert" "$U/a.ckpt" > "$U/check_ok4.log" 2>&1; rc=$?
+if [[ $rc -eq 1 ]] && grep -q 'REFUSED' "$U/check_ok4.log" && grep -q 'design hash' "$U/check_ok4.log"; then
+  echo "ok: control: ok4 (depth 12) has another design hash"
+else echo "FAIL control lhd_ckpt check ok4: exit $rc ($(tail -1 "$U/check_ok4.log"))"; fails=$((fails + 1)); fi
+
 # control: the run saw both an admitted and a refused certificate on every driver
 nd=$(wc -w <<< "$DRIVERS")
 nrefc=0; for c in $CERTS; do case ${WANT[$c]} in ok|admitted) ;; *) nrefc=$((nrefc + 1)) ;; esac; done
@@ -139,4 +201,4 @@ if [[ $nok -ne $nd || $nref -ne $((nd * nrefc)) ]]; then
   fails=$((fails + 1))
 fi
 if [[ $fails -gt 0 ]]; then echo "FAIL cert_admit_selftest: $fails"; exit 1; fi
-echo "PASS cert_admit_selftest: $nd drivers, ok4 run by each, $nref refusals at load, $nadm admitted (today's policy)"
+echo "PASS cert_admit_selftest: $nd drivers, ok4 run by each, $nref refusals at load, $nadm admitted (today's policy); dcert_upgrade and the design hash"
