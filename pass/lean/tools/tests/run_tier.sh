@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run_tier.sh quick|full: the Lean tools' tests, by tier, in one run.
+# run_tier.sh quick|full|long: the Lean tools' tests, by tier, in one run.
 #
 #   quick  every commit (about 30 min): .build-proj.sh (every module, DirectTests' guards, the DCERT4
 #          codec's and admission's guards (CertIOChecks), the axiom gate, the format theorems' gate
@@ -24,6 +24,15 @@
 #          exported by lhd, every Lean route on their certificates against iverilog on the source,
 #          and the value gates on the real scanner's certificates), all 21 in one test (about 30
 #          min).
+#   long   weekly (about 10 to 14 h, most of it L3): L1 to L5 only, in long_tier.sh (its header
+#          says what each runs, fails on and writes, and its environment): L1 census_speed
+#          (cert_trace and cert_run, ir and vc, on the census speed rows: $OUT/speed.tsv), L2
+#          fp_census (route:fp of cert_trace and dcert2_memroute against route:ir: $OUT/fp.tsv), L3
+#          sym_survey (sym_survey.py on a certificate list: $OUT/survey.tsv), L4 cert_corpus (every
+#          certificate admitted, traced, and the DCERT3 conversions' round trip: $OUT/corpus.tsv),
+#          L5 cold_build (quick, on a .build-proj.sh into an empty .olean-dev in a new tree, and every
+#          native from an empty ROOT). Its tables are compared with last week's (PREV_LONG): a
+#          trace or an admission fails the run, a number more than 10% off is reported in the note.
 #
 # One line per test, then a summary:
 #   PASS <test> (<seconds> s)
@@ -52,7 +61,7 @@
 #                on PATH and LHD for the exporter oracles; without any of them the test is a SKIP
 set -uo pipefail
 TIER="${1:-}"
-[[ "$TIER" == quick || "$TIER" == full ]] || { echo "usage: run_tier.sh quick|full" >&2; exit 2; }
+[[ "$TIER" == quick || "$TIER" == full || "$TIER" == long ]] || { echo "usage: run_tier.sh quick|full|long" >&2; exit 2; }
 # a tier runs every route: ROUTES (which the sym and refmap self-tests read) would drop some
 [[ -z "${ROUTES:-}" ]] || { echo "run_tier: ROUTES is set ($ROUTES); a tier runs every route, unset it" >&2; exit 2; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -97,7 +106,18 @@ lean_check() { # <check>: a tests/<check>.lean that prints PASS ...
   (cd "$L" && LEAN_PATH="$PWD/.olean-dev" lean --run "$SCRIPT_DIR/$1.lean" "${@:2}")
 }
 
+finish() { # the summary line; the exit status of the run
+  echo "summary: $npass passed, $nfail failed, $nskip skipped (results $SUMMARY)"
+  [[ $nfail -eq 0 && ( "$STRICT" != 1 || $nskip -eq 0 ) ]]
+}
+
 echo "run_tier $TIER at $(cd "$ROOT" && git rev-parse --short HEAD) ($(cd "$ROOT" && git status --porcelain | grep -vc '^??') files changed)"
+
+# ---- long: L1 to L5 only (long_tier.sh, sourced: it reports each item through record)
+if [[ "$TIER" == long ]]; then
+  . "$SCRIPT_DIR/long_tier.sh"
+  finish; exit $?
+fi
 
 # ---- quick
 if [[ "${BUILD:-1}" != 0 ]]; then
@@ -234,5 +254,4 @@ if [[ "$TIER" == full ]]; then
   fi
 fi
 
-echo "summary: $npass passed, $nfail failed, $nskip skipped (results $SUMMARY)"
-[[ $nfail -eq 0 && ( "$STRICT" != 1 || $nskip -eq 0 ) ]]
+finish
