@@ -11,10 +11,13 @@
 #          refusals), the drivers that need no lhd (quick_selftest.sh: dcert2_memroute's self-test and
 #          fixtures, lgraph-sim's command line), the operator corpus on every engine against ref
 #          (opcorpus_test.sh, interpreted), sym_observe_test, reach_selftest and judge_selftest.
-#   full   nightly (about 3 h): quick, then the sym, refmap, run, ckpt and lhd_ckpt_import
+#   full   nightly (about 3.5 h): quick, then the sym, refmap, run, ckpt and lhd_ckpt_import
 #          self-tests, xpatch, the lake side (CompileOpt, LgraphSim), the census traces, the
-#          Verilog designs against Verilator on every route (vref_test.sh, with TV and legacy), and
-#          the operator corpus natively on every route and TV (opcorpus_test.sh).
+#          Verilog designs against Verilator on every route (vref_test.sh, with TV and legacy), the
+#          operator corpus natively on every route and TV (opcorpus_test.sh), and the exporter's
+#          oracles (pass/lean/Exporter/Frontend/scripts/*_oracle.sh: small designs exported by lhd,
+#          every Lean route on their certificates against iverilog on the source, and the value
+#          gates on the real scanner's certificates), all 21 in one test (about 30 min).
 #
 # One line per test, then a summary:
 #   PASS <test> (<seconds> s)
@@ -37,6 +40,9 @@
 #   NATROOT      build-opt.sh ROOT for the native cert_trace and per-design simulators of the census
 #                traces, vref_test and opcorpus_test (default $OUT/natroot)
 #   verilator on PATH for vref_test (full); without it the test is a SKIP
+#   DESIGN_SCAN_TEST  the //pass/lean:design_scan_test binary the exporter oracles' value gates
+#                run (default bazel-bin/pass/lean/design_scan_test); iverilog and vvp on PATH and
+#                LHD for the exporter oracles (full); without any of them the test is a SKIP
 set -uo pipefail
 TIER="${1:-}"
 [[ "$TIER" == quick || "$TIER" == full ]] || { echo "usage: run_tier.sh quick|full" >&2; exit 2; }
@@ -47,6 +53,7 @@ ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 L="$ROOT/formal/lean"
 OUT="${OUT:-$ROOT/generated/run_tier/$TIER}"
 LHD="${LHD:-$ROOT/bazel-bin/lhd/lhd}"
+DESIGN_SCAN_TEST="${DESIGN_SCAN_TEST:-$ROOT/bazel-bin/pass/lean/design_scan_test}"
 STRICT="${STRICT:-0}"
 NATROOT="${NATROOT:-$OUT/natroot}"
 mkdir -p "$OUT"
@@ -173,6 +180,29 @@ if [[ "$TIER" == full ]]; then
   else
     run_test vref_test '^PASS vref_test' env LHD="$LHD" OUT="$OUT/out_vref" NATROOT="$NATROOT" PERDESIGN=1 \
       bash "$SCRIPT_DIR/vref_test.sh"
+  fi
+  # the exporter's oracles, one at a time (each builds what it loads; see oracle_lean.sh there): a
+  # script passes when it exits 0 with its `PASS:` line; the note names every one that did not
+  if ! command -v iverilog > /dev/null || ! command -v vvp > /dev/null; then
+    record exporter_oracles SKIP 0 "iverilog/vvp are not on PATH"
+  elif [[ ! -x "$LHD" ]]; then
+    record exporter_oracles SKIP 0 "no lhd at $LHD"
+  elif [[ ! -x "$DESIGN_SCAN_TEST" ]]; then
+    record exporter_oracles SKIP 0 "no design_scan_test at $DESIGN_SCAN_TEST (bazel build //pass/lean:design_scan_test)"
+  else
+    od="$OUT/out_oracles"; mkdir -p "$od"; : > "$OUT/exporter_oracles.log"
+    t0=$SECONDS; bad=(); k=0
+    for s in "$ROOT"/pass/lean/Exporter/Frontend/scripts/*_oracle.sh; do
+      o=$(basename "$s" .sh); k=$((k + 1)); t1=$SECONDS
+      if env LHD="$LHD" TEST_BIN="$DESIGN_SCAN_TEST" OUT="$od/$o" bash "$s" > "$od/$o.log" 2>&1 \
+           && grep -q 'PASS: ' "$od/$o.log"; then r=PASS; else r=FAIL; bad+=("$o"); fi
+      echo "$r $o ($((SECONDS - t1)) s; log $od/$o.log)" >> "$OUT/exporter_oracles.log"
+    done
+    if [[ $k -gt 0 && ${#bad[@]} -eq 0 ]]; then
+      record exporter_oracles PASS $((SECONDS - t0)) "$k scripts"
+    else
+      record exporter_oracles FAIL $((SECONDS - t0)) "${#bad[@]} of $k failed: ${bad[*]}; log $OUT/exporter_oracles.log"
+    fi
   fi
 fi
 

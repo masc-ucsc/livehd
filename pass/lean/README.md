@@ -56,6 +56,29 @@ the original RTL, and `Exporter/DesignCert/scripts/` holds the checks on the
 `DesignCert` format itself (`vc_gates.py`, `dcert_parity.py`,
 `cert_shape_check.py`).
 
+The oracles (`Exporter/Frontend/scripts/*_oracle.sh`) are of two kinds.
+Fourteen are RTL differentials: lhd exports a small design, and the Lean routes
+on its certificate (`cert_trace` on IR and VC, `dcert2_memroute`'s FP, and in
+the memory oracles the legacy model with its proof bridge and translation
+validation, `d3_sweep.py`) are compared with iverilog on the source, step by
+step, next to controls that must differ. Seven are value gates:
+`design_scan_test` writes the real scanner's certificate of a small hand-built
+graph, and Lean decides stated values on it. From a clone:
+
+```sh
+(cd formal/lean && bash .build-proj.sh)    # .olean-dev: the drivers and the proof tools
+bazel build -c opt //lhd:lhd //pass/lean:design_scan_test
+LHD=bazel-bin/lhd/lhd TEST_BIN=bazel-bin/pass/lean/design_scan_test \
+  bash pass/lean/Exporter/Frontend/scripts/sign_oracle.sh
+```
+
+with iverilog and vvp on PATH. Each script lake-builds the Mathlib-side
+modules it loads (the legacy bridges, translation validation's Compiler
+modules, the value gates' `DirectVsCompiled`); `oracle_lean.sh` in that folder
+says which modules come from `.olean-dev` and which from lake.
+`pass/lean/tools/tests/run_tier.sh full` runs all of them as one test,
+`exporter_oracles`.
+
 What stays in `scripts/` here is what more than one route runs: the gates on an
 emitted file, the axiom audit, the 12x5 coverage harness, and Translation
 Validation's compiler build. [`scripts/README.md`](scripts/README.md) lists each
