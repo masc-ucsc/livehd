@@ -41,6 +41,20 @@ set -euo pipefail
 #     spec facts                        SPEC FACTS PROVED
 #   sqm refines sqS                     the square by shift-and-add: REFINEMENT PROVED
 #   sqb (sqm without the x[3] term)     NOT A REFINEMENT: comm
+#   acc2n refines accS (a second register holds -acc; dup_o is acc only under the invariant)
+#     no inv                            NOT A REFINEMENT: obs
+#     inv (acc + ndup = 0)              REFINEMENT PROVED; with `split` per case; with `active`
+#     inv `oneof phase=0`               NOT INDUCTIVE (invariant), its counterexample report
+#     active adv (0 at cycle 0)         COUNTEREXAMPLE (base)
+#     emitted with the invariant (vc)   the theorem file compiles (pfIB, pfIS embedded)
+#   acce refines accS (waits on the environment's en): `req` keeps rankSel; none, or en:0, does not
+#   the default reset 1 (init free / init 0), init out0: (acc_o / nacc), a rank that rises (rankLe,
+#     rankLt), Booleans and a full slice (PROVED), a 4-bit slice (obs), `group` (one comm)
+#   npers (an event on a disables b): SPEC FACTS FAIL persist; ncon: outC
+#   a lying solver: CHECK REJECTED on refmap (failing and true) and specfacts; `false`: SOLVER FAILED
+#   cache: a second run takes every proof from work/ with a solver that fails any call; an emptied
+#     cached proof is CHECK REJECTED; without cache the same run is SOLVER FAILED
+# Every verdict is compared whole, with its exit code (formats/refmap.md, Results).
 # Every PROVED is the verified check (Check.runRefMapOf / runSpecFactsOf)
 # accepting LRAT proofs from the untrusted solver.
 #
@@ -176,7 +190,38 @@ module sqb(input clk, input [3:0] x, output [7:0] acc_o);
   assign acc_o = acc;
 endmodule
 EOF2
-for d in accS acc1 acc2 two ncon nmoore par alt sqS sqm sqb; do
+# acc2 with a second register that holds -acc: dup_o equals acc only under the invariant
+# acc + ndup = 0 (true from all-zero, kept since both move by x together); act is constant 1;
+# inv_o is the invariant as an output
+cat > "$OUT/acc2n.sv" <<'EOF2'
+module acc2n(input clk, input [7:0] x, output [7:0] acc_o, output [7:0] dup_o, output adv,
+             output rk, output sl, output act, output inv_o);
+  reg [7:0] acc; reg [7:0] ndup; reg phase;
+  always @(posedge clk) begin
+    phase <= ~phase;
+    if (phase) begin acc <= acc + x; ndup <= ndup - x; end
+  end
+  assign acc_o = acc; assign dup_o = 8'd0 - ndup; assign adv = phase; assign rk = ~phase;
+  assign sl = 1'b0; assign act = 1'b1; assign inv_o = (acc + ndup) == 8'd0;
+endmodule
+EOF2
+# accumulates only when the environment's enable is high: the wait is the environment's
+cat > "$OUT/acce.sv" <<'EOF2'
+module acce(input clk, input en, input [7:0] x, output [7:0] acc_o, output rk, output sl);
+  reg [7:0] acc;
+  always @(posedge clk) if (en) acc <= acc + x;
+  assign acc_o = acc; assign rk = 1'b0; assign sl = 1'b1;   // selector 1: waiting on requirement 0
+endmodule
+EOF2
+# an event on a disables b: the spec facts' persist fails
+cat > "$OUT/npers.sv" <<'EOF2'
+module npers(input clk, input sel, input [7:0] x, output oka, output okb, output [7:0] ra_o, output [7:0] rb_o);
+  reg [7:0] ra; reg [7:0] rb; reg busy;
+  always @(posedge clk) if (sel) rb <= rb + x; else begin ra <= ra + x; busy <= 1'b1; end
+  assign oka = 1'b1; assign okb = ~busy; assign ra_o = ra; assign rb_o = rb;
+endmodule
+EOF2
+for d in accS acc1 acc2 two ncon nmoore par alt sqS sqm sqb acc2n acce npers; do
   "$LHD" compile "$OUT/$d.sv" --reader yosys-slang --top "$d" --set yosys.setundef=zero \
     --emit-dir "lg:$OUT/${d}_lg" --workdir "$OUT/${d}_cw" > "$OUT/$d.compile.log" 2>&1 \
     || { tail -5 "$OUT/$d.compile.log"; echo "FAIL: compile $d"; exit 1; }
@@ -207,21 +252,34 @@ refmap acc2_rk0 acc2 out:adv  acc_o out:acc_o      sl/sl 0
 refmap acc2_ini acc2 out:adv  acc_o out:acc_o      rk/sl 1
 
 ROUTES="${ROUTES:-fp ir vc}"
-run1() { # <mode> <expect> <refmap> args...
+rc_of() { # the exit code a sym_refmap verdict promises (formats/refmap.md, Results)
+  case "$1" in
+    "REFINEMENT PROVED"|"SPEC FACTS PROVED") echo 0 ;;
+    "NOT A REFINEMENT"|"COUNTEREXAMPLE"|"SPEC FACTS FAIL"|"NOT INDUCTIVE") echo 1 ;;
+    "REFUSED") echo 4 ;;
+    "SOLVER FAILED") echo 5 ;;
+    "CHECK REJECTED") echo 6 ;;
+    *) echo x ;;
+  esac
+}
+run1() { # <mode> <expect> <refmap> args...: the last RESULT is exactly <expect>, with its exit code
   local mode=$1 expect=$2 rm=$3; shift 3
-  local log="$OUT/run_$(( ++N )).log"
+  local log="$OUT/run_$(( ++N )).log" rc
   if [[ -n "$SYM_NAT" ]]; then
-    "$SYM_NAT/sym_refmap" "$mode" "$OUT/$rm.refmap" "$@" "work:$OUT/work_$N" > "$log" 2>&1 || true
+    "$SYM_NAT/sym_refmap" "$mode" "$OUT/$rm.refmap" "$@" "work:$OUT/work_$N" > "$log" 2>&1 && rc=0 || rc=$?
   else
     (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/proof/sym_refmap.lean" \
-      "$mode" "$OUT/$rm.refmap" "$@" "work:$OUT/work_$N") > "$log" 2>&1 || true
+      "$mode" "$OUT/$rm.refmap" "$@" "work:$OUT/work_$N") > "$log" 2>&1 && rc=0 || rc=$?
   fi
   local got
   got=$(grep -o 'RESULT: [A-Z -]*' "$log" | tail -1 | sed 's/RESULT: //; s/[ -]*$//')
-  if [[ "$got" != "$expect" ]]; then
-    tail -6 "$log"; echo "FAIL: $mode $rm $* -- expected $expect, got '$got'"; exit 1
+  if [[ "$got" != "$expect" || "$rc" != "$(rc_of "$expect")" ]]; then
+    tail -6 "$log"; echo "FAIL: $mode $rm $* -- expected '$expect' exit $(rc_of "$expect"), got '$got' exit $rc"; exit 1
   fi
-  echo "ok: $mode $rm $* -> $got"
+  echo "ok: $mode $rm $* -> $got (exit $rc)"
+}
+has_last() { # <ERE>: in the last run's log
+  grep -qE -- "$1" "$OUT/run_$N.log" || { tail -6 "$OUT/run_$N.log"; echo "FAIL: run $N has no line /$1/"; exit 1; }
 }
 run() { # <mode> <expect> <refmap> args... : on fp, and on the other ROUTES for refmap/specfacts
   local mode=$1 expect=$2 rm=$3; shift 3
@@ -294,6 +352,92 @@ run specfacts "SPEC FACTS PROVED"  sqS
 run refmap    "REFINEMENT PROVED"  sqm
 run refmap    "NOT A REFINEMENT"   sqb
 grep -q 'NOT A REFINEMENT (step): \[comm acc\]' "$OUT/run_$N.log" || { tail -3 "$OUT/run_$N.log"; echo "FAIL: the missing partial product not caught by comm"; exit 1; }
+# the directives real proofs use: inv, split, active, req (rankSel), the default reset 1,
+# init out0:, group, Booleans and slices; each with a failing twin
+printf '%s\n' 'same inv_o' > "$OUT/acc2n.inv"
+printf '%s\n' 'same inv_o' 'ph oneof phase=0;phase=1' > "$OUT/acc2n_split.inv"
+printf '%s\n' 'lo oneof phase=0' > "$OUT/acc2n_lo.inv"
+nmap() { # <name> <extra lines...>: acc2n against accS, the slot observing dup_o
+  local nm=$1; shift
+  printf '%s\n' "impl acc2n_lean/acc2n.dcert" "spec accS_lean/accS.dcert" "reset 0" "alpha acc acc_o" \
+    "init acc 0" "chan add allow:ok resp:x obs:acc_o rank:rk/sl" "slot add out:adv resp:in:x obs:out:dup_o" \
+    "$@" > "$OUT/$nm.refmap"
+}
+nmap n_noinv
+nmap n_inv   "inv acc2n.inv"
+nmap n_split "inv acc2n_split.inv" "split ph"
+nmap n_lo    "inv acc2n_lo.inv"
+nmap n_act   "inv acc2n.inv" "active act"
+nmap n_actb  "inv acc2n.inv" "active adv"
+emap() { # <name> <req lines...>: acce, whose waits are the environment's (en)
+  local nm=$1; shift
+  printf '%s\n' "impl acce_lean/acce.dcert" "spec accS_lean/accS.dcert" "reset 0" "alpha acc acc_o" "init acc 0" \
+    "chan add allow:ok resp:x obs:acc_o rank:rk/sl" "slot add in:en resp:in:x obs:out:acc_o" "$@" > "$OUT/$nm.refmap"
+}
+emap e_req   "req e en:1 fires:in:en"
+emap e_noreq
+emap e_off   "req e en:0 fires:in:en"
+printf '%s\n' "impl acc1_lean/acc1.dcert" "spec accS_lean/accS.dcert" "alpha acc acc_o" "init acc free" \
+  "chan add allow:ok resp:x obs:acc_o" "slot add 1 resp:in:x obs:out:acc_o" > "$OUT/acc1_r1.refmap"
+sed 's/^init acc free$/init acc 0/' "$OUT/acc1_r1.refmap" > "$OUT/acc1_r1z.refmap"
+refmap acc2_o0   acc2 out:adv            acc_o out:acc_o      rk/sl  out0:acc_o
+refmap acc2_o0b  acc2 out:adv            acc_o out:acc_o      rk/sl  out0:nacc
+refmap acc2_rkup acc2 out:adv            acc_o out:acc_o      adv/sl 0
+refmap acc2_bool acc2 '(out:adv&1)|0'    acc_o out:acc_o[0:8] rk/sl  0
+refmap acc2_sl4  acc2 'out:adv==1'       acc_o out:acc_o[0:4] rk/sl  0
+two_map par_g par "" "" 'slot a 1 resp:in:xa obs:out:ra_o' 'slot b 1 resp:in:xb obs:out:rb_o' 'group ra,rb'
+printf '%s\n' 'spec npers_lean/npers.dcert' 'chan a sel:sel=0 resp:x obs:ra_o allow:oka' \
+  'chan b sel:sel=1 resp:x obs:rb_o allow:okb' > "$OUT/npers.refmap"
+# without the invariant dup_o = -ndup is free in an arbitrary state: only obs fails
+run refmap    "NOT A REFINEMENT"   n_noinv;   has_last 'NOT A REFINEMENT \(step\): \[obs add#0\]'
+run refmap    "REFINEMENT PROVED"  n_inv;     has_last 'invariant: 1 conjunct\(s\) PROVED'
+run refmap    "REFINEMENT PROVED"  n_split;   has_last '\[obs add#0 \| phase=1\] .*UNSAT'; has_last '\[obs add#0 \| all zero\] .*UNSAT'
+# phase alternates: `oneof phase=0` holds at cycle 0 and is not inductive; its report is written
+run refmap    "NOT INDUCTIVE"      n_lo;      has_last 'NOT INDUCTIVE \(invariant\): \[lo\]'
+grep -q '^conjuncts FALSE at cycle 1: \[lo\]' "$OUT/work_$N/cti_inv_lo.txt" \
+  || { cat "$OUT/work_$N/cti_inv_lo.txt"; echo "FAIL: no counterexample report for the invariant"; exit 1; }
+run refmap    "REFINEMENT PROVED"  n_act;     has_last '\[active\] .*UNSAT'
+# adv is 0 at cycle 0: `active adv` fails the base
+run refmap    "COUNTEREXAMPLE"     n_actb
+# the rank stays 0 while the selector names requirement 0: `req e en:1` keeps it enabled
+run refmap    "REFINEMENT PROVED"  e_req;     has_last '\[rankSel add\] .*UNSAT'; has_last ' 1 requirement\(s\)'
+run refmap    "NOT A REFINEMENT"   e_noreq;   has_last 'NOT A REFINEMENT \(step\): \[rankSel add\]'
+run refmap    "NOT A REFINEMENT"   e_off;     has_last 'NOT A REFINEMENT \(step\): \[rankSel add\]'
+# the default reset 1: the map at cycle 1 is x(0), so init acc 0 fails and free holds
+run refmap    "REFINEMENT PROVED"  acc1_r1;   has_last 'commutation group\(s\), reset 1$'
+run refmap    "COUNTEREXAMPLE"     acc1_r1z
+# init out0: the map at reset is an output at cycle 0 (acc_o holds; nacc = x(0) does not)
+run refmap    "REFINEMENT PROVED"  acc2_o0
+run refmap    "COUNTEREXAMPLE"     acc2_o0b
+# a rank equal to phase rises in the stutter cycle
+run refmap    "NOT A REFINEMENT"   acc2_rkup; has_last 'NOT A REFINEMENT \(step\): \[rankLe add, rankLt add\]'
+# Booleans and slices: the same slot written another way; a 4-bit slice is not the 8-bit word
+run refmap    "REFINEMENT PROVED"  acc2_bool
+run refmap    "NOT A REFINEMENT"   acc2_sl4;  has_last 'NOT A REFINEMENT \(step\): \[obs add#0\]'
+run refmap    "REFINEMENT PROVED"  par_g;     has_last '\[comm ra,rb\] .*UNSAT'
+run specfacts "SPEC FACTS FAIL"    npers;     has_last 'SPEC FACTS FAIL: .*persist a/b'
+run specfacts "SPEC FACTS FAIL"    ncon;      has_last 'SPEC FACTS FAIL: .*outC a/b'
+# the verified checkers refuse proofs from a lying solver (an empty LRAT file proves nothing),
+# also of a true refinement; a solver that gives no answer is SOLVER FAILED
+cat > "$OUT/liar.sh" <<'EOF2'
+#!/usr/bin/env bash
+# claims UNSAT and leaves an empty LRAT file: a proof of nothing ($2 is the LRAT path)
+printf 's UNSATISFIABLE\n'; : > "$2"; exit 20
+EOF2
+chmod +x "$OUT/liar.sh"
+run refmap    "CHECK REJECTED"     acc2_all "solver:$OUT/liar.sh"
+run refmap    "CHECK REJECTED"     acc1     "solver:$OUT/liar.sh"
+run specfacts "CHECK REJECTED"     ncon     "solver:$OUT/liar.sh"
+run1 refmap   "SOLVER FAILED"      acc1     "solver:$(command -v false)"
+has_last 'RESULT: SOLVER FAILED \(invariant base\): solver exit 1'
+# cache: a second run takes every proof from work/ (the solver `false` would fail any call); a
+# cached proof emptied is refused by the check; without cache the same run fails at the solver
+W="$OUT/cache_work"; FALSE="solver:$(command -v false)"
+run1 refmap   "REFINEMENT PROVED"  n_split sim:vc "work:$W"
+run1 refmap   "REFINEMENT PROVED"  n_split sim:vc cache "$FALSE" "work:$W"
+f=$(ls -S "$W"/rm_*.lrat | head -1); : > "$f"
+run1 refmap   "CHECK REJECTED"     n_split sim:vc cache "$FALSE" "work:$W"
+run1 refmap   "SOLVER FAILED"      n_split sim:vc "$FALSE" "work:$W"
 # theorem files and the composition, compiled against formal/lean/.olean-dev
 T="$OUT/thm"
 run refmap    "REFINEMENT PROVED"  par "emit:f2:$T/F2par.lean"
@@ -385,6 +529,13 @@ done
 [[ "$(axioms "$T/V1acc2.out")" == "depends on axioms: [propext, Classical.choice, Quot.sound, checked]" ]] \
   || { cat "$T/V1acc2.out"; echo "FAIL: V1acc2 axioms"; exit 1; }
 echo "ok: theorem files on ir and vc (and mixed) compile; F2 axioms: standard + one native_decide each; F1: the named verdict"
+# the theorem file of a map with an invariant (its proofs pfIB, pfIS embedded), on vc
+run1 refmap "REFINEMENT PROVED" n_inv sim:vc "emit:f2:$T/V2inv.lean"
+grep -q '^def pfIS : List (List ByteArray) := \[\[hexBytes "[0-9a-f]' "$T/V2inv.lean" || { echo "FAIL: V2inv embeds no invariant proof"; exit 1; }
+lean_c -R "$T" -o "$T/V2inv.olean" "$T/V2inv.lean" > "$T/V2inv.out" 2>&1 || { tail -5 "$T/V2inv.out"; echo "FAIL: theorem file V2inv"; exit 1; }
+[[ "$(axioms "$T/V2inv.out")" == "depends on axioms: [propext, Classical.choice, Quot.sound, verdict._native.native_decide.ax_1_1]" ]] \
+  || { cat "$T/V2inv.out"; echo "FAIL: V2inv axioms"; exit 1; }
+echo "ok: the theorem file of a map with an invariant compiles; axioms: standard + one native_decide"
 cat > "$T/ComposeAny.lean" <<'EOF2'
 /- The composition of Compose.lean, from verdicts of three routes: par on vc, alt with the
 implementation on vc and the spec on fp, the spec facts on ir. Each verdict gives the route-free
